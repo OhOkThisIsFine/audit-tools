@@ -209,23 +209,6 @@ function fileMapContextFor(bundle: ArtifactBundle, points: StartingPoints): Revi
   return reviewFileMapContext(buildReviewFileMap(bundle, startingPointReviewScope(points)));
 }
 
-/**
- * The call-site map a design-review lane rendered with `options` receives: the
- * summary its prompt carries and the read-only context file its emission site
- * passes to the lane materializer. Every contract, conceptual, perspective and
- * judge prompt with the same bundle and options anchors the same starting
- * points, so one build serves all of them.
- */
-export function designReviewFileMapContext(
-  bundle: ArtifactBundle,
-  options: DesignReviewOptions = {},
-): ReviewFileMapContext {
-  return fileMapContextFor(
-    bundle,
-    selectStartingPoints(bundle, resolveMaxUnits(bundle, options)),
-  );
-}
-
 function buildPrioritizedReadingList(points: StartingPoints): string {
   if (points.all_units_excluded) return "No in-scope starting units; excluded units are context only.";
   if (points.entries.length === 0) {
@@ -233,7 +216,7 @@ function buildPrioritizedReadingList(points: StartingPoints): string {
   }
 
   if (points.risk_item_count === 0) {
-    const lines = points.entries.map((u) => `- **${u.unit_id}** — ${u.files.join(", ")}`);
+    const lines = points.entries.map((u) => `- **${u.unit_id}** — ${u.files.length} file(s)`);
     return [
       `Top ${points.entries.length} unit(s) (no risk scores available):`,
       ...lines,
@@ -241,7 +224,7 @@ function buildPrioritizedReadingList(points: StartingPoints): string {
   }
 
   const lines = points.entries.map((entry) => {
-    const fileList = entry.files.length > 0 ? entry.files.join(", ") : "(files unknown)";
+    const fileList = entry.files.length > 0 ? `${entry.files.length} file(s)` : "(files unknown)";
     return `- **${entry.unit_id}** (risk score: ${entry.risk_score}) — ${fileList}`;
   });
 
@@ -783,17 +766,49 @@ function renderGraphProvenance(bundle: ArtifactBundle): string[] {
   ];
 }
 
-/**
- * Render the shared structural context block that is identical for both the
- * contract-review and conceptual-review passes. Placing it first in both
- * prompts makes it cache-eligible when the same bundle is used for both agents.
- */
-export function renderSharedStructuralContext(
+/** Machine-derived evidence shared by the lanes, never their arguments or verdicts. */
+export interface DesignReviewRecon {
+  structuralContext: string;
+  charterContext: string;
+  fileMap: ReviewFileMapContext;
+}
+
+export function prepareDesignReviewRecon(
   bundle: ArtifactBundle,
-  maxUnits: number,
-): string {
+  options: DesignReviewOptions = {},
+): DesignReviewRecon {
+  const startingPoints = selectStartingPoints(bundle, resolveMaxUnits(bundle, options));
+  const fileMap = fileMapContextFor(bundle, startingPoints);
+  // Only the starting-point units are named in the prompt. The complete index
+  // is reference material: include all manifest paths, including unassigned
+  // ones, without implying that listed or excluded files are primary targets.
+  const units = bundle.unit_manifest?.units ?? [];
+  const inventory = bundle.repo_manifest?.files ?? [];
+  if (inventory.length > 0 || units.length > 0) {
+    const assigned = new Set(units.flatMap(unit => unit.files));
+    fileMap.contextFiles.push({
+      filename: "design-review-file-inventory.json",
+      label: "Complete design-review file inventory (look up specific units or paths as needed)",
+      text: JSON.stringify({
+        units: Object.fromEntries(units.map(unit => [unit.unit_id, uniqueSorted(unit.files)])),
+        unassigned: uniqueSorted(inventory.map(file => file.path).filter(path => !assigned.has(path))),
+        excluded: uniqueSorted(inventory.filter(file => file.excluded).map(file => file.path)),
+      }, null, 2) + "\n",
+    });
+  }
+  return {
+    structuralContext: renderStructuralContext(bundle, startingPoints, fileMap),
+    charterContext: renderCharterContext(bundle),
+    fileMap,
+  };
+}
+
+export function renderSharedStructuralContext(bundle: ArtifactBundle, maxUnits: number): string {
+  return prepareDesignReviewRecon(bundle, { max_units: maxUnits }).structuralContext;
+}
+
+function renderStructuralContext(bundle: ArtifactBundle, startingPoints: StartingPoints, fileMap: ReviewFileMapContext): string {
   const deterministicFindings = bundle.design_assessment?.findings ?? [];
-  const startingPoints = selectStartingPoints(bundle, maxUnits);
   const prioritizedReadingList = buildPrioritizedReadingList(startingPoints);
 
   // Bind the same complete semantic projection that controls review staleness,
@@ -809,11 +824,14 @@ export function renderSharedStructuralContext(
     "",
     ...renderGraphProvenance(bundle),
     // The summary only: the complete map reaches the lane as a read-only context
-    // file its emission site binds (`designReviewFileMapContext`).
-    ...fileMapContextFor(bundle, startingPoints).summaryLines,
+    // files its emission site binds.
+    ...fileMap.summaryLines,
     "### File inventory",
     "",
     summarizeFiles(bundle),
+    ...(fileMap.contextFiles.some(file => file.filename === "design-review-file-inventory.json") ? [
+      "The complete file inventory is a read-only context file. Look up the specific unit or path you need; do not reload or re-list the whole repository. Use the shared call-site map before re-deriving dependencies. These inputs do not substitute for your own source checks or judgment.",
+    ] : []),
     "",
     "### Unit structure",
     "",
@@ -857,15 +875,15 @@ export function renderSharedStructuralContext(
 export function renderContractReviewPrompt(
   bundle: ArtifactBundle,
   options: DesignReviewOptions = {},
+  recon = prepareDesignReviewRecon(bundle, options),
 ): string {
-  const maxUnits = resolveMaxUnits(bundle, options);
 
   return [
     "# Project contract review (adversarial pass)",
     "",
     "You are performing the **contract-assessment** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to infer existing contracts from the repository and attack them adversarially with concrete counterexamples.",
     "",
-    renderSharedStructuralContext(bundle, maxUnits),
+    recon.structuralContext,
     ...renderLensScope(options),
     "## Contract assessment instructions",
     "",
@@ -912,16 +930,16 @@ export function renderContractReviewPrompt(
 export function renderConceptualReviewPrompt(
   bundle: ArtifactBundle,
   options: DesignReviewOptions = {},
+  recon = prepareDesignReviewRecon(bundle, options),
 ): string {
-  const maxUnits = resolveMaxUnits(bundle, options);
-  const charterContext = renderCharterContext(bundle);
+  const { charterContext } = recon;
 
   return [
     "# Project conceptual design review (generative pass)",
     "",
     "You are performing the **conceptual-design-critique** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide generative observations about broader architecture ideas that static analysis cannot produce.",
     "",
-    renderSharedStructuralContext(bundle, maxUnits),
+    recon.structuralContext,
     ...renderLensScope(options),
     ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
@@ -949,9 +967,9 @@ export function renderConceptualPerspectivePrompt(
   index: number,
   total: number,
   options: DesignReviewOptions = {},
+  recon = prepareDesignReviewRecon(bundle, options),
 ): string {
-  const maxUnits = resolveMaxUnits(bundle, options);
-  const charterContext = renderCharterContext(bundle);
+  const { charterContext } = recon;
 
   return [
     `# Conceptual design review — perspective ${index + 1} of ${total}: ${perspective.name}`,
@@ -964,7 +982,7 @@ export function renderConceptualPerspectivePrompt(
     "",
     "You may sharpen or extend this lens to fit this codebase's character and domain, but stay in character.",
     "",
-    renderSharedStructuralContext(bundle, maxUnits),
+    recon.structuralContext,
     ...renderLensScope(options),
     ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
@@ -995,9 +1013,9 @@ export function renderConceptualJudgePrompt(
   }>,
   roundId: string,
   options: DesignReviewOptions = {},
+  recon = prepareDesignReviewRecon(bundle, options),
 ): string {
-  const maxUnits = resolveMaxUnits(bundle, options);
-  const charterContext = renderCharterContext(bundle);
+  const { charterContext } = recon;
   const sources = perspectiveResults.map(
     (p, i) =>
       `${i + 1}. **${p.name}** — contributor \`${p.contributor_id}\` — \`${p.path}\``,
@@ -1013,7 +1031,7 @@ export function renderConceptualJudgePrompt(
     // submission the tool ingests. Rendering the shared structural context here
     // was the omission that left the deep pass's only ingested lane without the
     // graph's provenance (and, below, without the operator's lens selection).
-    renderSharedStructuralContext(bundle, maxUnits),
+    recon.structuralContext,
     ...renderLensScope(options),
     ...(charterContext ? [charterContext] : []),
     "## Perspective result files",

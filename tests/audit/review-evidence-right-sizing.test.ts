@@ -13,7 +13,7 @@ import { LENSES } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { Finding } from "../../src/audit/types.js";
 import type { IntentCheckpoint } from "../../src/shared/index.js";
-import { designReviewFileMapContext } from "../../src/audit/orchestrator/designReviewPrompt.js";
+import { prepareDesignReviewRecon } from "../../src/audit/orchestrator/designReviewPrompt.js";
 import { buildReviewFileMap } from "../../src/audit/systemic/reviewFileMap.js";
 import {
   adversaryFileMapContext,
@@ -124,8 +124,8 @@ const excludesPerformance: IntentCheckpoint = {
 
 describe("design-review call-site map: an index plus one slice per unit", () => {
   test("each starting-point unit gets its own slice; no slice carries another unit's anchors", () => {
-    const context = designReviewFileMapContext(bundle(), { max_units: 2 });
-    const slices = context.contextFiles;
+    const context = prepareDesignReviewRecon(bundle(), { max_units: 2 }).fileMap;
+    const slices = context.contextFiles.filter(file => file.filename.endsWith(".md"));
     expect(slices.map((file) => file.filename)).toEqual([
       "review-call-site-map.unit-a.md",
       "review-call-site-map.unit-b.md",
@@ -142,7 +142,7 @@ describe("design-review call-site map: an index plus one slice per unit", () => 
   });
 
   test("a co-change pair is not listed as a call site, and the omission is stated", () => {
-    const context = designReviewFileMapContext(bundle(), { max_units: 2 });
+    const context = prepareDesignReviewRecon(bundle(), { max_units: 2 }).fileMap;
     const unitA = context.contextFiles[0]!.text;
     expect(unitA).toContain("- **src/a/one.ts**\n  - referenced by: (none recorded)\n  - references: src/b/three.ts\n");
     expect(context.summaryLines.join("\n")).toMatch(/co_change \(1 edge\(s\)\).*not a call site/);

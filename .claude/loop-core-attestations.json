@@ -152,6 +152,24 @@
     }
   },
   "reviews": {
+    "07c0619b47133a4a": {
+      "reviewed_by": "dot-root",
+      "attester_class": "agent",
+      "checked": "Traced prepared structural context across contract, independent perspective, and judge dispatch. Checked that moved inventory and unchanged map slices are bound read-only, per-lane verdict grants stay distinct, and the round digest includes the moved inventory bytes. Compared against the packaged next-step fixture and staged test evidence.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "701c4802eb7dae1ced16becec1548e1bf0969fc8",
+        "ran_at": "2026-11-25T16:48:47.118Z"
+      },
+      "attested_at": "2026-11-25T16:49:25.212Z",
+      "vouches": {
+        "src/audit/cli/conceptualDispatch.ts": "5cbe322f97791c30c5ce225ed26f3e9abbe98ffa",
+        "src/audit/cli/nextStepCommand.ts": "ba530592561b7a50821cb30071f068194c2934a4",
+        "src/audit/orchestrator/designReviewPrompt.ts": "5402516c7351804479dfb15c3c0143c554539abb"
+      }
+    },
     "0c6c1b84455cdb39": {
       "reviewed_by": "opus-subagent-p01-submission-review",
       "attester_class": "agent",
@@ -885,7 +903,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "93ab3b5081cedfc1"
+      "review": "07c0619b47133a4a"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "review": "e36223304299f9c6"
@@ -912,7 +930,7 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "435c17a0f11016cc"
+      "review": "07c0619b47133a4a"
     },
     "src/audit/cli/nextStepHelpers.ts": {
       "review": "435c17a0f11016cc"
@@ -996,7 +1014,7 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "93ab3b5081cedfc1"
+      "review": "07c0619b47133a4a"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "93ab3b5081cedfc1"

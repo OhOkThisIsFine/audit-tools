@@ -29,7 +29,10 @@ import { prepareFixtureRun } from "../helpers/functionalPreflightFixture.js";
 import { describe, expect, it, afterEach } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { execFileSyncHidden } from "../helpers/spawn.mjs";
+import { fileURLToPath } from "node:url";
+import { toPromptPathToken } from "../../src/shared/tooling/exec.js";
 
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
@@ -159,7 +162,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     ).toBe(3); // 2 perspectives + the judge
   });
 
-  async function prepareRetryFixture() {
+  async function prepareRetryFixture(viaCli = false) {
     const dir = await artifactsDir();
     const root = dirname(dirname(dir));
     await mkdir(join(root, "src"), { recursive: true });
@@ -235,7 +238,12 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     await writeCoreArtifacts(dir, completed);
     await persistDesignReviewSnapshots(dir, completed);
     await prepareFixtureRun(root, { artifactsDir: dir, declinedAnalyzerIds: ["semgrep", "eslint", "knip", "jscpd", "osv-scanner"], preflight: true });
-    await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+    if (viaCli) {
+      const cli = fileURLToPath(new URL("../../audit-code.mjs", import.meta.url));
+      execFileSyncHidden(process.execPath, [cli, "next-step", "--root", root, "--artifacts-dir", dir], { cwd: root, encoding: "utf8" });
+    } else {
+      await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+    }
     const firstStep = JSON.parse(
       await readFile(join(dir, "steps", "current-step.json"), "utf8"),
     );
@@ -245,6 +253,19 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     const firstPerspectivePaths = firstManifest.perspectives.map((p: { result_path: string }) => p.result_path) as string[];
     return { dir, root, firstStep, firstPerspectivePaths, firstManifest };
   }
+
+  it("binds one shared file inventory without embedding it in independent prompts", async () => {
+    const { firstStep, firstManifest } = await prepareRetryFixture(true);
+    const paths = firstStep.access.read_paths.filter((path: string) => basename(path) === "design-review-file-inventory.json");
+    expect(paths).toHaveLength(1);
+    expect(firstStep.access.write_paths).not.toContain(paths[0]);
+    expect(JSON.parse(await readFile(paths[0], "utf8"))).toHaveProperty("units");
+    for (const perspective of firstManifest.perspectives) {
+      const prompt = await readFile(perspective.prompt_path, "utf8");
+      expect(prompt).toContain(toPromptPathToken(paths[0]));
+      expect(prompt).toContain("You will NOT see the other reviewers' output");
+    }
+  });
 
   it("reissues unavailable and invalid perspective results before the judge has submitted", async () => {
     const { dir, root, firstStep, firstPerspectivePaths, firstManifest } = await prepareRetryFixture();

@@ -3,7 +3,7 @@ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { RiskItem } from "audit-tools/shared";
 import type { AuditUnit } from "../../src/audit/types.js";
 
-const { renderContractReviewPrompt } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
+const { prepareDesignReviewRecon, renderContractReviewPrompt } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
 
 /**
  * Slice out just the "Prioritised reading list" section so assertions about
@@ -60,9 +60,12 @@ test("renders top-N units by risk score (default budget)", () => {
   const idx4 = list.indexOf("unit-4");
   expect(idx0 < idx4, "units must be ordered by descending risk score").toBeTruthy();
 
-  // Each listed line carries the unit id, its risk_score, and a file path.
+  // Each listed line carries the unit id, its risk_score, and a file count.
   expect(list.includes("(risk score: 100)")).toBeTruthy();
-  expect(list.includes("src/unit-0.ts")).toBeTruthy();
+  expect(list).toContain("1 file(s)");
+  expect(list).not.toContain("src/unit-0.ts");
+  const inventory = prepareDesignReviewRecon(bundle).fileMap.contextFiles.find(file => file.filename === "design-review-file-inventory.json");
+  expect(JSON.parse(inventory!.text).units["unit-14"]).toEqual(["src/unit-14.ts"]);
 });
 
 test("respects max_units from options (lower)", () => {

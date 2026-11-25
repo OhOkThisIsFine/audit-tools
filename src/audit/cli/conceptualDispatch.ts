@@ -18,7 +18,8 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import {
   type DesignReviewOptions,
-  designReviewFileMapContext,
+  prepareDesignReviewRecon,
+  type DesignReviewRecon,
   renderConceptualReviewPrompt,
   renderConceptualPerspectivePrompt,
   renderConceptualJudgePrompt,
@@ -235,6 +236,7 @@ export async function prepareConceptualDispatch(opts: {
   reReviewSection?: string;
   /** Repair feedback is prompt context, never part of the review round identity. */
   rejectionNotice?: string;
+  recon?: DesignReviewRecon;
 }): Promise<ConceptualDispatch> {
   const { artifactsDir, bundle, settings } = opts;
   const notes = [opts.reReviewSection, opts.rejectionNotice].filter(Boolean).join("\n\n");
@@ -264,7 +266,8 @@ export async function prepareConceptualDispatch(opts: {
   // same starting points, so the shallow reviewer — or every perspective and
   // the judge — reads the same read-only, bound map file; each prompt carries
   // only its summary.
-  const fileMapContext = designReviewFileMapContext(bundle, reviewOptions).contextFiles;
+  const recon = opts.recon ?? prepareDesignReviewRecon(bundle, reviewOptions);
+  const fileMapContext = recon.fileMap.contextFiles;
   // A round that is about to be superseded — by a re-review, or by a switch to
   // the shallow pass — will never be ingested, so this is the last moment its
   // perspectives' dispatch rows can be closed with what they actually
@@ -296,7 +299,7 @@ export async function prepareConceptualDispatch(opts: {
           promptFilename: "design-review-conceptual-prompt.md",
           generatedContext: fileMapContext,
           promptText:
-            renderConceptualReviewPrompt(bundle, reviewOptions) + reReviewSuffix,
+            renderConceptualReviewPrompt(bundle, reviewOptions, recon) + reReviewSuffix,
         },
       ],
     });
@@ -332,15 +335,16 @@ export async function prepareConceptualDispatch(opts: {
   const perspectives = selectPerspectives(settings.perspectives);
   const total = perspectives.length;
   const perspectiveTexts = perspectives.map((p, i) =>
-    renderConceptualPerspectivePrompt(bundle, p, i, total, reviewOptions),
+    renderConceptualPerspectivePrompt(bundle, p, i, total, reviewOptions, recon),
   );
   // The round the perspectives are being asked about: the prompts themselves
-  // (the whole upstream projection each perspective reads) plus the judge's
+  // and shared evidence files each perspective reads, plus the judge's
   // re-review section, which is present exactly when this is a re-review after
   // staleness. A fresh round therefore mints fresh lane ids and fresh prompts;
   // an unchanged one re-declares the identical bound paths.
   const roundToken = conceptualRoundToken([
     ...perspectiveTexts,
+    ...fileMapContext.flatMap(file => [file.filename, file.text]),
     opts.reReviewSection ?? "",
   ]);
   const perspectiveFiles: Array<{
@@ -374,6 +378,7 @@ export async function prepareConceptualDispatch(opts: {
       })),
       roundToken,
       reviewOptions,
+      recon,
     ) + reReviewSuffix;
 
   const perspectiveRefusals = await readTrailingSubmissionRefusals(

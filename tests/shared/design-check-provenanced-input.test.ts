@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { toPromptPathToken } from "audit-tools/shared";
 import { prepareConceptualDispatch } from "../../src/audit/cli/conceptualDispatch.js";
 import {
-  designReviewFileMapContext,
+  prepareDesignReviewRecon,
   renderConceptualReviewPrompt,
 } from "../../src/audit/orchestrator/designReviewPrompt.js";
 import {
@@ -267,7 +267,7 @@ test("a design-review round's map anchors its starting-point files, not the alph
     },
   };
   const prompt = renderConceptualReviewPrompt(bundle, { max_units: 1 });
-  const map = designReviewFileMapContext(bundle, { max_units: 1 }).contextFiles.map((file) => file.text).join("\n");
+  const map = prepareDesignReviewRecon(bundle, { max_units: 1 }).fileMap.contextFiles.map((file) => file.text).join("\n");
   expect(map).toContain("- **src/f65.ts**\n  - referenced by: (none recorded)\n  - references: src/f00.ts");
   expect(prompt).toMatch(/Scope: the files of the 1 starting-point unit\(s\) listed under "Starting points" in the review prompt — 1 file\(s\) under review/);
   // Not under review, so not anchored — however early it sorts.

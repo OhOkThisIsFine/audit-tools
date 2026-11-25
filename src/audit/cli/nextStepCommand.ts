@@ -53,7 +53,8 @@ import {
   edgeReasoningContentHash,
 } from "../orchestrator/edgeReasoning.js";
 import {
-  designReviewFileMapContext,
+  prepareDesignReviewRecon,
+  type DesignReviewRecon,
   renderContractReviewPrompt,
 } from "../orchestrator/designReviewPrompt.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
@@ -193,6 +194,7 @@ async function prepareConceptualPass(
   sourceRoot: string,
   bundle: ArtifactBundle,
   settings: ConceptualReviewSettings,
+  recon?: DesignReviewRecon,
 ): Promise<ConceptualDispatch> {
   const notesSection = await designReviewNotesSection(
     artifactsDir,
@@ -204,6 +206,7 @@ async function prepareConceptualPass(
     sourceRoot,
     bundle,
     settings,
+    recon,
     ...notesSection,
   });
 }
@@ -227,6 +230,7 @@ async function prepareContractDispatch(opts: {
   sourceRoot: string;
   bundle: ArtifactBundle;
   maxUnits: number | undefined;
+  recon?: DesignReviewRecon;
 }): Promise<ContractDispatch> {
   const notesSection = await designReviewNotesSection(
     opts.artifactsDir,
@@ -251,6 +255,7 @@ async function prepareContractDispatch(opts: {
     max_units: opts.maxUnits,
     ...(lenses === undefined ? {} : { lenses }),
   };
+  const recon = opts.recon ?? prepareDesignReviewRecon(opts.bundle, reviewOptions);
   const fanout = await materializeFanoutLanes({
     artifactsDir: opts.artifactsDir,
     sourceRoot: opts.sourceRoot,
@@ -265,12 +270,12 @@ async function prepareContractDispatch(opts: {
         promptFilename: "design-review-contract-prompt.md",
         // The prompt carries the call-site map's summary; the complete map is
         // this read-only, bound file.
-        generatedContext: designReviewFileMapContext(opts.bundle, reviewOptions).contextFiles,
+        generatedContext: recon.fileMap.contextFiles,
         // No results-path section here: `materializeFanoutLanes` appends the one
         // canonical footer (bound path + the read-only-executor alternative) to
         // every lane prompt it writes.
         promptText: [
-          renderContractReviewPrompt(opts.bundle, reviewOptions),
+          renderContractReviewPrompt(opts.bundle, reviewOptions, recon),
           ...[notesSection.reReviewSection, notesSection.rejectionNotice]
             .filter((section): section is string => Boolean(section))
             .flatMap((section) => ["", section]),
@@ -698,17 +703,20 @@ const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
     const continueCommand = nextStepCommand(root, artifactsDir);
 
     const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
+    const recon = prepareDesignReviewRecon(result.bundle, { max_units: conceptualSettings.max_units });
     const contract = await prepareContractDispatch({
       artifactsDir,
       sourceRoot,
       bundle: result.bundle,
       maxUnits: conceptualSettings.max_units,
+      recon,
     });
     const conceptual = await prepareConceptualPass(
       artifactsDir,
       sourceRoot,
       result.bundle,
       conceptualSettings,
+      recon,
     );
 
     const shortfall = mergeLaneShortfalls([
