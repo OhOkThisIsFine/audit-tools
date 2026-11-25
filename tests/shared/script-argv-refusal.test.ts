@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { parseArgv, refusalMessage, isHelpFlag, USAGE_EXIT } from '../../scripts/shared/argvGuard.mjs';
+import { parseArgv, refusalMessage, isHelpFlag } from '../../scripts/shared/argvGuard.mjs';
 import { listTrackedScripts, readScriptSource } from '../helpers/tracked-scripts.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');

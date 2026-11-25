@@ -1,4 +1,4 @@
-import { test, expect, describe, it } from "vitest";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
