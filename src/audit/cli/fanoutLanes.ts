@@ -8,9 +8,9 @@ import { hashContent } from "../../shared/hash.js";
 // is the first): every lane prompt file on disk is written here, so the path form
 // a lane reader sees is decided here.
 
-import { access, chmod, mkdir, readFile, unlink } from "node:fs/promises";
+import { access, chmod, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { writeTextFile } from "../../shared/io/json.js";
+import { writeFileAtomic, writeTextFile } from "../../shared/io/json.js";
 import { publishAuditReviewBindings, type AuditReviewBinding } from "./auditReviewBindings.js";
 
 import {
@@ -166,9 +166,8 @@ async function fileExists(path: string): Promise<boolean> {
 /**
  * Write one generated context file and return its path. A file already holding
  * the same bytes is left alone (its path is content-addressed, so this is the
- * unchanged-round case). A file holding OTHER bytes was edited in place: it is
- * made writable and unlinked first, because on Windows a rename over a
- * read-only file fails with EPERM.
+ * unchanged-round case). Repair edited bytes atomically: an already-emitted
+ * prompt can still name this path while a new emission is being prepared.
  */
 async function writeGeneratedContext(
   promptDir: string,
@@ -185,16 +184,14 @@ async function writeGeneratedContext(
     }
   };
   const existing = await holdsExpected();
-  if (existing === false) {
-    await chmod(path, 0o666);
-    await unlink(path);
-  }
   if (existing !== true) {
     try {
-      await writeTextFile(path, file.text);
+      await writeFileAtomic(path, expected, { replaceReadOnly: existing === false });
     } catch (error) {
-      // A concurrent emission of the same round wrote (and locked) the same
-      // bytes first: the file is what this write would have produced.
+      // A Windows replacement may have unlocked the destination before its
+      // rename failed. Leave the surviving file read-only again if possible.
+      if (existing === false) await chmod(path, 0o444).catch(() => undefined);
+      // A concurrent emission of the same round may have won the rename.
       if ((await holdsExpected()) !== true) throw error;
     }
   }

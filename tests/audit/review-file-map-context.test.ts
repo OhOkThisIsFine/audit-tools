@@ -2,7 +2,7 @@
 // into the lane's review binding, never inlined into the prompt (owner decision 2026-10-04). The
 // binding is what makes "read-only" a property rather than a request: acceptance re-hashes every
 // bound input, so a submission made against an edited map is refused.
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,8 +16,20 @@ import { AUDIT_GATE_SUBMISSION_SCOPE, GATE_LANES } from "../../src/audit/cli/lan
 import { tryConsumeSubmission } from "../../src/audit/cli/nextStepHelpers.js";
 import { systemicReviewInputRevision } from "../../src/audit/orchestrator/systemicChallengeExecutor.js";
 
+const fsProbe = vi.hoisted(() => ({
+  beforeRename: undefined as ((from: string, to: string) => Promise<void>) | undefined,
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, rename: async (from: string, to: string) => {
+    await fsProbe.beforeRename?.(from, to);
+    return fs.rename(from, to);
+  } };
+});
+
 const roots: string[] = [];
 afterEach(async () => {
+  fsProbe.beforeRename = undefined;
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
@@ -116,17 +128,47 @@ test("two emissions of an unchanged round write identical map bytes at an identi
   expect(second.prompt).toBe(first.prompt);
 });
 
-test("re-emission replaces a map file whose bytes were changed, and leaves it read-only", async () => {
+test("re-emission atomically replaces an edited map without a missing-path window", async () => {
   const artifactsDir = await tempArtifacts("map-file-repair-");
   const { mapPath } = await emitShallow(artifactsDir);
   const original = await readFile(mapPath, "utf8");
   await chmod(mapPath, 0o666);
   await writeFile(mapPath, "edited");
+  await chmod(mapPath, 0o444);
+
+  const observeBeforeRename = vi.fn(async (from: string) => {
+    // A reader following the previously emitted prompt still sees a complete
+    // file while the replacement is ready but not yet published.
+    expect(await readFile(mapPath, "utf8")).toBe("edited");
+    expect(await readFile(from, "utf8")).toBe(original);
+    // Atomic publication does not make the edited bytes valid evidence.
+    expect(await readAuditReviewBinding(artifactsDir, LANE)).toBeUndefined();
+  });
+  fsProbe.beforeRename = async (from, to) => {
+    if (to === mapPath) await observeBeforeRename(from);
+  };
 
   await emitShallow(artifactsDir);
+  expect(observeBeforeRename).toHaveBeenCalledTimes(1);
   expect(await readFile(mapPath, "utf8")).toBe(original);
   expect((await stat(mapPath)).mode & 0o222).toBe(0);
   expect(await readAuditReviewBinding(artifactsDir, LANE)).toBeDefined();
+});
+
+test("a failed map replacement keeps the edited file in place and read-only", async () => {
+  const artifactsDir = await tempArtifacts("map-file-repair-failure-");
+  const { mapPath } = await emitShallow(artifactsDir);
+  await chmod(mapPath, 0o666);
+  await writeFile(mapPath, "edited");
+  await chmod(mapPath, 0o444);
+  fsProbe.beforeRename = async (_from, to) => {
+    if (to === mapPath) throw Object.assign(new Error("map rename refused"), { code: "EIO" });
+  };
+
+  await expect(emitShallow(artifactsDir)).rejects.toThrow("map rename refused");
+  expect(await readFile(mapPath, "utf8")).toBe("edited");
+  expect((await stat(mapPath)).mode & 0o222).toBe(0);
+  expect(await readAuditReviewBinding(artifactsDir, LANE)).toBeUndefined();
 });
 
 test("a deep round builds the map once: every perspective and the judge bind the same file", async () => {

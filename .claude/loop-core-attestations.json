@@ -740,6 +740,22 @@
         "src/remediate/steps/nextStep.ts": "e8d48778eb2bcd88562db99e1664e5643005af0e"
       }
     },
+    "e08e0a3e6b64c623": {
+      "reviewed_by": "dogfood_narrative",
+      "attester_class": "agent",
+      "checked": "Independent exact-blob review checked first creation, conflicting writer fallback, existing content digest and atomic replacement failure continuity.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "4cf23886ac10c63c54580d7d6ad67aa6b4ce273a",
+        "ran_at": "2026-11-25T19:04:05.541Z"
+      },
+      "attested_at": "2026-11-25T19:05:13.016Z",
+      "vouches": {
+        "src/audit/cli/fanoutLanes.ts": "1075dfa1f728ec2b4bb31755aa2b9fb18f4c780d"
+      }
+    },
     "e27b7c336e51764b": {
       "reviewed_by": "agent:ad6fa6c7fef1d8cd9-independent-diff-review,agent:p08-file-group-reviewers-and-refuter",
       "attester_class": "agent",
@@ -952,7 +968,7 @@
       "review": "481abf3e9efbbca4"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "review": "74f5fdb4c95e9366"
+      "review": "e08e0a3e6b64c623"
     },
     "src/audit/cli/foldTransaction.ts": {
       "review": "435c17a0f11016cc"

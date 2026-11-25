@@ -120,21 +120,6 @@ test("INV-audit-cli-08: handleSynthesisNarrativeBranch accepts the trimmed param
   ).rejects.toThrow();
 });
 
-// ── INV-audit-cli-09: ExternalAnalyzerResults null guard (COR-df0bf37c) ────────
-// cmdImportExternalAnalyzer must throw early when results field is absent/null
-// rather than letting .length crash with a TypeError at the console.log call.
-// Verified via the source guard added to importExternalAnalyzerCommand.ts.
-// (Integration test requires disk IO; this invariant is structural/doc.)
-test("INV-audit-cli-09: ExternalAnalyzerResults null-guard contract is documented", () => {
-  // The fix adds: if (!Array.isArray(externalAnalyzerResults.results)) throw Error(...)
-  // Structural invariant: Array.isArray(null) === false, Array.isArray(undefined) === false,
-  // Array.isArray([]) === true.
-  expect(!Array.isArray(null), "null is not an array").toBeTruthy();
-  expect(!Array.isArray(undefined), "undefined is not an array").toBeTruthy();
-  expect(Array.isArray([]), "[] is an array").toBeTruthy();
-  expect(!Array.isArray({ length: 3 }), "array-like is not an array").toBeTruthy();
-});
-
 // ── INV-audit-cli-11: dispatchStatusCommand re-throws non-missing IO errors (COR-6e84f23c) ─
 // A former status-path bare catch swallowed all readFile errors, misreporting
 // permission/IO failures as "missing results". Fixed: only ENOENT is treated as missing;

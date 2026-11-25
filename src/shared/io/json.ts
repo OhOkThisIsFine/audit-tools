@@ -4,6 +4,7 @@ import {
   readFile,
   writeFile,
   appendFile,
+  chmod,
   rename,
   rm,
 } from "node:fs/promises";
@@ -100,6 +101,7 @@ export async function withFsRetry<T>(
 export async function writeFileAtomic(
   path: string,
   content: string | Buffer,
+  options: { replaceReadOnly?: boolean } = {},
 ): Promise<void> {
   await ensureParentDirectory(path);
   const temp = join(
@@ -116,7 +118,16 @@ export async function writeFileAtomic(
     await writeFile(temp, content, "utf8");
     // The temp name is unique per process+uuid, so only the final rename-over-
     // existing-destination is exposed to transient Windows lock errors.
-    await withFsRetry(() => rename(temp, path));
+    await withFsRetry(async () => {
+      if (options.replaceReadOnly && process.platform === "win32") {
+        // Clear the destination's read-only bit only after the replacement is
+        // ready. The caller still owns the intended mode after this write.
+        await chmod(path, 0o666).catch(error => {
+          if (!isFileMissingError(error)) throw error;
+        });
+      }
+      await rename(temp, path);
+    });
   } catch (error) {
     throw ioError("write", path, error);
   } finally {

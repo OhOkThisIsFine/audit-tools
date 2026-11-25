@@ -9,6 +9,7 @@ import { test, expect, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, writeFile, rm, stat, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 
@@ -54,23 +55,26 @@ test("sample-run writes a v2 report in a separate sample directory, not audit st
   });
 });
 
-// ── COR-df0bf37c: import-external-analyzer throws on missing results array ──
-// cmdImportExternalAnalyzer must guard against .results being absent/null
-// before calling .results.length.
+test("COR-df0bf37c: import-external-analyzer rejects non-array results before dispatch and accepts an empty array", async () => {
+  await withTempDir(async root => {
+    const input = join(root, "normalized-findings.json");
+    const artifacts = join(root, ".audit-tools", "audit");
+    const args = ["import-external-analyzer", "--external-analyzer-results", input];
+    await writeFile(input, JSON.stringify({ tool: "fixture-analyzer", results: { length: 0 } }));
+    await expect(runWrapper(args, { cwd: root })).rejects.toThrow(/must have a 'results' array/);
+    await expect(stat(artifacts)).rejects.toMatchObject({ code: "ENOENT" });
 
-test("COR-df0bf37c: Array.isArray guard distinguishes null/absent results from empty array", () => {
-  // Validate the guard logic directly (no disk IO needed for this invariant).
-  const cases = [
-    { input: null, expected: false },
-    { input: undefined, expected: false },
-    { input: {}, expected: false },
-    { input: { length: 3 }, expected: false },
-    { input: [], expected: true },
-    { input: [{ id: 1 }], expected: true },
-  ];
-  for (const { input, expected } of cases) {
-    expect(Array.isArray(input), `Array.isArray(${JSON.stringify(input)}) should be ${expected}`).toBe(expected);
-  }
+    const empty = { tool: "fixture-analyzer", results: [] };
+    await writeFile(input, JSON.stringify(empty));
+    const { stdout } = await runWrapper(args, { cwd: root });
+    expect(JSON.parse(stdout)).toMatchObject({
+      tool: empty.tool,
+      imported_count: 0,
+      selected_executor: "external_analyzer_import_executor",
+    });
+    const stored = await readFile(join(artifacts, "external_analyzer_results.json"), "utf8");
+    expect(JSON.parse(stored)).toEqual([empty]);
+  });
 });
 
 // ── COR-0ae3577b: CLI forwards no token-wrap option from sessionConfig ───────
