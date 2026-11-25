@@ -299,3 +299,53 @@ test("resolution and execution share the identical absolute deadline", async () 
     ]);
   } finally { resolver.mockRestore(); now.mockRestore(); }
 });
+
+test("fresh release is resolved once, failed scan stays visible, and resume reuses the recorded release", async () => {
+  const { EXTERNAL_ANALYZER_CANDIDATES } = await import("audit-tools/shared");
+  const root = mkdtempSync(join(tmpdir(), "executor-latest-"));
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(join(root, "package.json"), "{}");
+  try {
+    const lookups: string[] = [];
+    const attempts: string[][] = [];
+    const analyzerFlags = Object.fromEntries(EXTERNAL_ANALYZER_CANDIDATES.map(candidate =>
+      [candidate.id, candidate.id === "semgrep" ? "auto" : "skip"] as const,
+    ));
+    const fetch: BinaryFetcher = async url => {
+      lookups.push(url);
+      return new TextEncoder().encode(JSON.stringify({ info: { version: "1.999.0" } }));
+    };
+    const run: BinaryCommandRunner = async argv => {
+      attempts.push(argv);
+      const probe = argv.includes("--version");
+      return { argv, stdout: probe ? "1.0.0" : '{"results":[],"errors":[{}]}',
+        stderr: "", status: 0, duration_ms: 1 };
+    };
+    const options = { enabled: true, latestReleases: true, fetch, run, analyzers: analyzerFlags,
+      consentToken: { value: "granted", tools: ["semgrep"] } };
+    const first = await runExternalAnalyzerAcquisitionExecutor(bundleAfterIntake(), root, options);
+    const { ExternalAnalyzerAcquisitionMarkerSchema } = await import("audit-tools/shared");
+    const marker = ExternalAnalyzerAcquisitionMarkerSchema.parse(first.updated.external_analyzer_acquisition);
+    expect(marker.tool_statuses.find(x => x.tool === "semgrep"))
+      .toMatchObject({ version: "1.999.0", stage: "scan", status: "failed" });
+    expect(first.progress_summary).toContain("rerun only that analyzer");
+    await runExternalAnalyzerAcquisitionExecutor(first.updated, root, options);
+    expect(lookups).toEqual(["https://pypi.org/pypi/semgrep/json"]);
+    expect(attempts.filter(argv => argv.includes("semgrep==1.999.0"))).toHaveLength(2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an imported success by tool name alone does not clear the automatic coverage gap", async () => {
+  const { incompleteAnalyzerStatuses } = await import("../../src/audit/orchestrator/acquisitionExecutor.js");
+  const failure = { tool: "semgrep", status: "failed", stage: "scan", version: "1.999.0", resolved: true } as const;
+  expect(incompleteAnalyzerStatuses({
+    ...bundleAfterIntake(),
+    external_analyzer_acquisition: { enabled: true, tool_statuses: [failure] },
+    external_analyzer_results: [{
+      tool: "semgrep", results: [],
+      tool_statuses: [{ tool: "semgrep", status: "success", resolved: true }],
+    }],
+  })).toEqual([failure]);
+});

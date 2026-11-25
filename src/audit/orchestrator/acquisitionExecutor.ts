@@ -11,6 +11,8 @@ import {
   prepareAcquisition,
   defaultBinaryFetcher,
   resolveBinaryCandidates,
+  resolveAnalyzerRelease,
+  type ExternalAnalyzerToolStatus,
 } from "audit-tools/shared";
 import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
 import type {
@@ -39,6 +41,8 @@ export interface ExternalAcquisitionAdvanceOptions {
   resolveExecutable?: BinaryResolveOptions["resolveExecutable"];
   /** Hermeticity gate: acquisition runs ONLY when true. Default off (empty marker). */
   enabled?: boolean;
+  /** Resolve the current upstream release for each admitted, managed analyzer. */
+  latestReleases?: boolean;
   /** Injected network fetch for binary acquisition; defaults to a global-fetch adapter. */
   fetch?: BinaryFetcher;
   /** Injected command runner (probe / spawn); defaults to the shared runTrackedAsync. */
@@ -61,6 +65,15 @@ export interface ExternalAcquisitionAdvanceOptions {
   cacheDir?: string;
   platform?: NodeJS.Platform;
   arch?: string;
+}
+
+export function incompleteAnalyzerStatuses(bundle: ArtifactBundle): ExternalAnalyzerToolStatus[] {
+  return (bundle.external_analyzer_acquisition?.tool_statuses ?? []).filter(status =>
+    status.status !== "skipped" && (
+      !["success", "findings"].includes(status.status) ||
+      Boolean(status.dropped_rows || status.source_read_failures)
+    ),
+  );
 }
 
 /**
@@ -104,9 +117,29 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   const prepared = prepareAcquisition(EXTERNAL_ANALYZER_CANDIDATES, root, options);
   const candidates = prepared.candidates;
   const engineOptions = prepared.options;
+  const versions = new Map<string, string>();
+  const versionFailures: ExternalAnalyzerToolStatus[] = [];
+  const selected = await Promise.all(candidates.map(async candidate => {
+    if (!options.latestReleases || engineOptions.admissions?.get(candidate.id) !== null) return candidate;
+    const recorded = bundle.external_analyzer_acquisition?.tool_statuses.find(status => status.tool === candidate.id)?.version;
+    try {
+      const release = await resolveAnalyzerRelease(candidate, fetcher,
+        (engineOptions.deadline?.at ?? Date.now()) - Date.now(), recorded);
+      if (!release) return candidate;
+      versions.set(candidate.id, release.version);
+      return release.candidate;
+    } catch {
+      versionFailures.push({
+        tool: candidate.id, resolved: false, status: "not_resolved", stage: "resolve",
+        error: recorded ? "Recorded analyzer version could not be reused" : "Could not resolve the latest stable upstream release (metadata unavailable or incompatible)",
+      });
+      return null;
+    }
+  }));
+  const availableCandidates = selected.filter(candidate => candidate !== null);
 
   const { resolvedBinaries, unresolvedStatuses } = await resolveBinaryCandidates(
-    candidates,
+    availableCandidates,
     root,
     {
       ...engineOptions,
@@ -122,14 +155,14 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     },
   );
 
-  const runnable = candidates.filter(candidate => candidate.runner !== "binary" ||
+  const runnable = availableCandidates.filter(candidate => candidate.runner !== "binary" ||
     Object.hasOwn(resolvedBinaries, candidate.id));
   const { results, statuses } = await runAcquisitionEngine(runnable, root, {
     ...engineOptions, resolvedBinaries,
   });
   const candidateIds = new Set(candidates.map(candidate => candidate.id));
   const statusById = new Map<string, (typeof statuses)[number]>();
-  for (const status of [...unresolvedStatuses, ...statuses]) {
+  for (const status of [...versionFailures, ...unresolvedStatuses, ...statuses]) {
     if (!candidateIds.has(status.tool)) throw new Error(`unregistered analyzer status producer: ${status.tool}`);
     if (statusById.has(status.tool)) throw new Error(`duplicate analyzer status producer: ${status.tool}`);
     statusById.set(status.tool, status);
@@ -137,7 +170,11 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   const orderedStatuses = candidates.map(candidate => {
     const status = statusById.get(candidate.id);
     if (!status) throw new Error(`missing analyzer status producer: ${candidate.id}`);
-    return status;
+    const version = versions.get(candidate.id);
+    if (!options.latestReleases) return status;
+    const stage = status.stage ?? (status.status === "parse_error" ? "parse"
+      : status.resolved ? "scan" : "resolve");
+    return { ...status, ...(version ? { version } : {}), ...(status.status !== "skipped" ? { stage } : {}) };
   });
 
   let mergedResults = bundle.external_analyzer_results;
@@ -166,12 +203,17 @@ export async function runExternalAnalyzerAcquisitionExecutor(
 
   const findingCount = results.reduce((sum, r) => sum + r.results.length, 0);
   const ran = statuses.filter((s) => s.resolved).map((s) => s.tool);
+  const failures = incompleteAnalyzerStatuses(updated);
+  const failureSummary = failures.length === 0 ? "" :
+    "\nAnalyzer coverage incomplete: " + failures.map(status =>
+      `${status.tool} (${status.version ?? "version unavailable"}, ${status.stage ?? status.status}): ${status.status}`
+    ).join("; ") + ". Dispatcher: diagnose each failure and rerun only that analyzer on the same frozen snapshot, within existing consent. Record any version override and use import-external-analyzer for recovered normalized results. If recovery fails, report incomplete coverage; do not restart the audit or treat this as clean.";
   return {
     updated,
     artifacts_written: artifactsWritten,
     progress_summary:
       `External analyzer acquisition ran ${ran.length} tool(s)` +
       (ran.length > 0 ? ` (${ran.join(", ")})` : "") +
-      `, contributing ${findingCount} finding(s).`,
+      `, contributing ${findingCount} finding(s).` + failureSummary,
   };
 }

@@ -183,10 +183,13 @@ export function isDegradedExternalAnalyzerStatus(
   return false;
 }
 
+// sites-pinned: tests/audit/acquisition-executor.test.ts
 export const ExternalAnalyzerToolStatusSchema = z
   .object({
     tool: z.string(),
     command: z.string().optional(),
+    version: z.string().optional(),
+    stage: z.enum(["resolve", "install", "scan", "parse"]).optional(),
     resolved: z.boolean(),
     status: z.enum(EXTERNAL_ANALYZER_TOOL_STATUSES),
     exit_code: z.number().nullable().optional(),

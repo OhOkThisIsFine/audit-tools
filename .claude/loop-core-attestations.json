@@ -853,6 +853,23 @@
         "src/shared/submission/submissionScan.ts": "86726d05792322664bb576d0f9ca6b901888d175"
       }
     },
+    "ea151410085234cc": {
+      "reviewed_by": "audit-tools-independent-security-review-v0579",
+      "attester_class": "agent",
+      "checked": "Reviewed exact staged production blobs for admission and scope regressions: frozen root and original consent gate retained; dispatcher-only notices never broaden charter access; no imported success can erase native failure without verification.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "d1b27ae3bd9cd61cbe9fab91d38dfd50023347cc",
+        "ran_at": "2026-11-25T22:45:47.706Z"
+      },
+      "attested_at": "2026-11-25T22:45:47.768Z",
+      "vouches": {
+        "src/audit/cli/nextStepCommand.ts": "cedfd3484bf946ca2f5b587586b6ff51eb72eb18",
+        "src/audit/orchestrator/acquisitionExecutor.ts": "4af2ecb30a5a002b62afe7b936cbfb3867cee852"
+      }
+    },
     "f20b857654eebefb": {
       "reviewed_by": "claude-opus-5-5 session 48f746a3 (orchestrator) + four simplify reviewer subagents (reuse, simplification, efficiency, altitude)",
       "attester_class": "agent",
@@ -970,7 +987,7 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "380a3e547fdf760b"
+      "review": "ea151410085234cc"
     },
     "src/audit/cli/nextStepHelpers.ts": {
       "review": "380a3e547fdf760b"
@@ -997,7 +1014,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/acquisitionExecutor.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "ea151410085234cc"
     },
     "src/audit/orchestrator/advance.ts": {
       "review": "74f5fdb4c95e9366"
