@@ -29,6 +29,7 @@ const {
 const {
   buildDesignReviewSnapshot,
   writeDesignReviewSnapshot,
+  designReviewSnapshotPath,
   loadDesignReviewSnapshots,
   isDesignReviewStale,
   computeDesignReReviewDelta,
@@ -389,4 +390,48 @@ test("discarded legacy snapshots cannot preserve completed review authority", as
     expect(branch.action).toBe("return");
     if (branch.action === "return") expect(branch.result.kind).toBe("design_review_parallel");
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test.each(["malformed JSON", "missing inputs", "missing task", "wrong pass", "bad findings"] as const)(
+  "a %s snapshot stales only the affected design review",
+  async damage => {
+    const dir = await mkdtemp(join(tmpdir(), "audit-dr-damaged-"));
+    try {
+      const b = fullBundle({ design_assessment: {
+        generated_at: "2026-01-01T00:00:00Z", findings: [], contract_reviewed: true, conceptual_reviewed: true,
+      } });
+      const conceptual = buildDesignReviewSnapshot("conceptual", [], b, "2026-01-01T00:00:00Z");
+      const contract = buildDesignReviewSnapshot("contract", [], b, "2026-01-01T00:00:00Z");
+      await writeDesignReviewSnapshot(dir, conceptual);
+      const corrupt = {
+        "malformed JSON": "{",
+        "missing inputs": JSON.stringify({ ...contract, reviewed_inputs: {} }),
+        "missing task": JSON.stringify({ ...contract, reviewed_task: null }),
+        "wrong pass": JSON.stringify(conceptual),
+        "bad findings": JSON.stringify({ ...contract, prior_findings: [{}] }),
+      }[damage];
+      await writeFile(designReviewSnapshotPath(dir, "contract"), corrupt);
+      b.design_review_snapshots = await loadDesignReviewSnapshots(dir);
+      expect(b.design_review_snapshots).toEqual({ conceptual });
+      const state = deriveAuditState(b);
+      expect(state.obligations.find(o => o.id === "design_review_contract_completed")?.state).toBe("stale");
+      expect(state.obligations.find(o => o.id === "design_review_conceptual_completed")?.state).toBe("satisfied");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each(["snapshot is a directory", "snapshot parent is a file"])("design review propagates I/O errors if %s", async damage => {
+  const dir = await mkdtemp(join(tmpdir(), "audit-dr-io-"));
+  try {
+    if (damage === "snapshot is a directory") {
+      await mkdir(designReviewSnapshotPath(dir, "contract"), { recursive: true });
+    } else {
+      await writeFile(join(dir, "design-review-snapshots"), "not a directory");
+    }
+    await expect(loadDesignReviewSnapshots(dir)).rejects.toThrow(/design-review-snapshots/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

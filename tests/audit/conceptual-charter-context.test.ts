@@ -17,6 +17,7 @@ const {
   renderCharterContext,
   renderConceptualReviewPrompt,
   renderConceptualPerspectivePrompt,
+  renderConceptualJudgePrompt,
   selectPerspectives,
   DEFAULT_CONCEPTUAL_PERSPECTIVES,
   CONCEPTUAL_PERSPECTIVES,
@@ -205,4 +206,13 @@ test("the default deep fan-out dispatches the whole roster", () => {
   expect(selectPerspectives(), "the default must not silently drop a perspective").toEqual(
     CONCEPTUAL_PERSPECTIVES,
   );
+});
+
+test("deep judge receives the same linked charter block and uncertainty as the perspectives", () => {
+  const bundle = baseBundle(populatedRegister());
+  const sources = [{ name: "independent perspective", path: "result.json", contributor_id: "p1" }];
+  const prompt = renderConceptualJudgePrompt(bundle, sources, "round");
+  expect(prompt).toContain(renderCharterContext(bundle));
+  expect(prompt).toMatch(/LOW-CONFIDENCE account: FLAG for human/);
+  expect(renderConceptualJudgePrompt(baseBundle(undefined), sources, "round")).not.toContain("Subsystem charters");
 });

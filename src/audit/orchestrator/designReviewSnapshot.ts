@@ -24,8 +24,11 @@ import { projectDesignReviewTask } from "./designReviewTask.js";
 import { join } from "node:path";
 import {
   diffProjections,
-  readOptionalJsonFile,
-  discardOnSchemaVersionMismatch,
+  readJsonFile,
+  isFileMissingError,
+  FindingSchema,
+  isJsonParseError,
+  isRecord,
   renderDiffReReviewSection,
   stableStringifyProjection,
   writeJsonFile,
@@ -81,16 +84,41 @@ export async function readDesignReviewSnapshot(
   artifactsDir: string,
   pass: DesignReviewPass,
 ): Promise<DesignReviewSnapshot | null> {
-  // Regenerable: a snapshot from an older schema is treated as ABSENT so the pass
-  // re-reviews, rather than being read back under semantics it was not written for.
-  return (
-    discardOnSchemaVersionMismatch(
-      await readOptionalJsonFile<DesignReviewSnapshot>(
-        designReviewSnapshotPath(artifactsDir, pass),
-      ),
-      SNAPSHOT_SCHEMA_VERSION,
-    ) ?? null
-  );
+  const path = designReviewSnapshotPath(artifactsDir, pass);
+  let value: unknown;
+  try {
+    value = await readJsonFile<unknown>(path);
+  } catch (error) {
+    if (isFileMissingError(error)) return null;
+    if (!isJsonParseError(error)) throw error;
+    console.warn(`Ignoring damaged ${pass} design-review snapshot: ${error.message}`);
+    return null;
+  }
+  // Old versions are intentionally discarded; a missing stamp is damage.
+  if (isRecord(value) && typeof value.schema_version === "string" && value.schema_version !== SNAPSHOT_SCHEMA_VERSION) return null;
+  if (!isDesignReviewSnapshot(value, pass)) {
+    console.warn(`Ignoring damaged ${pass} design-review snapshot at ${path}: invalid snapshot shape`);
+    return null;
+  }
+  return value;
+}
+
+function isDesignReviewSnapshot(value: unknown, pass: DesignReviewPass): value is DesignReviewSnapshot {
+  if (!isRecord(value) || value.schema_version !== SNAPSHOT_SCHEMA_VERSION || value.pass !== pass ||
+      typeof value.reviewed_at !== "string" || !value.reviewed_at ||
+      !Array.isArray(value.prior_findings) || !value.prior_findings.every(finding => FindingSchema.safeParse(finding).success) ||
+      !isRecord(value.reviewed_inputs) || !isRecord(value.reviewed_task)) return false;
+  const { reviewed_inputs: inputs, reviewed_task: task } = value;
+  return DESIGN_REVIEW_INPUTS.every(key => Object.hasOwn(inputs, key)) &&
+    (task.lenses === null || isStringArray(task.lenses)) && isStringArray(task.degraded_analyzers) &&
+    (pass === "contract" || (
+      (task.conceptual_depth === "shallow" || task.conceptual_depth === "deep") &&
+      Array.isArray(task.perspectives) && Array.isArray(task.charter_context)
+    ));
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(entry => typeof entry === "string");
 }
 
 /**

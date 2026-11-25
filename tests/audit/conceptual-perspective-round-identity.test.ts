@@ -81,8 +81,8 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     });
     // A perspective delivers its findings in the first round.
     const delivered = perspectivePaths(first.writePaths)[0]!;
-    await mkdir(dirname(delivered), { recursive: true });
-    await writeFile(delivered, "[]", "utf8");
+    const manifest = JSON.parse(await readFile(first.artifactPaths.conceptual_round_manifest!, "utf8"));
+    await writeBoundReviewFixture(dir, manifest.perspectives[0].lane_id, []);
 
     // Same round, re-emitted: identical bound paths, so an already-delivered
     // perspective is NOT re-asked.
@@ -96,6 +96,9 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       perspectivePaths(reEmit.writePaths),
       "re-emitting an unchanged round must re-declare the identical bound paths",
     ).toEqual(perspectivePaths(first.writePaths));
+
+    expect(reEmit.instructionLines.join("\n")).not.toContain("- **Perspective 1 (");
+    expect(JSON.parse(await readFile(delivered, "utf8")).review.mode).toBe("independent");
 
     // A genuine re-review (diff section present) is a NEW round.
     const second = await prepareConceptualDispatch({
@@ -242,6 +245,26 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     const firstPerspectivePaths = firstManifest.perspectives.map((p: { result_path: string }) => p.result_path) as string[];
     return { dir, root, firstStep, firstPerspectivePaths, firstManifest };
   }
+
+  it("reissues unavailable and invalid perspective results before the judge has submitted", async () => {
+    const { dir, root, firstStep, firstPerspectivePaths, firstManifest } = await prepareRetryFixture();
+    await writeBoundReviewFixture(dir, firstManifest.perspectives[0].lane_id, []);
+    const independent = await readFile(firstPerspectivePaths[0]!, "utf8");
+    await writeBoundReviewFixture(dir, firstManifest.perspectives[1].lane_id, {});
+    const unavailable = JSON.parse(await readFile(firstPerspectivePaths[1]!, "utf8"));
+    unavailable.review = { mode: "unavailable", reason: "No independent context is available." };
+    await writeFile(firstPerspectivePaths[1]!, JSON.stringify(unavailable));
+    await writeBoundReviewFixture(dir, firstManifest.perspectives[2].lane_id, {});
+    await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+    const retry = JSON.parse(await readFile(join(dir, "steps", "current-step.json"), "utf8"));
+    expect(retry.step_kind).toBe("design_review_conceptual");
+    expect(retry.access.write_paths).toEqual(firstStep.access.write_paths);
+    const instructions = await readFile(retry.artifact_paths.current_prompt, "utf8");
+    expect(instructions).not.toContain("- **Perspective 1 (");
+    expect(instructions).toContain("- **Perspective 2 (");
+    expect(instructions).toContain("- **Perspective 3 (");
+    expect(await readFile(firstPerspectivePaths[0]!, "utf8")).toBe(independent);
+  });
 
   it("unavailable deep review pauses and retains completed independent perspectives on unchanged resume", async () => {
     const { dir, root, firstStep, firstPerspectivePaths, firstManifest } = await prepareRetryFixture();

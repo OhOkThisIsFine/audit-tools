@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "audit_results.schema.json",
   "title": "Audit Results",
   "type": "array",
@@ -137,7 +137,29 @@
                 "required": [
                   "path"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "oneOf": [
+                  {
+                    "required": [
+                      "quoted_text"
+                    ],
+                    "properties": {
+                      "quoted_text": {
+                        "pattern": "\\S"
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "no_quotable_span"
+                    ],
+                    "properties": {
+                      "no_quotable_span": {
+                        "pattern": "\\S"
+                      }
+                    }
+                  }
+                ]
               },
               "minItems": 1
             },

@@ -37,26 +37,22 @@ export const WORKER_REFUSED_LOCATION_FIELDS = {
     "line_end is derived at ingest from where quoted_text occurs and must not be supplied",
 } as const;
 
+const NONBLANK_LOCATION_TEXT = /\S/;
+const LOCATION_EVIDENCE_FIELDS = ["quoted_text", "no_quotable_span"] as const;
+
 export const WorkerFindingLocationSchema = FindingLocationObjectSchema.omit({
   line_start: true,
   line_end: true,
 })
   .strict()
-  // The audit draw's grounding rule, enforced at the SCHEMA so the host door
-  // (`parseFindings`) and the generated JSON schema state it without a second
-  // hand-written check. The sentence is the shared constant the dispatch prompt
-  // renders, so the ask and the refusal are the same words.
+  // The audit draw's grounding rule. The portable renderer below uses the
+  // same fields and nonblank predicate; the dispatch prompt shares the refusal text.
   //
   // It is on the WORKER projection and not on the shared location schema on
   // purpose: a remediator plan finding is re-minted from graph nodes, so it has
   // no reviewer who could quote a span or declare that none exists.
   .superRefine((location, ctx) => {
-    const quoted =
-      typeof location.quoted_text === "string" &&
-      location.quoted_text.trim().length > 0;
-    const declared =
-      typeof location.no_quotable_span === "string" &&
-      location.no_quotable_span.trim().length > 0;
+    const [quoted, declared] = LOCATION_EVIDENCE_FIELDS.map(field => NONBLANK_LOCATION_TEXT.test(location[field] ?? ""));
     if (quoted === declared) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -279,10 +275,18 @@ export function renderWorkerJsonSchema(
   const generated = zodToJsonSchema(entry.schema, {
     $refStrategy: "none",
     target: "jsonSchema7",
+    // Zod refinements do not project automatically. oneOf accepts exactly one
+    // branch whose field is present and nonblank, just like the runtime check.
+    postProcess: (schema, def) => def === WorkerFindingLocationSchema._def && schema
+      ? { ...schema, oneOf: LOCATION_EVIDENCE_FIELDS.map(field => ({
+          required: [field],
+          properties: { [field]: { pattern: NONBLANK_LOCATION_TEXT.source } },
+        })) }
+      : schema,
   }) as Record<string, unknown>;
   delete generated.$schema;
   return {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
+    $schema: "http://json-schema.org/draft-07/schema#",
     $id: filename,
     title: entry.title,
     ...generated,

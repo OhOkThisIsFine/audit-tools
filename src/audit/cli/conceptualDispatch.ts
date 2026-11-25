@@ -4,12 +4,16 @@ import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 import { INDEPENDENT_CONTEXT, renderFanoutExecutionLines } from "../../shared/prompts.js";
 // sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/conceptual-independent-guidance.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import {
+  isFileMissingError,
+  isJsonParseError,
   type DesignReviewBinding,
   type IntentCheckpoint,
   charterReviewDisposition,
   readTrailingSubmissionRefusals,
   resolveDesignReviewBinding,
 } from "audit-tools/shared";
+import { z } from "zod";
+import { readAuditReviewSubmission, ReviewUnavailableError } from "./reviewSubmission.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import {
@@ -25,6 +29,7 @@ import type { FanoutLaneSpec } from "./fanoutLanes.js";
 import {
   clearConceptualReviewRoundManifest,
   conceptualReviewRoundManifestPath,
+  parseConceptualPerspectiveFindings,
   readConceptualReviewRoundManifest,
   writeConceptualReviewRoundManifest,
 } from "../types/conceptualAdjudication.js";
@@ -454,10 +459,17 @@ export async function prepareConceptualDispatch(opts: {
   // the narrative tells the host to actually run: a delivered lane is never
   // re-instructed and its landed submission is never clobbered, because the
   // host is simply never told to write there again.
-  const pendingLaneIds = new Set(fanout.pendingLanes.map((lane) => lane.id));
-  const pendingPerspectives = perspectivePrompts
-    .map((f, i) => ({ ordinal: i + 1, f }))
-    .filter(({ f }) => pendingLaneIds.has(f.lane));
+  const pendingPerspectives: Array<{ ordinal: number; f: (typeof perspectivePrompts)[number] }> = [];
+  for (const [i, f] of perspectivePrompts.entries()) {
+    try {
+      const result = await readAuditReviewSubmission<unknown>(f.resultsPath, artifactsDir, f.lane, semanticInputRevision);
+      parseConceptualPerspectiveFindings(result);
+    } catch (error) {
+      if (!(error instanceof ReviewUnavailableError) && !(error instanceof z.ZodError) &&
+          !isFileMissingError(error) && !isJsonParseError(error)) throw error;
+      pendingPerspectives.push({ ordinal: i + 1, f });
+    }
+  }
   const pendingCount = pendingPerspectives.length;
   const deliveredCount = perspectivePrompts.length - pendingCount;
 

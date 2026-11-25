@@ -1,5 +1,6 @@
 import { test, expect, describe, it } from "vitest";
 import assert from "node:assert/strict";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -145,4 +146,41 @@ test("WorkerAuditTaskSchema line_ranges enforces end >= start", () => {
       }),
     /line range end must be >= start/,
   );
+});
+
+test("portable finding locations enforce the same nonblank evidence XOR as worker ingestion", async () => {
+  const validator = new AjvJsonSchemaValidator();
+  const load = async (filename: string) => validator.getValidator(
+    JSON.parse(await readFile(join(schemasDir, filename), "utf8")),
+  );
+  const [findingJson, resultJson, resultsJson] = await Promise.all([
+    load("finding.schema.json"), load("audit_result.schema.json"), load("audit_results.schema.json"),
+  ]);
+  const result = {
+    task_id: "task-1", unit_id: "unit-1", pass_id: "pass:behavior",
+    lens: "architecture", file_coverage: [{ path: "src/a.ts", total_lines: 1 }],
+  };
+  const finding = {
+    id: "f", title: "title", category: "category", severity: "medium", confidence: "high",
+    lens: "architecture", summary: "summary",
+  };
+  const whitespace = " \t\n\u00a0\u2028\ufeff";
+  for (const [quote, declaration, valid] of [
+    [undefined, undefined, false], [whitespace, undefined, false],
+    [undefined, whitespace, false], ["", "", false], ["excerpt", "explanation", false],
+    ["excerpt", undefined, true], [undefined, "explanation", true],
+    ["excerpt", whitespace, true], [whitespace, "explanation", true],
+    ["excerpt", "", false], ["\u0085", undefined, true],
+  ] as const) {
+    const candidate = { ...finding, affected_files: [{
+      path: "src/a.ts",
+      ...(quote === undefined ? {} : { quoted_text: quote }),
+      ...(declaration === undefined ? {} : { no_quotable_span: declaration }),
+    }], evidence: ["src/a.ts"] };
+    const entry = { ...result, findings: [candidate] };
+    expect(WorkerFindingSchema.safeParse(candidate).success).toBe(valid);
+    expect(findingJson(candidate).valid).toBe(valid);
+    expect(resultJson(entry).valid).toBe(valid);
+    expect(resultsJson([entry]).valid).toBe(valid);
+  }
 });

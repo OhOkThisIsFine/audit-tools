@@ -402,3 +402,10 @@ test("pre-tag suite exercises the exact publish runtime, not only its floating m
     expect(setup?.with?.["node-version"]).toBe("${{ env.RELEASE_NODE_VERSION }}");
   }
 });
+
+test("wrapper-only changes trigger routine tests on main pushes and pull requests", async () => {
+  const suite = parseYaml(await readWorkflow("audit-code-test-suite.yml"));
+  for (const event of ["push", "pull_request"]) {
+    expect(suite.on[event].paths).toContain("wrapper/**");
+  }
+});

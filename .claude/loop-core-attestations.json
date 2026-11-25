@@ -491,6 +491,24 @@
         "src/remediate/steps/nextStep.ts": "b1a1a5987bbc151afde71db8d9be3b5a77a3b563"
       }
     },
+    "93ab3b5081cedfc1": {
+      "reviewed_by": "dot-dogfood-narrative",
+      "attester_class": "agent",
+      "checked": "Checked unchanged-round reuse against unavailable and invalid bound perspective submissions, preservation of independent sibling bytes and lane paths, linked charter and uncertainty in deep judge context, and malformed or wrong-pass snapshots reopening only the damaged pass while non-ENOENT I/O remains fatal.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "fbdd697ec5d679f7d2f07b41d88ecd4b28ee793c",
+        "ran_at": "2026-11-25T16:05:14.088Z"
+      },
+      "attested_at": "2026-11-25T16:05:51.191Z",
+      "vouches": {
+        "src/audit/cli/conceptualDispatch.ts": "22298927ee90061614e8d5d78e15de7cf2d0fab9",
+        "src/audit/orchestrator/designReviewPrompt.ts": "3ffafe53bdba0f1105471b7ab22336895b1285c0",
+        "src/audit/orchestrator/designReviewSnapshot.ts": "25c708ee29c98347dbaf3e4d0188b83ef19bb5eb"
+      }
+    },
     "9ae8f3b83f558bae": {
       "reviewed_by": "claude-session:7e4d0c11 (author self-review; owner chose the wording)",
       "attester_class": "agent",
@@ -867,7 +885,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "5a1d216870700235"
+      "review": "93ab3b5081cedfc1"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "review": "e36223304299f9c6"
@@ -978,10 +996,10 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "e36223304299f9c6"
+      "review": "93ab3b5081cedfc1"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
-      "review": "f20b857654eebefb"
+      "review": "93ab3b5081cedfc1"
     },
     "src/audit/orchestrator/designReviewTask.ts": {
       "review": "f20b857654eebefb"

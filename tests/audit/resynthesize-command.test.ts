@@ -1,4 +1,5 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
+import * as artifactTreeHold from "../../src/shared/io/artifactTreeHold.js";
 import { mkdir, mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -320,4 +321,33 @@ test("resynthesize exits with code 1 and names the missing file when audit-findi
     expect(exitCode, "Should exit 1 when audit-findings.json is missing").toBe(1);
     expect(stderr.includes("audit-findings.json"), `stderr should name the missing file, got: ${stderr}`).toBeTruthy();
   });
+});
+
+test("resynthesize leaves promoted Markdown untouched if the final ownership check rejects", async () => {
+  const hold = vi.spyOn(artifactTreeHold, "withArtifactTreeHold")
+    .mockImplementationOnce(async (_dir, _logger, run) => run(async () => {
+      throw new Error("report lock was lost");
+    }));
+  try {
+    await withTempRoot(async root => {
+      const dir = join(root, ".audit-tools");
+      const active = join(dir, "audit");
+      await mkdir(active, { recursive: true });
+      const plan = makePlan();
+      const bytes = JSON.stringify(currentReport(plan));
+      const markdown = join(dir, "audit-report.md");
+      await writeFile(join(dir, "audit-findings.json"), bytes);
+      await writeFile(join(active, "audit-findings.json"), bytes);
+      await writeFile(join(active, "review_plan.json"), JSON.stringify(plan));
+      await writeFile(markdown, "preserved report");
+
+      const result = await runResynthesize([process.execPath, "cli.ts", "resynthesize", "--root", root]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("report lock was lost");
+      expect(result.stdout).toBe("");
+      expect(await readFile(markdown, "utf8")).toBe("preserved report");
+    });
+  } finally {
+    hold.mockRestore();
+  }
 });

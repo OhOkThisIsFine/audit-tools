@@ -5,9 +5,10 @@ import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRe
  */
 
 import { test, describe, it, expect, afterEach } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 import {
   prepareConceptualDispatch,
   renderReuseNotice,
@@ -421,8 +422,8 @@ describe("deep conceptual resume narrows the instruction surface, not the access
     ];
 
     // Perspective 1 lands its submission; the round itself is unchanged.
-    await mkdir(dirname(deliveredPath), { recursive: true });
-    await writeFile(deliveredPath, "[]", "utf8");
+    const manifest = JSON.parse(await readFile(first.artifactPaths.conceptual_round_manifest!, "utf8"));
+    await writeBoundReviewFixture(dir, manifest.perspectives[0].lane_id, []);
 
     const resumed = await prepareConceptualDispatch({
       artifactsDir: dir,

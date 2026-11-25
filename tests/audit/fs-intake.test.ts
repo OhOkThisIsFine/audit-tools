@@ -1,7 +1,19 @@
-import { test, onTestFinished, expect } from "vitest";
+import { test, onTestFinished, expect, vi } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const failures = vi.hoisted(() => ({ unreadableDirectory: "" }));
+vi.mock("node:fs/promises", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    readdir: async (...args: Parameters<typeof fs.readdir>) => {
+      if (args[0] === failures.unreadableDirectory) throw Object.assign(new Error("synthetic denied read"), { code: "EACCES" });
+      return await fs.readdir(...args);
+    },
+  };
+});
 
 const { buildRepoManifestFromFs } = await import("../../src/audit/extractors/fsIntake.js");
 
@@ -60,28 +72,18 @@ test("walk logs a warning and continues when readdir throws", async () => {
     });
     console.warn = (...args) => warnings.push(args.join(" "));
 
-    // Patch readdir on the fsIntake module by replacing the imported readdir via
-    // the node:fs/promises mock. Since we can't easily mock the import, we
-    // instead create a directory whose name triggers a readdir error by using a
-    // symlink to a non-existent target (Windows-safe: just remove after creating).
-    // Simpler approach: verify the warning branch by creating a directory that
-    // cannot be read via chmod — but chmod is not available on Windows.
-    // Instead, use a mock-friendly approach: verify that a normal walk succeeds
-    // (no warnings for readable directories) and that the results contain the
-    // expected file.
+    const unreadable = join(root, "sub");
+    failures.unreadableDirectory = unreadable;
+    onTestFinished(() => { failures.unreadableDirectory = ""; });
     const manifest = await buildRepoManifestFromFs({ root });
 
-    const okEntry = manifest.files.find((f) => f.path.includes("ok.js"));
-    expect(okEntry, "ok.js should be in results").toBeTruthy();
-    const nestedEntry = manifest.files.find((f) => f.path.includes("nested.js"));
-    expect(nestedEntry, "nested.js should be in results").toBeTruthy();
-
-    // No warnings for a clean walk
-    expect(warnings.filter((w) => w.includes("skipping unreadable directory")).length, "no unreadable-directory warnings expected for a clean walk").toBe(0);
+    expect(manifest.files.map(file => file.path)).toEqual(["ok.js"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`skipping unreadable directory: ${unreadable} (synthetic denied read)`);
   });
 });
 
-test("walk logs a warning and continues when stat throws", async () => {
+test("walk inventories readable files without warnings", async () => {
   await withTempRepo(async (root) => {
     await writeFile(join(root, "file-a.js"), "export const a = 1;\n");
     await writeFile(join(root, "file-b.js"), "export const b = 2;\n");

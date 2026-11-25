@@ -23,6 +23,7 @@ on:
       - templates/**
       - skills/**
       - scripts/**
+      - wrapper/**
       - "*.mjs"
       - .github/workflows/**
       - package.json
@@ -52,6 +53,7 @@ on:
       - templates/**
       - skills/**
       - scripts/**
+      - wrapper/**
       - "*.mjs"
       - .github/workflows/**
       - package.json

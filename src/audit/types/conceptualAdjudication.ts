@@ -274,7 +274,7 @@ export function deriveConceptualVerificationStatus(
   }));
 }
 
-function submissionFindings(value: unknown): Finding[] {
+export function parseConceptualPerspectiveFindings(value: unknown): Finding[] {
   const envelope = z
     .union([
       z.array(SubmittedDesignFindingSchema),
@@ -321,7 +321,7 @@ export async function loadConceptualPerspectiveFindings(
     seen.add(contributor.contributor_id);
     try {
       const value = await readSubmission(contributor.result_path, contributor.lane_id);
-      out.set(contributor.contributor_id, submissionFindings(value));
+      out.set(contributor.contributor_id, parseConceptualPerspectiveFindings(value));
     } catch (error) {
       // Do not turn an unreadable or missing file into a malformed submission.
       if (!(error instanceof z.ZodError) && !isJsonParseError(error)) throw error;

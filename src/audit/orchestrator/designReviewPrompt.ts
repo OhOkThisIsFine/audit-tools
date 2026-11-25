@@ -997,6 +997,7 @@ export function renderConceptualJudgePrompt(
   options: DesignReviewOptions = {},
 ): string {
   const maxUnits = resolveMaxUnits(bundle, options);
+  const charterContext = renderCharterContext(bundle);
   const sources = perspectiveResults.map(
     (p, i) =>
       `${i + 1}. **${p.name}** — contributor \`${p.contributor_id}\` — \`${p.path}\``,
@@ -1014,6 +1015,7 @@ export function renderConceptualJudgePrompt(
     // graph's provenance (and, below, without the operator's lens selection).
     renderSharedStructuralContext(bundle, maxUnits),
     ...renderLensScope(options),
+    ...(charterContext ? [charterContext] : []),
     "## Perspective result files",
     "",
     "Read each of these review-submission/v1 JSON envelopes. The domain findings are in `result.findings`; `review` declares the reviewer context. If a perspective declares degraded or unavailable, stop and request an independent replacement instead of treating it as completed review:",

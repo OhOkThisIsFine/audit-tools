@@ -48,7 +48,7 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
         reflections: await readQuestionReportReflections(artifactsDir),
         ...await readQuestionReportCharterOptions(artifactsDir),
       });
-      assertOwnership();
+      await assertOwnership();
       await writeTextFile(reportPath, markdown);
       outputJson({
         source: inputPath,
