@@ -1,7 +1,7 @@
 import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -185,6 +185,27 @@ test("runFirstAvailableCommand keeps the event loop alive while its child runs",
     await rm(root, { recursive: true, force: true });
   }
   expect(ticks, "the heartbeat must beat while the child runs").toBeGreaterThan(0);
+});
+
+test("runFirstAvailableCommand returns the first resolved command's failure without running a fallback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "local-cmd-no-fallback-"));
+  const invocationLog = join(root, "invocations.txt");
+  const candidate = (label: string, exitCode: number) => ({
+    command: process.execPath,
+    args: ["-e", `require("node:fs").appendFileSync("invocations.txt", ${JSON.stringify(label)}); process.exitCode = ${exitCode};`],
+    display: label,
+  });
+
+  try {
+    const result = await runFirstAvailableCommand(root, [
+      candidate("first", 7),
+      candidate("fallback", 0),
+    ]);
+    expect(result).toMatchObject({ candidate: { display: "first" }, exitCode: 7 });
+    expect(await readFile(invocationLog, "utf8")).toBe("first");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("runFirstAvailableCommand prefers PATHEXT shims over extensionless files on Windows", async (t) => {

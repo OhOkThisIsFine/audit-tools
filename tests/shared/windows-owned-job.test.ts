@@ -80,6 +80,24 @@ test("accounting failure exits with ownership intact and no empty claim", async 
   expect(vi.getTimerCount()).toBe(0);
 });
 
+test("final release failure reports an ownership error rather than an empty job or success", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  f.releaseEmpty.mockImplementation(() => { throw new Error("release denied"); });
+  await runWindowsOwnedJob(f.runtime, async () => f);
+  f.start({ argv: ["fixture"], env: {} });
+  f.child.emit("exit", 0, null);
+  vi.advanceTimersByTime(10);
+  expect(f.releaseEmpty).toHaveBeenCalledOnce();
+  expect(f.messages).toEqual([
+    { type: "ready" },
+    { type: "root_exit", code: 0, signal: null },
+    { type: "error", code: "EOWNERSHIP", message: "release denied" },
+  ]);
+  expect(f.exit.mock.calls).toEqual([[1]]);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 test("owner disconnect cancels polling without releasing a live job", async () => {
   vi.useFakeTimers();
   const f = fixture();

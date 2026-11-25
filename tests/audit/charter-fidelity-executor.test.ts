@@ -92,8 +92,11 @@ describe("runCharterFidelityExecutor", () => {
       rationale: "both slices say so",
       decided_by: "lane",
     });
-    expect(byId.get("diff-2")!.fidelity?.verdict).toBe("unverifiable");
-    expect(byId.get("diff-2")!.fidelity?.decided_by).toBe("tool");
+    expect(byId.get("diff-2")!.fidelity).toEqual({
+      verdict: "unverifiable",
+      rationale: "no verdict returned by the fidelity lane for this difference",
+      decided_by: "tool",
+    });
     expect(reg.findings).toHaveLength(1);
     expect(reg.findings[0]!.affected_files.map((f) => f.path)).toEqual(["src/a.ts"]);
   });

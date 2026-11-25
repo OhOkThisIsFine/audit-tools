@@ -81,6 +81,17 @@ describe("runStepCommand", () => {
     expect(stepCalls[0]).toMatchObject({ preferredExecutor: "synthesis_executor" });
   });
 
+  it("uses an explicit alternate artifacts directory for both execution and the printed envelope", async () => {
+    const artifactsDir = join(root, "alternate audit");
+    await runStepCommand(["--root", root, "--artifacts-dir", artifactsDir], {
+      mode: "executor",
+      preferredExecutor: "intake_executor",
+    });
+
+    expect(stepCalls).toEqual([{ root, artifactsDir, preferredExecutor: "intake_executor" }]);
+    expect(JSON.parse(printed()).artifacts_dir).toBe(artifactsDir);
+  });
+
   it("warns about a non-git root ONLY when the command asks", async () => {
     await runStepCommand(["--root", root], {
       mode: "executor",

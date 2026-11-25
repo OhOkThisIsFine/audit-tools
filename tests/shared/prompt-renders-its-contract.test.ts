@@ -255,6 +255,15 @@ describe(FAILURE_SIGNATURE, () => {
     }
   });
 
+  it("tells the charter fidelity reviewer that an omitted difference remains unjudged", () => {
+    const prompt = renderCharterFidelityPrompt({
+      submissionPath: "x/fidelity.json",
+      packetPath: "x/fidelity-packet.md",
+    });
+    expect(prompt).toMatch(/difference you leave out stays unjudged/i);
+    expect(prompt).toMatch(/never assumes `supported`/i);
+  });
+
   it("renders a charter-FIDELITY example that is itself a valid submission", () => {
     // The third instance of the same class, one step further down the charter
     // layer. The fidelity example wrote both alternations into field VALUES
