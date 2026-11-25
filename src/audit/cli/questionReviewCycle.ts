@@ -8,7 +8,7 @@ import { decideNextStep } from "../orchestrator/nextStep.js";
 import { probeScopeIndexKeyCached, type ScopeIndexMemo } from "../orchestrator/scopeIndexBaseline.js";
 import { computeStaleArtifacts } from "../orchestrator/staleness.js";
 import { ingestAuditQuestionResults, readAuditQuestionLedger } from "./dispatch/hostHandoff.js";
-import { projectQuestionReview, type AuditQuestionBinding } from "./dispatch/questionReviewAcceptance.js";
+import { indexQuestionDependencies, projectQuestionReview, type AuditQuestionBinding } from "./dispatch/questionReviewAcceptance.js";
 import { ensureQuestionReviewRunIdUnlocked } from "./questionReviewSession.js";
 import { questionWorkloadBindings } from "./questionWorkloadBindings.js";
 import type { ReviewReopenEvent } from "../../shared/types/reviewQuestion.js";
@@ -59,10 +59,10 @@ export async function deriveQuestionCycleUnlocked(options: QuestionCycleOptions)
       if (isFileMissingError(error)) return ledgerOnly;
       throw error;
     });
-  const currentInputs = [...sourceFiles].map(([key, fingerprint]) => ({ kind: "source" as const, key, fingerprint }));
-  const dependenciesByQuestion = new Map(bindings.map(binding => [binding.question.question_id, [
-    ...binding.dependencies, ...currentInputs, ...binding.evidence.flatMap(item => item.dependencies),
-  ]] as const));
+  const sourceIndex = indexQuestionDependencies([...sourceFiles].map(([key, fingerprint]) => ({ kind: "source" as const, key, fingerprint })));
+  const dependenciesByQuestion = new Map(bindings.map(binding => [binding.question.question_id, {
+    sourceIndex, local: [...binding.dependencies, ...binding.evidence.flatMap(item => item.dependencies)],
+  }] as const));
   const pending = bindings.filter(binding => {
     const active = projectQuestionReview(binding.question, ingestion.answers,
       dependenciesByQuestion.get(binding.question.question_id), ingestion.adjudications);

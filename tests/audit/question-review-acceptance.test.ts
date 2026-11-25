@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { projectQuestionReview, reviewAnswerDisposition, type AuditQuestionBinding } from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
+import { indexQuestionDependencies, projectQuestionReview, reviewAnswerDisposition, type AuditQuestionBinding } from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
 import { adjudicateAuditQuestionResult, consolidateAuditQuestionFindings, ingestAuditQuestionResults, publishAuditQuestionWorkload, readAuditQuestionLedger, readAuditQuestionWorkload, reopenAuditQuestions, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
-import { REVIEW_QUESTION_CONTRACT_VERSION, questionReopenDependencies, type ReviewEvidence, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, questionReopenDependencies, type ReviewAcceptedAnswer, type ReviewEvidence, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
 const v = REVIEW_QUESTION_CONTRACT_VERSION;
 const identity = { schema_version: v, question_id: "resume", revision_id: "r1", snapshot_id: "s1" } as const;
@@ -43,6 +43,22 @@ async function fixture(run: (root: string) => Promise<void>) {
 }
 
 describe("question review acceptance", () => {
+  it("projects the same current and stale history using one shared frozen-source index", () => {
+    const { question } = makeBinding("a");
+    const answers: ReviewAcceptedAnswer[] = [{ schema_version: v, accepted_at: "2026-01-01T00:00:00Z",
+      submission: submission("a", "clean"), dependency_bindings: [source, membership] }];
+    const cases = [source, { ...source, fingerprint: "manual-v2" }];
+    for (const frozen of cases) {
+      const legacy = projectQuestionReview(question, answers, [frozen, membership]);
+      const indexed = projectQuestionReview(question, answers, {
+        sourceIndex: indexQuestionDependencies([frozen]), local: [membership],
+      });
+      expect(indexed).toEqual(legacy);
+      expect(indexed.current).toHaveLength(frozen === source ? 1 : 0);
+      expect(indexed.stale).toHaveLength(frozen === source ? 0 : 1);
+    }
+  });
+
   it.each(["unsupported", "blocked", "conflicted", "adjudicated"] as const)(
     "does not reserve any claim for a %s consolidation",
     async problem => fixture(async root => {

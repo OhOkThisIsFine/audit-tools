@@ -153,16 +153,6 @@ describe("the async CLI bound fails at the command, not as a test-ceiling abort"
     // precisely the unattributable signal the bound exists to replace.
     expect(error, "a child that never exits must reject, not resolve").not.toBeNull();
     expect(elapsed, `rejection must happen at the bound, took ${String(elapsed)}ms`).toBeLessThan(60_000);
-  });
-
-  it("the rejection NAMES the command, the bound, and the child — not just 'timed out'", async () => {
-    const error = await runBounded(process.execPath, NEVER_EXITS, {
-      timeoutMs: 1_500,
-      killGraceMs: 500,
-    }).then(
-      () => null,
-      (caught: Error) => caught,
-    );
 
     // A bare "timed out" is the message this replaces: the reader had to guess
     // which of a walk's many CLI calls wedged.

@@ -3,7 +3,7 @@ import { compareCodeUnits, stableStringify, uniqueSorted } from "audit-tools/sha
 import type { AuditRead } from "../../shared/types/finding.js";
 import {
   REVIEW_QUESTION_CONTRACT_VERSION,
-  type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence,
+  type CurrentQuestionDependencies, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewEvidence,
   type ReviewFindingClaim, type ReviewPlan, type ReviewQuestion, type ReviewReopenEvent,
 } from "../../shared/types/reviewQuestion.js";
 import {
@@ -23,7 +23,7 @@ export interface QuestionReportInput {
   plan: ReviewPlan;
   accepted: readonly ReviewAcceptedAnswer[];
   evidence: readonly ReviewEvidence[];
-  dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
+  dependenciesByQuestion: ReadonlyMap<string, CurrentQuestionDependencies>;
   adjudications?: readonly ReviewAdjudication[];
   consolidations?: readonly Decisions[number][];
   reopens?: readonly ReviewReopenEvent[];
@@ -33,9 +33,9 @@ export interface QuestionReportInput {
 export function projectQuestionForReport(
   question: ReviewQuestion, history: readonly ReviewAcceptedAnswer[], adjudications: readonly ReviewAdjudication[],
   evidence: ReadonlyMap<string, ReviewEvidence>,
-  dependencies: readonly ReviewDependency[] | undefined,
+  dependencies: CurrentQuestionDependencies | undefined,
 ): { row: QuestionRow; claims: Claim[] } {
-  const { current: live, stale } = projectQuestionReview(question, history, dependencies?.slice());
+  const { current: live, stale } = projectQuestionReview(question, history, dependencies);
   const ids = new Set(live.map(({ submission }) => submission.submission_id));
   const decisions = adjudications.filter(decision => decision.question_id === question.question_id &&
     decision.revision_id === question.revision_id && decision.snapshot_id === question.snapshot_id &&

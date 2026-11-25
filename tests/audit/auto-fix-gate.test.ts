@@ -137,20 +137,8 @@ describe("phase-1 auto-fix opt-out and dry-run gate", () => {
       const applied = result.updated_bundle.auto_fixes_applied as AutoFixesApplied;
       expect(applied.executed_tools).toEqual([]);
       expect(applied.failed_tools).toEqual([]);
-    });
-  });
-
-  it("the gate names itself in the step summary, so a skipped phase is never silent", async () => {
-    await withTempDir("auto-fix-summary-", async (root: string) => {
-      await prepareRepo(root);
-
-      const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
-        root,
-        preferredExecutor: "auto_fix_executor",
-        autoFix: { enabled: true, dryRun: true },
-      });
-
       expect(result.progress_summary.toLowerCase()).toContain("dry run");
     });
   });
+
 });

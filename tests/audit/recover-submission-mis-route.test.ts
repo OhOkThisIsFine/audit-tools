@@ -107,7 +107,7 @@ async function payload(dir: string, refs: string[]): Promise<string> {
 }
 
 describe("recover-submission refuses a MIS-ROUTED extraction payload", () => {
-  it("refuses a payload citing a path this lane's packet never delivered, and names it", async () => {
+  it("refuses an undelivered citation and names both the path and the intended lane", async () => {
     const artifactsDir = await fixture(["docs/goals.md"]);
     const from = await payload(artifactsDir, ["src/a.ts"]);
     await expect(
@@ -119,22 +119,7 @@ describe("recover-submission refuses a MIS-ROUTED extraction payload", () => {
         "--from",
         from,
       ]),
-    ).rejects.toThrow(/src\/a\.ts/);
-  });
-
-  it("states WHICH lane the payload was aimed at, so the operator can fix the flag", async () => {
-    const artifactsDir = await fixture(["docs/goals.md"]);
-    const from = await payload(artifactsDir, ["src/a.ts"]);
-    await expect(
-      cmdRecoverSubmission([
-        "--artifacts-dir",
-        artifactsDir,
-        "--lane",
-        "charter_extraction_stated",
-        "--from",
-        from,
-      ]),
-    ).rejects.toThrow(/'stated' lane/);
+    ).rejects.toThrow(/(?=[\s\S]*src\/a\.ts)(?=[\s\S]*'stated' lane)/);
   });
 
   it("refuses when the lane has NO packet manifest — there is no lane to rescue onto", async () => {

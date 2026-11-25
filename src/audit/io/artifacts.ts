@@ -56,7 +56,7 @@ import type { CharterClarificationRegister } from "../types/charterClarification
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
-import { ReviewPlanSchema, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence, type ReviewPlan, type ReviewQuestion, type ReviewReopenEvent, type ReviewToolingQualification, type ReviewToolingTransition } from "../../shared/types/reviewQuestion.js";
+import { ReviewPlanSchema, type CurrentQuestionDependencies, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewEvidence, type ReviewPlan, type ReviewQuestion, type ReviewReopenEvent, type ReviewToolingQualification, type ReviewToolingTransition } from "../../shared/types/reviewQuestion.js";
 import { QuestionAuditFindingsReportSchema, QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION, type ReviewFindingConsolidation } from "../../shared/types/questionReviewReport.js";
 import { readVerifiedCharterPacketIndex } from "../orchestrator/charterPacketArchive.js";
 import { renderAuditReportMarkdown, type RenderAuditReportOptions } from "../reporting/synthesis.js";
@@ -173,7 +173,7 @@ export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
     answers: readonly ReviewAcceptedAnswer[];
     evidence: readonly ReviewEvidence[];
     adjudications: readonly ReviewAdjudication[];
-    dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
+    dependenciesByQuestion: ReadonlyMap<string, CurrentQuestionDependencies>;
     consolidations: readonly ReviewFindingConsolidation[];
     reopens?: readonly ReviewReopenEvent[];
   };

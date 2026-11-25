@@ -1,8 +1,9 @@
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 // sites-pinned: tests/audit/audit-cli-correctness.test.ts
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { AUDIT_FINDINGS_FILENAME, AUDIT_REPORT_FILENAME, auditToolsDir, writeJsonFile, writeTextFile } from "audit-tools/shared";
+import { AUDIT_FINDINGS_FILENAME, AUDIT_REPORT_FILENAME, auditToolsDir, writeTextFile } from "audit-tools/shared";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAcceptedAnswer, type ReviewFindingClaim, type ReviewPlan } from "../../shared/types/reviewQuestion.js";
 import { QuestionAuditFindingsReportSchema } from "../../shared/types/questionReviewReport.js";
@@ -65,17 +66,27 @@ export async function runSample(argv: string[] = process.argv): Promise<void> {
     : getArtifactsDir(argv);
   await withArtifactTreeHold(artifactsDir, undefined, async assertOwnership => {
     await assertNoPendingFoldReceipt(artifactsDir);
-    const protectedNames = ["audit_state.json", "review_session.json", "review_plan.json", AUDIT_FINDINGS_FILENAME, AUDIT_REPORT_FILENAME];
-    if (!hasFlag(argv, "--force") && protectedNames.some(name => existsSync(join(artifactsDir, name)))) {
-      console.error("Refusing to overwrite an audit state or report. Use --force only for a disposable sample target.");
-      process.exitCode = 1;
-      return;
-    }
     const { auditFindings, auditReport } = buildSampleAuditBundle();
     const findingsPath = join(artifactsDir, AUDIT_FINDINGS_FILENAME);
     const reportPath = join(artifactsDir, AUDIT_REPORT_FILENAME);
-    await assertOwnership();
-    await writeJsonFile(findingsPath, auditFindings);
+    const findingsText = JSON.stringify(auditFindings, null, 2) + "\n";
+    const force = hasFlag(argv, "--force");
+    const findingsExist = existsSync(findingsPath);
+    if (!force) {
+      const protectedNames = ["audit_state.json", "review_session.json", "review_plan.json", AUDIT_REPORT_FILENAME];
+      // Normal publication writes findings first. Resume only the exact
+      // deterministic sample output, never an unrelated partial or an audit.
+      if (protectedNames.some(name => existsSync(join(artifactsDir, name))) ||
+          (findingsExist && !(await readFile(findingsPath)).equals(Buffer.from(findingsText)))) {
+        console.error("Refusing to overwrite an audit state or report. Use --force only for a disposable sample target.");
+        process.exitCode = 1;
+        return;
+      }
+    }
+    if (force || !findingsExist) {
+      await assertOwnership();
+      await writeTextFile(findingsPath, findingsText);
+    }
     await assertOwnership();
     await writeTextFile(reportPath, auditReport);
     outputJson({ sample: true, artifacts_dir: artifactsDir, findings: findingsPath, report: reportPath });

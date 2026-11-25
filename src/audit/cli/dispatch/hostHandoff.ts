@@ -8,7 +8,7 @@ import { STEP_CONTRACT_VERSION } from "../steps.js";
 // task-bindings version bump whose refusal names the remedy)
 import type { ArtifactBundle } from "../../io/artifacts.js";
 import { acceptQuestionReview, projectQuestionReview, validateQuestionAdjudication, validateQuestionSource, type AuditQuestionBinding } from "./questionReviewAcceptance.js";
-import { REVIEW_QUESTION_CONTRACT_VERSION, ReviewAcceptedAnswerSchema, ReviewAdjudicationSchema, ReviewAssignmentSchema, ReviewDependencySchema, ReviewEvidenceSchema, ReviewQuestionSchema, ReviewReopenEventSchema, ReviewReopenRequestSchema, ReviewSubmissionSchema, questionReopenDependencies, type ReviewReopenEvent, type ReviewReopenRequest, type ReviewToolingQualification, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence, type ReviewQuestion } from "../../../shared/types/reviewQuestion.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, ReviewAcceptedAnswerSchema, ReviewAdjudicationSchema, ReviewAssignmentSchema, ReviewDependencySchema, ReviewEvidenceSchema, ReviewQuestionSchema, ReviewReopenEventSchema, ReviewReopenRequestSchema, ReviewSubmissionSchema, questionReopenDependencies, type ReviewReopenEvent, type ReviewReopenRequest, type ReviewToolingQualification, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewEvidence, type ReviewQuestion, type CurrentQuestionDependencies } from "../../../shared/types/reviewQuestion.js";
 import { projectQuestionForReport } from "../../reporting/questionReport.js";
 import { questionClaimKey, ReviewFindingConsolidationSchema, type ReviewFindingConsolidation } from "../../../shared/types/questionReviewReport.js";
 import { z } from "zod";
@@ -788,7 +788,7 @@ export async function reopenAuditQuestions(params: QuestionBoundary & {
   request: ReviewReopenRequest;
   qualification?: ReviewToolingQualification;
   questions: readonly ReviewQuestion[];
-  dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
+  dependenciesByQuestion: ReadonlyMap<string, CurrentQuestionDependencies>;
 }) {
   const paths = resolveBoundaryPaths(params);
   const request = ReviewReopenRequestSchema.parse(params.request);
@@ -837,7 +837,7 @@ export async function consolidateAuditQuestionFindings(params: QuestionBoundary 
   decision: ReviewFindingConsolidation;
   questions: readonly ReviewQuestion[];
   evidence: readonly ReviewEvidence[];
-  dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
+  dependenciesByQuestion: ReadonlyMap<string, CurrentQuestionDependencies>;
 }) {
   const paths = resolveBoundaryPaths(params);
   const decision = ReviewFindingConsolidationSchema.parse(params.decision);

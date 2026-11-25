@@ -275,22 +275,6 @@ test("cmdStatus degrades to no run when no active review run exists, even with r
   });
 });
 
-test("cmdStatus exits cleanly with a clear message when no audit_state.json exists", async () => {
-  await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    // No audit_state.json written
-
-    const result = await runStatus(artifactsDir);
-
-    expect(result.exitCode, "Should exit with code 1 when no audit_state.json").toBe(1);
-
-    // Should produce a human-readable message, not throw
-    const combined = result.stdout + result.stderr;
-    expect(combined, "Should include explanatory message").toMatch(/no active audit|audit_state/i);
-  });
-});
-
 test("cmdStatus outputs structured JSON with status no_active_audit when audit_state.json is missing", async () => {
   await withTempDir(async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
@@ -312,6 +296,8 @@ test("cmdStatus outputs structured JSON with status no_active_audit when audit_s
     expect(parsed.status).toBe("no_active_audit");
     expect(typeof parsed.error).toBe("string");
     expect(parsed.error.length > 0, "error field should be a non-empty string").toBeTruthy();
+
+    expect(parsed.error, "Should include an explanatory message").toMatch(/no active audit|audit_state/i);
 
     // Nothing written to stderr on this path
     expect(result.stderr.trim(), "nothing should be written to stderr on no-active-audit path").toBe("");

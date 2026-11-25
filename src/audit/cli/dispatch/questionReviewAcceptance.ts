@@ -1,7 +1,7 @@
 // sites-pinned: tests/audit/question-review-acceptance.test.ts
 import { compareCodeUnits, pathMatchesPrefix, stableStringify } from "audit-tools/shared";
 import { questionReopenKey } from "../../../shared/types/reviewQuestion.js";
-import type { ReviewAcceptedAnswer, ReviewAdjudication, ReviewAnswer, ReviewAssignment, ReviewEvidence, ReviewQuestion, ReviewSourceRef, ReviewSubmission } from "../../../shared/types/reviewQuestion.js";
+import type { CurrentQuestionDependencies, ReviewDependency, ReviewAcceptedAnswer, ReviewAdjudication, ReviewAnswer, ReviewAssignment, ReviewEvidence, ReviewQuestion, ReviewSourceRef, ReviewSubmission } from "../../../shared/types/reviewQuestion.js";
 
 export interface AuditQuestionBinding {
   question: ReviewQuestion;
@@ -154,19 +154,28 @@ function dependencyIdentity(dependencies: Readonly<ReviewAcceptedAnswer["depende
     .sort((a, b) => compareCodeUnits(a.join("\0"), b.join("\0"))));
 }
 
+export function indexQuestionDependencies(dependencies: readonly ReviewDependency[]): ReadonlySet<string> {
+  return new Set(dependencies.map(row => dependencyIdentity([row])));
+}
+
 /** Report current observations without ever changing the accepted originals. */
 export function projectQuestionReview(question: ReviewQuestion, answers: readonly ReviewAcceptedAnswer[],
-  dependencies: Readonly<ReviewAcceptedAnswer["dependency_bindings"]> | undefined,
+  dependencies: CurrentQuestionDependencies | undefined,
   adjudications: readonly ReviewAdjudication[] = [],
 ) {
-  const currentBindings = new Set(dependencies?.map((row) => dependencyIdentity([row])));
+  const shared = dependencies && "sourceIndex" in dependencies ? dependencies.sourceIndex : undefined;
+  const local = dependencies && "local" in dependencies ? dependencies.local : dependencies;
+  const currentBindings = indexQuestionDependencies(local ?? []);
   const required = [...question.source_dependencies, ...question.evidence_dependencies,
-    ...dependencies?.filter(item => item.kind === "membership" && item.key === questionReopenKey(question.question_id)) ?? []];
+    ...local?.filter(item => item.kind === "membership" && item.key === questionReopenKey(question.question_id)) ?? []];
   const sameQuestion = answers.filter((row) => row.submission.question_id === question.question_id)
     .sort((a, b) => compareCodeUnits(a.submission.submission_id, b.submission.submission_id));
   const current = sameQuestion.filter((row) => dependencies !== undefined &&
     row.submission.revision_id === question.revision_id &&
-    row.dependency_bindings.length > 0 && row.dependency_bindings.every((item) => currentBindings.has(dependencyIdentity([item]))) &&
+    row.dependency_bindings.length > 0 && row.dependency_bindings.every((item) => {
+      const identity = dependencyIdentity([item]);
+      return currentBindings.has(identity) || shared?.has(identity);
+    }) &&
     required.every((dependency) => row.dependency_bindings.some((item) => dependencyIdentity([item]) === dependencyIdentity([dependency]))));
   const stale = sameQuestion.filter((row) => !current.includes(row));
   const parts = question.requested_parts.map(({ part_id }) => {

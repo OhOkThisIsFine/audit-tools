@@ -43,6 +43,12 @@ export const ReviewDependencySchema = z.strictObject({
 });
 export type ReviewDependency = z.infer<typeof ReviewDependencySchema>;
 
+/** In-memory current dependencies, optionally sharing one frozen source index per cycle. */
+export type CurrentQuestionDependencies = readonly ReviewDependency[] | {
+  sourceIndex: ReadonlySet<string>;
+  local: readonly ReviewDependency[];
+};
+
 const questionBinding = { question_id: id, revision_id: id, snapshot_id: id };
 export const ReviewInventoryItemSchema = z.strictObject({
   inventory_item_id: id,

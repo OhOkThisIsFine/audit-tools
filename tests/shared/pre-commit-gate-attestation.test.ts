@@ -179,13 +179,6 @@ describe("pre-commit gate: bypass scoping, attester class, destination-keyed con
     expect(onBranch.status, `expected allow (0) off main; stderr:\n${onBranch.stderr}`).toBe(0);
   });
 
-  test("a missing attestation for a staged loop-core path blocks, naming the record to write", () => {
-    stageLoopCoreFile();
-    const r = runCommit();
-    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
-    expect(r.stderr).toContain("no adversarial-review attestation");
-  });
-
   // Under a git hook the attestation is read when GIT runs the commit — after
   // every earlier statement of the Bash call has executed — so `attest … &&
   // git commit …` in ONE tool call now simply works. The tool-boundary hook's

@@ -51,6 +51,21 @@ export async function questionWorkloadBindings(
   // The publisher freezes this entire shared source binding, not just the
   // files named by one question. Hash it once rather than once per assignment.
   const sourceBinding = hashContent(stableStringify({ sourceRoot: toPosixPath(sourceRoot), sourceFiles }));
+  // Index the same admitted records once for this workload. Store input
+  // positions, not evidence IDs, so distinct records and stable tie order
+  // match the original filter + sort.
+  const evidenceByPath = new Map<string, number[]>();
+  const evidenceByDependency = new Map<string, number[]>();
+  const indexEvidence = (index: Map<string, number[]>, key: string, position: number) => {
+    const positions = index.get(key);
+    if (positions) positions.push(position);
+    else index.set(key, [position]);
+  };
+  evidence.forEach((record, position) => {
+    if (record.snapshot_id !== plan.snapshot_id || !record.source_refs.every(ref => measured.has(ref.path))) return;
+    for (const ref of record.source_refs) indexEvidence(evidenceByPath, ref.path, position);
+    for (const dependency of record.dependencies) indexEvidence(evidenceByDependency, stableStringify(dependency), position);
+  });
   // Verify accepted claims and meaningful intent conflicts before heuristic
   // leads. This is scheduling order only; it does not change any binding.
   const priority = (question: typeof plan.questions[number]) => {
@@ -61,11 +76,16 @@ export async function questionWorkloadBindings(
   return plan.questions.filter(q => q.plan_status === "pending" || q.plan_status === "active")
     .sort((a, b) => priority(a) - priority(b)).map(question => {
     const suggested_sources = sourcesFor(question.inventory_item_ids);
-    const scopedEvidence = evidence.filter(record => record.snapshot_id === plan.snapshot_id &&
-      record.source_refs.every(ref => measured.has(ref.path)) &&
-      (record.source_refs.some(ref => suggested_sources.some(suggestion => ref.path === suggestion.path)) ||
-       question.evidence_dependencies.some(dep => record.dependencies.some(bound => stableStringify(dep) === stableStringify(bound)))))
-      .sort((a, b) => compareCodeUnits(a.evidence_id, b.evidence_id));
+    const matches = new Set<number>();
+    for (const { path } of suggested_sources) {
+      for (const position of evidenceByPath.get(path) ?? []) matches.add(position);
+    }
+    for (const dependency of question.evidence_dependencies) {
+      for (const position of evidenceByDependency.get(stableStringify(dependency)) ?? []) matches.add(position);
+    }
+    const scopedEvidence = [...matches].sort((a, b) =>
+      compareCodeUnits(evidence[a]!.evidence_id, evidence[b]!.evidence_id) || a - b)
+      .map(position => evidence[position]!);
     const epoch = epochs.get(question.question_id);
     const dependencies = [...question.source_dependencies, ...question.evidence_dependencies, ...(epoch ? [epoch] : [])];
     const issued = {

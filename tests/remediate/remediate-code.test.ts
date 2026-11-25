@@ -58,34 +58,10 @@ describe.skipIf(process.platform === "win32")("remediate-code global symlink ent
   });
 });
 
-describe("remediate-code.mjs dist-not-found guard", () => {
-  it("exits 1 with error message when dist/index.js is absent", () => {
-    // Copy the wrapper to a temp directory that has no dist/ subtree.
-    // Because the script derives __dirname from import.meta.url, running it
-    // from the temp location makes it look for dist/index.js there — which
-    // does not exist.
-    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-test-"));
-    try {
-      const dst = join(tmpDir, "remediate-code.mjs");
-      writeFileSync(dst, readFileSync(WRAPPER, "utf8"), "utf8");
-
-      const result = spawnSync(process.execPath, [dst], {
-        cwd: tmpDir,
-        encoding: "utf8",
-      });
-
-      expect(result.status).toBe(1);
-      expect(result.stderr).toMatch(/dist\/remediate\/index\.js not found/);
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-});
-
 // ── shouldBuildDist guards (COR-ea8a389a) ──────────────────────────────────
 
 describe("shouldBuildDist: sourceRoot absent (published-install path)", () => {
-  it("returns false (no build attempted) even when tsconfig and dist are absent", () => {
+  it("exits 1 with the missing-dist diagnostic without attempting a build", () => {
     // Neither src/, tsconfig.json, nor dist/index.js exist → published install.
     // shouldBuildDist() must return false; ensureBuilt skips build;
     // main() then exits 1 with the dist-not-found guard (no build stderr).

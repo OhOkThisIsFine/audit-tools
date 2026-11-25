@@ -225,19 +225,6 @@ test("buildLineIndexForPaths contains every unique path regardless of input orde
   }
 });
 
-test("buildLineIndexForPaths maps a non-existent path to UNMEASURED rather than throwing or reading as a genuine 0", async () => {
-  const dir = setup();
-  try {
-    const result = await buildLineIndexForPaths(dir, ["missing.ts"]);
-
-    expect(Object.prototype.hasOwnProperty.call(result, "missing.ts"), "missing path should be present").toBeTruthy();
-    expect(result["missing.ts"], "a read failure must be the UNMEASURED sentinel").toBe(UNMEASURED_LINE_COUNT);
-    expect(isUnmeasuredLineCount(result["missing.ts"])).toBe(true);
-  } finally {
-    teardown();
-  }
-});
-
 // ---------------------------------------------------------------------------
 // addFileLineCountHints
 // ---------------------------------------------------------------------------
@@ -414,6 +401,8 @@ test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, retur
   try {
     const result = await buildLineIndexForPaths(dir, ["definitely-missing-abc123.ts"]);
     expect(result["definitely-missing-abc123.ts"], "missing path maps to the UNMEASURED sentinel, not 0").toBe(UNMEASURED_LINE_COUNT);
+    expect(Object.prototype.hasOwnProperty.call(result, "definitely-missing-abc123.ts"), "missing path should be present").toBeTruthy();
+    expect(isUnmeasuredLineCount(result["definitely-missing-abc123.ts"])).toBe(true);
     // Keep the file-not-found vs IO-error logging split — still asserted here.
     const combined = stderrChunks.join("");
     expect(combined.includes("file not found"), `expected 'file not found' in stderr; got: ${combined}`).toBeTruthy();

@@ -346,6 +346,25 @@
         "src/audit/io/rollover.ts": "e14ad9ae183c298ce0760964cd8757004a416607"
       }
     },
+    "481abf3e9efbbca4": {
+      "reviewed_by": "dot-root",
+      "attester_class": "agent",
+      "checked": "Compared audit sample fresh, retry and protected-target behavior through the wrapper. Traced indexed evidence lookup position order and shared dependency identity through acceptance and reporting; checked byte-identical replay artifacts and restored the tested IO-to-dispatch dependency boundary. Verified duplicate test launches retained their distinct assertions.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "9f739e9378eb4dc2349cc5e9874922ad6be3a57b",
+        "ran_at": "2026-11-25T17:44:25.546Z"
+      },
+      "attested_at": "2026-11-25T17:45:34.196Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "07268e08d22f3fa7b85d5774cb785ecc467f9dcd",
+        "src/audit/cli/dispatch/questionReviewAcceptance.ts": "ef955a66fd36e13c1ee9eef4cabac29cf1fad58e",
+        "src/audit/cli/questionReviewCycle.ts": "3d4dd8a888b3f8c5c5f19872bc28210384ffc3ca",
+        "src/audit/cli/questionWorkloadBindings.ts": "99f811255cca0a0e95f7c4e5fded7b982aba8580"
+      }
+    },
     "491762bb82302829": {
       "reviewed_by": "independent-sonnet-reviewer-subagent",
       "attester_class": "agent",
@@ -908,13 +927,13 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "cfe244114db006a2"
+      "review": "481abf3e9efbbca4"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/dispatch/questionReviewAcceptance.ts": {
-      "review": "daa728eac345f91f"
+      "review": "481abf3e9efbbca4"
     },
     "src/audit/cli/fanoutLanes.ts": {
       "review": "74f5fdb4c95e9366"
@@ -938,10 +957,10 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/questionReviewCycle.ts": {
-      "review": "daa728eac345f91f"
+      "review": "481abf3e9efbbca4"
     },
     "src/audit/cli/questionWorkloadBindings.ts": {
-      "review": "a6bf59c41c6e9e97"
+      "review": "481abf3e9efbbca4"
     },
     "src/audit/cli/submitCommand.ts": {
       "review": "daa728eac345f91f"

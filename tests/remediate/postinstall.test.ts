@@ -41,15 +41,8 @@ describe("scripts/postinstall.mjs", () => {
     await rm(TEMP_HOME, { recursive: true, force: true });
   });
 
-  it("exits 0", () => {
+  it("exits 0 and installs the Claude command with the packaged loader body", async () => {
     const result = runPostinstall();
-    expect(result.status).toBe(0);
-  });
-
-  it("installs ~/.claude/commands/remediate-code.md", () => {
-    const result = runPostinstall();
-    // Surface a postinstall crash as a clear failing assertion rather than a
-    // confusing missing-file error downstream.
     expect(result.status).toBe(0);
     expect(result.error).toBeUndefined();
 
@@ -60,19 +53,6 @@ describe("scripts/postinstall.mjs", () => {
       "remediate-code.md",
     );
     expect(existsSync(installedPath)).toBe(true);
-  });
-
-  it("installed command matches source prompt", async () => {
-    const result = runPostinstall();
-    expect(result.status).toBe(0);
-    expect(result.error).toBeUndefined();
-
-    const installedPath = join(
-      TEMP_HOME,
-      ".claude",
-      "commands",
-      "remediate-code.md",
-    );
     const installed = await readFile(installedPath, "utf8");
     const source = await readFile(PROMPT_SOURCE, "utf8");
 

@@ -6,9 +6,10 @@
  */
 import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { test, expect, vi } from "vitest";
-import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { captureConsole } from "./helpers/captureConsole.mjs";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 
 async function withTempDir<T>(
@@ -173,6 +174,51 @@ test("sample-run refuses to overwrite active question review or an existing repo
       expect(process.exitCode).toBe(1);
       expect(await readFile(findings, "utf8")).toBe("preexisting report");
     } finally { process.exitCode = before; }
+  });
+});
+
+test("sample-run resumes only the exact first half and preserves completed reports", async () => {
+  await withTempDir(async root => {
+    const { runCli } = await import("../../src/audit/cli.js");
+    const artifactsDir = join(root, "sample-target");
+    const findings = join(artifactsDir, "audit-findings.json");
+    const markdown = join(artifactsDir, "audit-report.md");
+    const receipt = join(artifactsDir, ".fold-receipt.json");
+    const run = (force = false) => captureConsole(() => runCli([
+      process.execPath, "audit-code", "sample-run", "--root", root, "--artifacts-dir", artifactsDir,
+      ...(force ? ["--force"] : []),
+    ]));
+    expect((await run()).code).toBe(0);
+    const expectedFindings = await readFile(findings);
+    const expectedMarkdown = await readFile(markdown);
+
+    await rm(markdown); // The atomic findings write made it, the Markdown write did not.
+    await utimes(findings, new Date("2000-01-01T00:00:00Z"), new Date("2000-01-01T00:00:00Z"));
+    const preservedMtime = (await stat(findings)).mtimeMs;
+    expect((await run()).code).toBe(0);
+    expect(await readFile(findings)).toEqual(expectedFindings);
+    expect((await stat(findings)).mtimeMs).toBe(preservedMtime);
+    expect(await readFile(markdown)).toEqual(expectedMarkdown);
+
+    expect((await run()).code).toBe(1); // Both generated outputs already exist.
+    await writeFile(markdown, "custom report");
+    await rm(findings);
+    expect((await run()).code).toBe(1); // A Markdown-only target is not an interrupted sample.
+    expect(await readFile(markdown, "utf8")).toBe("custom report");
+    await expect(readFile(findings)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await writeFile(findings, "custom findings");
+    await writeFile(receipt, "{}");
+    const pending = await run(true);
+    expect(pending.code).toBe(1);
+    expect(pending.stderr).toMatch(/incomplete fold receipt/);
+    expect(await readFile(findings, "utf8")).toBe("custom findings");
+    expect(await readFile(markdown, "utf8")).toBe("custom report");
+
+    await rm(receipt);
+    expect((await run(true)).code).toBe(0); // The custom target is disposable.
+    expect(await readFile(findings)).toEqual(expectedFindings);
+    expect(await readFile(markdown)).toEqual(expectedMarkdown);
   });
 });
 

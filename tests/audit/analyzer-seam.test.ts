@@ -115,6 +115,7 @@ test("runGraphEnrichmentExecutor omits and leaves the floor byte-identical when 
     expect(result.artifacts_written).toEqual(["analyzer_capability.json"]);
     const entry = result.updated.analyzer_capability!.analyzers.find((a) => a.id === "typescript");
     expect(entry!.resolution).toBe("absent");
+    expect(entry!.edges_added, "no edges added for absent dep").toBe(0);
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
@@ -144,31 +145,6 @@ test("runGraphEnrichmentExecutor records not_applicable when no in-scope files a
 
 // Tests for the extracted runSingleAnalyzer / buildEnrichedGraph helpers —
 // exercised through the public runGraphEnrichmentExecutor API.
-
-test("runSingleAnalyzer (via executor): returns ok:false with note when dependency is absent", async () => {
-  const cacheRoot = await mkdtemp(join(tmpdir(), "absent-cache-"));
-  const root = await mkdtemp(join(tmpdir(), "absent-root-"));
-  try {
-    await mkdir(join(root, "src"), { recursive: true });
-    await writeFile(join(root, "src", "a.ts"), "export const a = 1;\n");
-
-    const result = await runGraphEnrichmentExecutor(tsBundle(), {
-      root,
-      registry: [typescriptAnalyzer],
-      cacheRoot,
-      analyzers: { typescript: "auto" },
-    });
-
-    const entry = result.updated.analyzer_capability!.analyzers.find((a) => a.id === "typescript");
-    expect(entry!.resolution, "absent dep → ok:false with resolution absent").toBe("absent");
-    expect(entry!.edges_added, "no edges added for absent dep").toBe(0);
-    // analyze() should not have contributed any edge
-    expect(result.updated.analyzer_capability!.coverage).toBe("degraded");
-  } finally {
-    await rm(cacheRoot, { recursive: true, force: true });
-    await rm(root, { recursive: true, force: true });
-  }
-});
 
 test("runSingleAnalyzer (via executor): returns ok:false with structured note when analyze() throws", async () => {
   const throwingAnalyzer: LanguageAnalyzer = {
