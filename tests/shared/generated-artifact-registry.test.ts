@@ -86,7 +86,6 @@ describe('generated-artifact freshness registry', () => {
     expect(trackedGenerators()).toEqual(
       expect.arrayContaining([
         'scripts/render-closeout.mjs',
-        'scripts/nightly/render-inbox.mjs',
         'scripts/check-doc-manifest.mjs',
         'scripts/check-philosophy-brief.mjs',
         'scripts/check-readme-sample-report.mjs',

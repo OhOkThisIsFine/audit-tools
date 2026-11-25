@@ -1041,15 +1041,6 @@ export const GUARDS = [
       'contract and owning symbol/file, or retire the last source occurrence',
   },
   {
-    id: 'check:nightly-inbox',
-    releaseOrder: 12,
-    releaseStage: 'checks',
-    kind: 'gate',
-    impl: 'check:nightly-inbox',
-    preCommit: 'reach',
-    fix: 'run `node scripts/nightly/render-inbox.mjs`, then re-stage docs/nightly-inbox.md',
-  },
-  {
     id: 'check:ci-trigger-paths',
     releaseOrder: 13,
     releaseStage: 'checks',
@@ -1479,9 +1470,6 @@ export const GUARDS = [
       'tracked file under tests/ — so this text is unenforced: read the row, never trust a green gate ' +
       'to have checked it. Diagnosis and remedy: docs/backlog/durable-traps.md',
   },
-  { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
-  { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },
-  { id: 'stored-nightly-queue-test', kind: 'contract-test', impl: 'tests/shared/stored-nightly-queue.test.ts' },
   { id: 'script-argv-refusal-test', kind: 'contract-test', impl: 'tests/shared/script-argv-refusal.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
   {
@@ -2319,15 +2307,16 @@ export const REACH = [
   },
 
   {
-    area: 'nightly routine',
-    files: ['scripts/nightly/**'],
-    guardedBy: ['nightly-routine-test', 'nightly-items-mandatory-fields-test', 'stored-nightly-queue-test', 'check:lint', 'check:dup', 'check:scripts'],
-    note:
-      'Stored queues support answering and completion. nightly-routine.test.ts exercises subject ' +
-      'identity, premise checks and the inbox round trip. nightly-items-mandatory-fields.test.ts ' +
-      'checks the compact open-item index. stored-nightly-queue.test.ts drives the actual answer ' +
-      'and regeneration commands through missing input and a failed projection write, then checks ' +
-      'the repaired snapshot, index, inbox and durable decisions.',
+    area: 'archived nightly queue snapshots',
+    files: ['.audit-tools/nightly/open-items.json', '.audit-tools/nightly/open-items-index.json'],
+    guardedBy: 'declared-gap',
+    note: 'Read-only historical snapshots; no active queue, renderer or projection check.',
+  },
+  {
+    area: 'historical decision citations',
+    files: ['.claude/nightly-decisions.json', 'scripts/shared/nightlyDecisionKey.mjs'],
+    guardedBy: ['check:scripts', 'check:lint'],
+    note: 'The archived ledger is read-only; both attestation producers still resolve cited historical keys.',
   },
   {
     area: 'script argv refusal',
@@ -2336,32 +2325,13 @@ export const REACH = [
     note:
       'a script that reads process.argv and does not adopt scripts/shared/argvGuard.mjs must appear in ' +
       'ARGV_GUARD_GAP inside tests/shared/script-argv-refusal.test.ts — the ratchet fails on a new ' +
-      'unguarded reader and on a stale gap entry. The behaviour is pinned end-to-end on the nightly ' +
-      'CLIs whose default action writes durable state: a bogus flag exits non-zero naming it and ' +
-      'creates no artifact, --help prints usage without writing. ⚠ UNCOVERED HALF, stated rather than ' +
+      'unguarded reader and on a stale gap entry. The shared parser contract verifies declared options, ' +
+      'refusals and help. ⚠ UNCOVERED HALF, stated rather than ' +
       'implied per the durable-traps rule: 42 of the tracked scripts still read process.argv without ' +
       'the guard, and the list above is a DECLARED boundary, not a clean sweep — those scripts can ' +
       'still ignore an unrecognized flag. Migrating them is mechanical but reaches gate entry points ' +
       'such as run-vitest-gate.mjs and profile-run.mjs, which forward variadic arguments to another ' +
       'process; each needs its own spec, so it is its own change.',
-  },
-  {
-    area: 'nightly inbox projection',
-    files: [
-      'docs/nightly-inbox.md',
-      '.audit-tools/nightly/open-items.json',
-      '.audit-tools/nightly/open-items-index.json',
-      '.claude/nightly-decisions.json',
-      'scripts/nightly/items.mjs',
-      'scripts/nightly/queue-files.mjs',
-      'scripts/nightly/render-inbox.mjs',
-    ],
-    guardedBy: ['check:nightly-inbox'],
-    note:
-      'render-inbox --check projects the tracked queue through the decisions ledger and byte-compares ' +
-      'ALL THREE derived artifacts — the markdown inbox, the queue snapshot, and the bounded ' +
-      'open-items-index — so none of them can assert open what the ledger records settled. The index ' +
-      'is a pure projection (no timestamp) precisely so two writers can emit identical bytes.',
   },
   {
     area: 'rendered host assets',
@@ -2682,12 +2652,6 @@ export const GENERATED = [
     artifacts: ['scripts/shared/runtime-artifact-names.generated.mjs'],
   },
   { generator: 'scripts/shared/generate-spec-mirrors.mjs', authority: 'check', npmScript: 'check:spec-mirrors' },
-  {
-    generator: 'scripts/nightly/render-inbox.mjs',
-    authority: 'check',
-    npmScript: 'check:nightly-inbox',
-    artifacts: ['docs/nightly-inbox.md', '.audit-tools/nightly/open-items.json'],
-  },
   {
     generator: 'scripts/shared/generate-filelock-export-surface.mjs',
     authority: 'contractTest',

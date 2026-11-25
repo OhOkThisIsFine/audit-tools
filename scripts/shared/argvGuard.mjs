@@ -1,10 +1,8 @@
 // The repo-wide CLI argument rule: a script REFUSES an argument it does not
 // recognize, and never reads an unrecognized flag as consent to do its work.
 //
-// WHY THIS EXISTS (nightly 2026-09-06, friction: tool_should_decide).
-// `node scripts/nightly/ingest-answers.mjs --help` did not print usage — it
-// ingested ten answers and wrote `.claude/nightly-decisions.json`. The flag was
-// simply ignored, and the script's default action is a durable write. Every
+// WHY THIS EXISTS: a retired decision-import command ignored `--help` and
+// saved ten answers instead of printing usage. Every
 // script of that shape has the same defect: the operator reaches for the
 // universal query flag, the script performs its write instead, and a typo
 // (`--dryrun` for `--dry-run`) is indistinguishable from a valid run.

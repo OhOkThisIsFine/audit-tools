@@ -101,7 +101,7 @@ describe('every retired hand-coded trigger is reproduced', () => {
       expect(triggeredIds([p]), `${p} must trigger the handoff leg`).toContain('check:handoff-roadmap');
     }
     // The retired nightly queue no longer feeds HANDOFF, so it must not fire the leg.
-    for (const p of ['.audit-tools/nightly/open-items.json', '.claude/nightly-decisions.json', 'scripts/nightly/items.mjs']) {
+    for (const p of ['.audit-tools/nightly/open-items.json', '.claude/nightly-decisions.json', 'scripts/shared/premise-probes.mjs']) {
       expect(triggeredIds([p]), `${p} must NOT trigger the handoff leg`).not.toContain('check:handoff-roadmap');
     }
   });

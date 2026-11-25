@@ -182,8 +182,7 @@ const override = flags.override != null ? String(flags.override).trim() : null;
 // is recorded durably. An owner call that rests on a settled nightly question
 // usually cites that question's key, and a typo in the record is a dangling
 // reference nobody can later follow (2026-09-04: `cde41c31c1c6a7f3` recorded
-// where the ledger held `cde41c31f1c6a7f3`; only a later `answer.mjs --done`
-// noticed). A citation is mechanically checkable, so it is checked before the
+// where the ledger held `cde41c31f1c6a7f3`). A citation is mechanically checkable, so it is checked before the
 // record is written. An absent or unreadable ledger FAILS OPEN — announced,
 // never silent (see the module).
 const keyCheck = resolveNightlyDecisionKeys(root, override ?? '');
@@ -192,7 +191,7 @@ if (!keyCheck.ok) {
     `the --override ${keyCheck.reason}. ` +
       (keyCheck.suggestion
         ? `Did you mean "${keyCheck.suggestion}"? `
-        : `Look the key up with \`node scripts/nightly/answer.mjs --list\`. `) +
+        : `Look the key up in \`.claude/nightly-decisions.json\`. `) +
       `The attestation is the durable audit record, so a key it cites must resolve.`,
   );
 }

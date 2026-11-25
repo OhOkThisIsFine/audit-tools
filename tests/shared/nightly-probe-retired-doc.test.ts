@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { evaluateProbes } from "../../scripts/nightly/items.mjs";
+import { evaluateProbes } from "../../scripts/shared/premise-probes.mjs";
 
 let root: string;
 

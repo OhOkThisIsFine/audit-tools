@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/doc-manifest-gate.test.ts
 //
 // Producer for the constitutional-doc refusal (.claude/hooks/pre-commit-gate.mjs).
 //
@@ -124,7 +125,7 @@ if (!keyCheck.ok) {
     `the --owner-decision ${keyCheck.reason}. ` +
       (keyCheck.suggestion
         ? `Did you mean "${keyCheck.suggestion}"? `
-        : `Look the key up with \`node scripts/nightly/answer.mjs --list\`. `) +
+        : `Look the key up in \`.claude/nightly-decisions.json\`. `) +
       `The attestation is the durable audit record, so a key it cites must resolve.`,
   );
 }

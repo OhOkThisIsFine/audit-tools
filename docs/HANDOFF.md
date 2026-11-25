@@ -23,8 +23,8 @@ edited copy".
 Legacy dispatch validation/merge scripts have been removed from the package; the asset guard
 requires production reference paths for dispatch scripts and data. Release CI includes the exact
 publish runtime, and profile fixtures write to temporary destinations. The mirror guard scans only surviving
-production roots. Superseded answers retain their original ledger entry and record
-the applied remainder, omitted clause, and later owner decision in the inbox.
+production roots. Superseded nightly answers retain their original ledger entry.
+The old inbox is retired; its final generated view is available in Git history.
 
 The 2026-09-19 recovery record `C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`
 is present on the owner's machine and has not been reviewed; retain unknown work.

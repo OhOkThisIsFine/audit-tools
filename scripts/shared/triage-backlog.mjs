@@ -107,7 +107,7 @@ import {
 } from './lane-dispatch.mjs';
 import { splitBacklogEntries } from './backlog-entry-grammar.mjs';
 import { openDispatchLane } from './mcp-dispatch-lane.mjs';
-import { evaluateProbes } from '../nightly/items.mjs';
+import { evaluateProbes } from './premise-probes.mjs';
 import { hashContent } from './primitives.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -187,7 +187,7 @@ function resolveProbes(raw, root) {
       hits = trackedMatches(
         root,
         ['grep', '-l', '-F', '-e', p.symbol, '--',
-          ':!docs/backlog', ':!docs/reviews', ':!docs/HANDOFF.md', ':!docs/nightly-inbox.md', ':!.claude'],
+          ':!docs/backlog', ':!docs/reviews', ':!docs/HANDOFF.md', ':!.claude'],
         [0, 1],
       );
       how = 'symbol';
@@ -586,7 +586,7 @@ VERBATIM from the entry — you cannot see the repo, so never invent content. Pr
 disappearance would mean the entry is done. Emit [] only when the entry quotes nothing checkable.
 
 Three rules about the TARGET, each of which made a third of the previous run's probes worthless:
-- A probe aimed at docs/backlog, docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md or .claude
+- A probe aimed at docs/backlog, docs/reviews, docs/HANDOFF.md or .claude
   carries NO evidence. Those files are the RECORD of the code, not the code — a backlog entry quotes
   the very fragment it is about, so finding it there proves nothing and losing it means nothing.
   Probe the source file the entry is ABOUT, never the entry itself.

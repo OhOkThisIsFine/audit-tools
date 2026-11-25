@@ -147,9 +147,8 @@ describe('an absent / unreadable ledger fails OPEN, announced', () => {
 
   it('passes through when the ledger is malformed JSON, recording why', () => {
     // Malformed state must not make a repo un-attestable (the same rule the
-    // derived-file preflight's unwired leg follows). Note the asymmetry with
-    // `readDecisions`, which fails CLOSED on its WRITE paths: nothing here
-    // writes, so the risk that rule guards against is absent.
+    // derived-file preflight's unwired leg follows). The archived ledger has
+    // no writer, and the attestation announces that the citation was skipped.
     const root = makeRoot(null, { raw: '{"truncated": ' });
     const r = resolveNightlyDecisionKeys(root, `citing ${REAL_KEY}`);
     expect(r.ok).toBe(true);

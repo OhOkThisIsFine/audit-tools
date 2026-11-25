@@ -107,19 +107,10 @@ skills-lock.json
 # on the run that added them. Later rules win in gitignore, so re-negating here
 # overrides the `.audit-tools/*` / `.audit-tools/*/*` ignores above.
 #
-# Nightly-routine governance records are TRACKED: the open propositions and the
-# proposals behind them are the routine's actual output, and an escalation that
-# lives only on one machine is lost the moment you are not sitting at it.
-# A proposal directory is tracked WHOLE, not just its prose: the routine requires
-# a hook/gate proposal to carry its patch and its red-green tests, so the patch is
-# part of the record. The runtime state beside it (triage jsonl, viewed state)
-# stays ignored.
+# Historical nightly queue snapshots and proposal records. No live renderer or
+# server consumes the snapshots; keep the checked-in copies as evidence.
 !.audit-tools/nightly/
 !.audit-tools/nightly/open-items.json
-# The bounded, enumerable projection of the queue (scripts/nightly/items.mjs,
-# `OPEN_ITEMS_INDEX_RELPATH`). Tracked for the same reason the store is: it is
-# what a reader enumerates instead of the 26k-token store, and `check:nightly-inbox`
-# reconciles it against the ledger so it can never assert open what is settled.
 !.audit-tools/nightly/open-items-index.json
 !.audit-tools/nightly/proposals/
 !.audit-tools/nightly/proposals/**

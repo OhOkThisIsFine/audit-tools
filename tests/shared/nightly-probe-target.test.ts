@@ -11,10 +11,7 @@ import { join } from "node:path";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  evaluateProbes,
-  partitionBySettled,
-} from "../../scripts/nightly/items.mjs";
+import { evaluateProbes } from "../../scripts/shared/premise-probes.mjs";
 
 let root: string;
 
@@ -172,9 +169,7 @@ describe("record-path probes are refused by direction, not outright", () => {
   });
 
   it("never auto-closes such an item, even once the quoted fragment is deleted", () => {
-    // The guarantee the split must not buy its capability with. This is the
-    // close path exactly as `partitionBySettled` walks it — no flag passed — so
-    // the record probe abstains and `resolved` stays unreachable.
+    // A changed record is not evidence that the underlying issue was fixed.
     seedRecord();
     const item = escalation();
 
@@ -185,9 +180,6 @@ describe("record-path probes are refused by direction, not outright", () => {
     git("commit", "-qm", "rewrite record");
 
     expect(evaluateProbes(root, item).status).not.toBe("resolved");
-    const { open, resolved } = partitionBySettled([item], {}, root);
-    expect(resolved).toHaveLength(0);
-    expect(open).toHaveLength(1);
   });
 });
 

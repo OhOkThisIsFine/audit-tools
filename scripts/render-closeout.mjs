@@ -37,7 +37,6 @@ import { CLOSEOUT_SECTIONS } from './closeout-sections-data.mjs';
 import { closeoutReadinessFindings } from './shared/closeoutReadiness.mjs';
 import { readSessionStartingHead } from './shared/sessionRegistry.mjs';
 import { worktreeTree } from './shared/worktree-tree.mjs';
-import { readOpenItems } from './nightly/items.mjs';
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const STATE_DIR = join(root, '.claude', 'hooks', '.state', 'closeout-render');
@@ -176,70 +175,6 @@ function toLines(v) {
   return arr.map((x) => String(x).trim()).filter((x) => x.length > 0);
 }
 
-/**
- * Does this decisions value name an OPEN item in the project's decision queue?
- *
- * The queue is the project's answerable page (`docs/nightly-inbox.md`, read
- * back by `npm run nightly:ingest`), and an item is named by its `subject_key`
- * — the identity the queue itself keys on. The key has to be BOTH well-formed
- * and present among the items still OPEN: a key that resolves to nothing, or to
- * something already answered, is not an ask in flight and is refused.
- *
- * EVERY 16-hex candidate in the value is tried, and ONE open hit accepts. The
- * value is prose the author wrote, and prose legitimately names other things:
- * a decision already settled is worth citing as context ("this replaces the
- * settled e978fad576fb2473"), and the section explicitly asks for the open
- * question alongside it. Reading only the FIRST match made that shape
- * unrenderable — the settled key won the match, and the refusal then asserted
- * the open key named no open item, which is false and unactionable.
- *
- * FAILS CLOSED, unlike every other check here. The others fail open because a
- * readiness check cannot see its evidence must not assert a problem; this one
- * is a claim by the report's AUTHOR that a question has been posed somewhere
- * answerable, and an unverifiable claim is not one. The cost of the
- * conservative direction is a re-render; the cost of the other is a decision
- * that reaches nobody while the report says it was asked.
- *
- * @param {string} root
- * @param {string} text the section's value, as joined lines
- * @returns {{ ok: true, key: string } | { ok: false, detail: string }}
- */
-function queueItemVerdict(root, text) {
-  const keys = [...text.matchAll(/\b[0-9a-f]{16}\b/g)].map((m) => m[0]);
-  if (keys.length === 0) {
-    return {
-      ok: false,
-      detail:
-        'To use the decision queue as the answering route, name the item by its subject key (the ' +
-        '16-hex id the item carries, e.g. \`e978fad576fb2473\`) — that is what makes the claim ' +
-        'checkable. Run \`node scripts/nightly/answer.mjs --list\` to see the keys currently open.',
-    };
-  }
-  let open;
-  try {
-    open = readOpenItems(root).items;
-  } catch (error) {
-    return {
-      ok: false,
-      detail:
-        `could not read the decision queue to verify ${keys.join(', ')}: ` +
-        `${/** @type {any} */ (error)?.message ?? error}. A queue item cannot be verified, so it ` +
-        'cannot stand in for the question.',
-    };
-  }
-  const openKeys = new Set((Array.isArray(open) ? open : []).map((item) => item?.subject_key));
-  const hit = keys.find((key) => openKeys.has(key));
-  if (hit !== undefined) return { ok: true, key: hit };
-  return {
-    ok: false,
-    detail:
-      `none of the ${keys.length} 16-hex key(s) in this value — ${keys.join(', ')} — names an OPEN ` +
-      'item in the decision queue. Either they are not queue keys, or their subjects are already ' +
-      'settled (a settled subject is never re-raised, so citing one asks nothing). Run ' +
-      '\`node scripts/nightly/answer.mjs --list\` for the keys currently open.',
-  };
-}
-
 const missing = [];
 const emptied = [];
 const rendered = [];
@@ -270,14 +205,7 @@ for (const section of CLOSEOUT_SECTIONS) {
   }
   const text = lines.join(' ');
   if (section.requiresQuestion && !text.includes('?')) {
-    // An open queue item is the other way a question can reach the owner.
-    if (!section.acceptsQueueItem) {
-      fail(`section "${section.id}": ${section.requiresQuestion}`);
-    }
-    const queue = queueItemVerdict(root, text);
-    if (!queue.ok) {
-      fail(`section "${section.id}": ${section.requiresQuestion}\n\n${queue.detail}`);
-    }
+    fail(`section "${section.id}": ${section.requiresQuestion}`);
   }
   if (section.itemized && !Array.isArray(value)) {
     fail(`section "${section.id}": ${section.itemized}`);

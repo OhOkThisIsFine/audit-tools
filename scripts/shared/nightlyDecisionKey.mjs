@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/nightly-decision-key.test.ts
 // Does a free-text decision field actually cite a nightly ledger key it claims?
 //
 // THE TRAP. Both attestation producers (`.claude/hooks/attest-loop-core-review.mjs`
@@ -25,7 +26,10 @@
 // follows). Fail-open is announced, never silent — a silent skip is
 // indistinguishable from a verified citation.
 import { readFileSync } from 'node:fs';
-import { DECISIONS_RELPATH, decisionsPath } from '../nightly/items.mjs';
+import { join } from 'node:path';
+
+// Historical ledger retained so existing attestation citations still resolve.
+const DECISIONS_RELPATH = '.claude/nightly-decisions.json';
 
 // The ledger key format, and the ONLY shape this module treats as a citation.
 // Historical queues stored it as the 16-char prefix of a
@@ -65,10 +69,8 @@ function nearestKey(key, keys) {
  * (absent ledger, read fault, malformed JSON) so the caller can ANNOUNCE the
  * fail-open rather than let it read as a verified citation.
  *
- * Malformed JSON is treated as unavailable rather than as an error: this module
- * is a citation checker, and `readDecisions` already fails CLOSED (throws) on
- * its own write paths, where the risk is destroying the ledger. Nothing here
- * writes.
+ * Malformed JSON is treated as unavailable. This checks citations against a
+ * historical ledger and never writes it.
  *
  * @param {string} root
  * @param {string} text
@@ -80,7 +82,7 @@ export function resolveNightlyDecisionKeys(root, text) {
 
   let ledger;
   try {
-    const raw = readFileSync(decisionsPath(root), 'utf8');
+    const raw = readFileSync(join(root, DECISIONS_RELPATH), 'utf8');
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { ok: true, keys: [], skipped: `${DECISIONS_RELPATH} is not a key map` };
