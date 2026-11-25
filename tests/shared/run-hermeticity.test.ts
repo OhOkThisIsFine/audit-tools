@@ -25,6 +25,10 @@
  * suite run.
  */
 import { describe, it, expect } from "vitest";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, relative } from "node:path";
+import { TEST_RUN_ROOT_ENV } from "../helpers/scratch.js";
 import { liveChildProblems } from "../helpers/global-setup.js";
 // Straight from the ledger module, not through the `spawn.mjs` barrel every
 // other test imports: BOTH async entry points are the contract here, and each
@@ -93,4 +97,18 @@ describe("run hermeticity — a child still running at the end is named", () => 
     await exited;
     expect(live.some((entry) => entry.pid === child.pid)).toBe(false);
   });
+});
+
+it("places each hermetic cache under the suite-owned fixture root", () => {
+  const root = process.env[TEST_RUN_ROOT_ENV]!;
+  const dirs = ["AUDIT_CODE_STATE_DIR", "AUDIT_TOOLS_ANALYZER_CACHE", "AUDIT_TOOLS_BINARY_CACHE"]
+    .map((name) => process.env[name]!);
+  expect(new Set(dirs).size).toBe(dirs.length);
+  for (const dir of [...dirs, tmpdir()]) {
+    const fromRoot = relative(root, dir);
+    expect(existsSync(dir)).toBe(true);
+    expect(fromRoot).not.toBe("");
+    expect(fromRoot).not.toMatch(/^\.\./);
+    expect(isAbsolute(fromRoot)).toBe(false);
+  }
 });

@@ -1,12 +1,14 @@
 import { describe, test, expect } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { markRunEnded, rollOverFinishedRun } from "../../src/audit/io/rollover.js";
 import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
 import { buildTerminalStep } from "../../src/audit/cli/nextStepHelpers.js";
+import { AUDIT_GATE_SUBMISSION_SCOPE } from "../../src/audit/cli/laneSubmissions.js";
+import { hostScratchDir } from "../../src/shared/io/auditToolsPaths.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 import {
   withTempRepo,
@@ -20,7 +22,15 @@ test("a completed question audit rolls over without carrying the prior run's ans
     const first = await readQuestionWorkload(await advanceToDispatchReady(root));
     const firstSnapshot = first.work_items[0]!.binding.question.snapshot_id;
     const firstAnswers = await submitQuestions(root, first.work_items);
+    const scratch = hostScratchDir(artifactsDir, AUDIT_GATE_SUBMISSION_SCOPE);
+    const unrelated = hostScratchDir(artifactsDir, "unowned-scratch");
+    await mkdir(scratch, { recursive: true });
+    await mkdir(unrelated, { recursive: true });
+    await writeFile(join(scratch, "temporary-input.txt"), "disposable host work");
+    await writeFile(join(unrelated, "keep.txt"), "not this run's scratch");
     expect((await presentQuestionReport(root)).status).toBe("complete");
+    expect(existsSync(scratch)).toBe(false);
+    expect(await readFile(join(unrelated, "keep.txt"), "utf8")).toBe("not this run's scratch");
     const reportPath = join(root, ".audit-tools", "audit-findings.json");
     expect((await readQuestionFindings(reportPath)).question_review.accepted.map(({ submission }) => submission))
       .toEqual(expect.arrayContaining(firstAnswers));
@@ -183,6 +193,39 @@ describe("rollOverFinishedRun", () => {
       await buildTerminalStep({ root: base, sourceRoot: base, artifactsDir }, { audit_report: "# report" }, state, "done");
       expect(await readFile(join(promotedDir, "audit-findings.json"), "utf8")).toBe("{\"run\":2}");
       expect(existsSync(join(artifactsDir, "run-ended.json"))).toBe(true);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("terminal cleanup retains scratch when it cannot promote a report", async () => {
+    const { base, artifactsDir } = await endedRun();
+    try {
+      const scratch = hostScratchDir(artifactsDir, AUDIT_GATE_SUBMISSION_SCOPE);
+      await mkdir(scratch, { recursive: true });
+      await writeFile(join(scratch, "resume.txt"), "needed on retry");
+      await buildTerminalStep({ root: base, sourceRoot: base, artifactsDir }, {},
+        { status: "complete", obligations: [] }, "done");
+      expect(await readFile(join(scratch, "resume.txt"), "utf8")).toBe("needed on retry");
+      expect(existsSync(join(artifactsDir, "run-ended.json"))).toBe(false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("terminal cleanup never follows a linked scratch parent", async () => {
+    const { base, artifactsDir, promotedDir } = await endedRun();
+    try {
+      const outside = join(base, "not-audit-scratch");
+      const outsideScope = join(outside, AUDIT_GATE_SUBMISSION_SCOPE);
+      await mkdir(outsideScope, { recursive: true });
+      await writeFile(join(outsideScope, "keep.txt"), "outside the audit tree");
+      await symlink(outside, join(artifactsDir, "scratch"), "junction");
+      await writeFile(join(artifactsDir, "audit-report.md"), "# report");
+      const result = await buildTerminalStep({ root: base, sourceRoot: base, artifactsDir },
+        { audit_report: "# report" }, { status: "complete", obligations: [] }, "done");
+      expect(result).toMatchObject({ kind: "complete", finalReportPath: join(promotedDir, "audit-report.md") });
+      expect(await readFile(join(outsideScope, "keep.txt"), "utf8")).toBe("outside the audit tree");
     } finally {
       await rm(base, { recursive: true, force: true });
     }

@@ -1,47 +1,24 @@
-// Vitest setupFile: machine-global state-dir hermeticity for the whole suite.
-//
-// Every e2e/wrapper test spawns the real CLIs, and every CLI
-// invocation resolves the machine-global state dir (`~/.audit-code`:
-// sources-declared.json, quota-state.json, reservations.json). Without this
-// override a box with declared sources leaks that state into EVERY child process.
-//
-// Setting AUDIT_CODE_STATE_DIR here redirects every reader/writer (single-sourced
-// in src/shared/io/stateDir.ts) to a fresh temp dir, both in-process and in every
-// spawned child (all spawn helpers inherit/spread process.env). setupFiles run per
-// worker, so each test file gets its own dir. Always overrides — hermeticity must
-// not depend on the invoking shell's environment.
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+// Vitest runs this setup for each test file. The directories isolate both
+// in-process lookups and spawned CLIs from the machine's real audit state
+// and installed tools. Keep them inside the invocation root: worker exits
+// (including worker-thread termination) do not reliably run exit listeners.
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 
-const stateDir = mkdtempSync(join(tmpdir(), "audit-tools-test-state-"));
-process.env.AUDIT_CODE_STATE_DIR = stateDir;
-
-// Same hermeticity for the analyzer-dependency cache (~/.audit-tools/
-// analyzer-cache, single-sourced in src/shared/tooling/analyzerDeps.ts):
-// a box whose cache holds typescript@5 resolves analyzers other machines
-// report absent, so a test can go green here and red on CI. Every test sees
-// an EMPTY per-worker cache; a test that wants a populated cache builds one
-// and passes its own cacheRoot.
-const analyzerCache = mkdtempSync(join(tmpdir(), "audit-tools-test-analyzer-cache-"));
-process.env.AUDIT_TOOLS_ANALYZER_CACHE = analyzerCache;
-
-// Same again for the ACQUIRED (external) analyzer cache (~/.audit-tools/bincache,
-// single-sourced in src/shared/analyzers/binaryAcquisition.ts defaultCacheDir):
-// the e2e CLI suites reach the real acquisition path, and a binary that is absent
-// or unverifiable there makes the run DOWNLOAD a pinned release, while one already
-// cached makes it resolve. Either way the verdict would depend on what this
-// machine's home directory happens to hold. Pinned here, at the single point every
-// spawned CLI child inherits, rather than per-suite.
-const binaryCache = mkdtempSync(join(tmpdir(), "audit-tools-test-binary-cache-"));
-process.env.AUDIT_TOOLS_BINARY_CACHE = binaryCache;
-
-process.on("exit", () => {
-  for (const dir of [stateDir, analyzerCache, binaryCache]) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup; the OS temp dir is the backstop.
-    }
-  }
-});
+const runRoot = process.env.AUDIT_TOOLS_TEST_RUN_ROOT;
+if (!runRoot) throw new Error("Vitest global setup did not create the audit-tools test root.");
+const fixtureRoot = mkdtempSync(join(runRoot, "worker-fixtures-"));
+// Contain the remaining mkdtemp(tmpdir()) fixtures and temporary writes by
+// spawned CLIs too. POSIX prefers TMPDIR; Windows prefers TEMP then TMP.
+process.env.TMPDIR = fixtureRoot;
+process.env.TEMP = fixtureRoot;
+process.env.TMP = fixtureRoot;
+for (const [key, name] of [
+  ["AUDIT_CODE_STATE_DIR", "state"],
+  ["AUDIT_TOOLS_ANALYZER_CACHE", "analyzer-cache"],
+  ["AUDIT_TOOLS_BINARY_CACHE", "binary-cache"],
+]) {
+  const dir = join(fixtureRoot, name);
+  mkdirSync(dir);
+  process.env[key] = dir;
+}

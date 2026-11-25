@@ -15,8 +15,8 @@ import { decodeAuditReviewSubmission, readAuditReviewSubmission, currentAuditRev
  */
 
 import { AnalyzerRunConsentDecisionSchema, readRunConsentUnlocked, updateRunConsentUnlocked } from "../../shared/analyzerRunConsent.js";
-import { mkdir, readFile, unlink } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { lstat, mkdir, readFile, rm, unlink } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 import {
   AUDIT_FINDINGS_FILENAME,
   auditFindingsPath,
@@ -58,6 +58,7 @@ import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import {
   auditReportPath,
   groundDesignFindings,
+  hostScratchDir,
   laneAssetsDir,
   promotedAuditReportPath,
 } from "audit-tools/shared";
@@ -470,8 +471,25 @@ async function promoteCompletedReport(root: string, artifactsDir: string): Promi
   for (const problem of await removeRunSnapshot(artifactsDir, root)) {
     process.stderr.write(`[audit-code] run snapshot cleanup: ${problem}\n`);
   }
-  if (findingsArchived) await markRunEnded(artifactsDir);
+  await markRunEnded(artifactsDir);
+  await removeCompletedHostScratch(artifactsDir);
   return promotedPath;
+}
+
+/** Terminal promotion holds the artifact-tree lock. Remove only the scope we
+ * supplied to the host, not the scratch parent, lane evidence or ledgers. */
+async function removeCompletedHostScratch(artifactsDir: string): Promise<void> {
+  const scratch = hostScratchDir(artifactsDir, AUDIT_GATE_SUBMISSION_SCOPE);
+  try {
+    // Never traverse a symlink/junction at the scratch parent. A non-directory
+    // at the exact scope is not a scratch tree we created either.
+    if (!(await lstat(dirname(scratch))).isDirectory() || !(await lstat(scratch)).isDirectory()) return;
+    await rm(scratch, { recursive: true, force: true, maxRetries: 2 });
+  } catch (error) {
+    if (!isFileMissingError(error)) {
+      process.stderr.write(`[audit-code] retained host scratch after completion: ${scratch} (${String(error)})\n`);
+    }
+  }
 }
 
 /**

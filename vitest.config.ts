@@ -24,8 +24,9 @@ export default defineConfig({
   test: {
     include: vitestIncludeGlobs(),
     // Machine-global state-dir hermeticity: point AUDIT_CODE_STATE_DIR at a
-    // per-worker temp dir so no test (in-process or spawned CLI) reads/writes the
-    // box's live ~/.audit-code. See tests/helpers/state-dir-setup.mjs.
+    // private per-file directory below the run's fixture root so no test
+    // (in-process or spawned CLI) reads/writes the box's live ~/.audit-code.
+    // Vitest global teardown releases all these directories in one operation.
     setupFiles: ["tests/helpers/state-dir-setup.mjs"],
     // Runs ONCE per invocation, before any worker forks: publishes the
     // per-invocation fixture root (AUDIT_TOOLS_TEST_RUN_ROOT, consumed by

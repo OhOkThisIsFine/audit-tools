@@ -40,10 +40,11 @@ import { registerSuite, unregisterSuite, SUITE_OWNED_BUILD_ENV } from "./suiteLo
 import { settleTrackedChildren, type LiveChild } from "./trackedSpawn.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+let ownedRunRoot: string | undefined;
 
 export async function setup(): Promise<void> {
-  const root = mkdtempSync(join(tmpdir(), "audit-tools-tests-"));
-  process.env[TEST_RUN_ROOT_ENV] = root;
+  ownedRunRoot = mkdtempSync(join(tmpdir(), "audit-tools-tests-"));
+  process.env[TEST_RUN_ROOT_ENV] = ownedRunRoot;
   // Marks every descendant of this run. Workers inherit process.env and the
   // spawn helpers pass it on, so a build the SUITE itself triggers — the dev
   // wrapper's auto-rebuild, which several tests exercise — is exempt from the
@@ -57,18 +58,18 @@ export async function teardown(): Promise<void> {
   unregisterSuite(repoRoot);
   // BEFORE the run root goes: the child ledger lives inside it.
   const liveChildren = await settleTrackedChildren();
-  const root = process.env[TEST_RUN_ROOT_ENV];
-  if (root) {
+  const cleanupProblems: string[] = [];
+  if (ownedRunRoot) {
     try {
-      rmSync(root, { recursive: true, force: true });
-    } catch {
-      // Best-effort; the OS temp dir is the backstop.
+      rmSync(ownedRunRoot, { recursive: true, force: true, maxRetries: 2 });
+    } catch (error) {
+      cleanupProblems.push(`Could not remove owned Vitest fixture root ${ownedRunRoot}: ${String(error)}`);
     }
   }
   // BOTH reports, never the first one only: the two say different things about
   // the same run, and a fixture tree in `tests/` must not hide a child that is
   // still running behind it.
-  const problems = [...inTreeFixtureProblems(), ...liveChildProblems(liveChildren)];
+  const problems = [...cleanupProblems, ...inTreeFixtureProblems(), ...liveChildProblems(liveChildren)];
   if (problems.length > 0) throw new Error(problems.join("\n\n"));
 }
 

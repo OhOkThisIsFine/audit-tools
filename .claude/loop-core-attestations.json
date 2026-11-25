@@ -501,6 +501,22 @@
         "src/shared/submission/submissionLedger.ts": "545a2b34d94254b6c5e1eb7a1b6ade0b12f44cba"
       }
     },
+    "7d602de291bfef13": {
+      "reviewed_by": "audit_cleanup_review",
+      "attester_class": "agent",
+      "checked": "Checked premature deletion of resumable working evidence and recursive directory traversal through a linked scratch parent via the exact terminal promotion hold; independent bare Vitest confirmed worker-fixture containment and cleanup.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "dde24e338effaeafe4ba4cde0b939ef0824422a7",
+        "ran_at": "2026-11-25T19:48:08.980Z"
+      },
+      "attested_at": "2026-11-25T19:48:09.523Z",
+      "vouches": {
+        "src/audit/cli/nextStepHelpers.ts": "776240758ef712b97bec374d56dda82190f79e26"
+      }
+    },
     "92a14c6e9e3ff056": {
       "reviewed_by": "Codex independent reviewer, task-5 (01a13aa5-86e7-718a-b50b-8a39bff4f03f)",
       "attester_class": "agent",
@@ -983,7 +999,7 @@
       "review": "cfe244114db006a2"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "cfe244114db006a2"
+      "review": "7d602de291bfef13"
     },
     "src/audit/cli/prompts.ts": {
       "review": "e36223304299f9c6"
