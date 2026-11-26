@@ -70,7 +70,12 @@ import {
 import type { CoverageLedger } from "../state/types.js";
 import { buildCoverageLedger } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
-import { retryIncompleteCloseReport, runClosePhase } from "../phases/close.js";
+import {
+  assertNoUnresolvedClosingAction,
+  retryIncompleteCloseReport,
+  runClosePhase,
+  UnresolvedClosingActionError,
+} from "../phases/close.js";
 import { hasBoundRemediationSubmission, ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
 import { RETIRED_DISPATCH_SHAPE_MESSAGE, type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
 import {
@@ -1980,6 +1985,7 @@ async function emitFinalGateRedStep(ctx: {
   tree?: string | null;
   /** Close has already recorded its red before presentation. */
   recordedPath?: string;
+  closingActionWithheld?: boolean;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, scope, gate, runLogger } = ctx;
   admitRemediationDirtyBaseline(state);
@@ -2053,6 +2059,7 @@ Ask the operator to supply a verification command, then run:
 The command replaces only the test role for this run. Any declared build,
 typecheck, and lint checks still run. Alternatively, stop here with work preserved.
 Do not invent a passing command or waive the gate.
+${ctx.closingActionWithheld ? "\nThe closing action was withheld." : ""}
 ` : `
 # Remediation paused — the repository suite is red
 
@@ -2064,7 +2071,7 @@ One command failed:
 The output tail is in \`${recordPath}\`.
 
 This pause changes nothing. Every item keeps its status, the run stays in its
-phase, and no work is lost. A red suite does not name the item that caused it.
+phase, and no work is lost. ${ctx.closingActionWithheld ? "The closing action was withheld. " : ""}A red suite does not name the item that caused it.
 A commit made outside this run can also cause it.
 
 ${attributionBlock}
@@ -2303,12 +2310,15 @@ async function handleClosing(
       onFinalGateRed: async (gate) => {
         paused = await emitFinalGateRedStep({
           root, artifactsDir, state, scope: "all-terminal final gate",
-          where: "Before completing the close phase", gate, runLogger,
+          where: "Before completing the close phase", gate, runLogger, closingActionWithheld: true,
           recordedPath: finalGateRecordPath(artifactsDir),
         });
       },
     }, runLogger);
   } catch (error) {
+    if (error instanceof UnresolvedClosingActionError) {
+      return { kind: "emit", step: await emitUnresolvedClosingStep(root, artifactsDir, state, error) };
+    }
     if (!(error instanceof RemediationPlanAuthorityError)) throw error;
     return { kind: "emit", step: await emitPlanRevisionBlockedStep(root, artifactsDir, {
       reason: `Closing is paused before any closing action. ${error.message}`,
@@ -3488,6 +3498,22 @@ async function decideNextStepLoop(
   }
 }
 
+async function emitUnresolvedClosingStep(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState | null,
+  error: UnresolvedClosingActionError,
+): Promise<RemediationStep> {
+  return writeCurrentStep({
+    stepKind: "close_run", status: "blocked", runId: stateRunId(state),
+    repoRoot: root, artifactsDir,
+    prompt: ["# Closing action needs reconciliation", error.message, `Receipt: ${error.receiptPath}`].join("\n\n"),
+    allowedCommands: [],
+    artifactPaths: { closing_receipt: error.receiptPath },
+    stopCondition: "Report the unresolved outcome to the operator. Do not rerun a closing command.",
+  });
+}
+
 /**
  * The serial state-machine advance itself — pre-intake gates, then the main
  * obligation fold. Runs with `<artifactsDir>/phase.lock` HELD for its whole
@@ -3504,6 +3530,20 @@ async function advanceUnderPhaseLock(deps: {
   // Loaded FRESH under the mutex: a peer may have advanced and persisted state
   // between the entry read and this process winning the lock.
   let state = await store.loadState();
+  try {
+    await assertNoUnresolvedClosingAction(artifactsDir);
+  } catch (error) {
+    if (!(error instanceof UnresolvedClosingActionError)) throw error;
+    if (state) {
+      try {
+        const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
+        if (completed) return handleComplete(root, artifactsDir, await store.loadState());
+      } catch (reconcileError) {
+        if (!(reconcileError instanceof UnresolvedClosingActionError)) throw reconcileError;
+      }
+    }
+    return emitUnresolvedClosingStep(root, artifactsDir, state, error);
+  }
   const bareRequest = options.input === undefined && options.severity === undefined && options.findingIds === undefined &&
     options.guidanceFile === undefined && options.guidanceText === undefined && options.verificationCommand === undefined &&
     options.guidanceFileSupplied !== true && options.forceReplan !== true && options.planOnly !== true && options.finalizeClosing !== true;

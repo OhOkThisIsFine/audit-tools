@@ -114,8 +114,11 @@ import {
 import { finalGateOutcomePath } from "../steps/finalGate.js";
 import { runCloseAcceptance, type CombinedTestResult } from "./closeAcceptance.js";
 
+const LANDING_GATE_EFFECT = "Landing checks do not withhold the closing action; a failure keeps the run artifacts for diagnosis.";
+
 // Derived from the single source so the key list can never drift from the
 // RemediationOutcomeStatus contract (A6).
+
 const OUTCOME_KEYS: RemediationOutcomeStatus[] = [
   ...RemediationOutcomeStatusSchema.options,
 ];
@@ -764,6 +767,7 @@ export interface ClosingResult {
   action: ClosingAction;
   status: "success" | "failed" | "skipped";
   commands: ClosingCommandResult[];
+  observed_git_ref?: { ref: string; object_id: string };
   /** See `ClosingActionPreviewSchema.leftover_files` — same untouched-dirt set, at execute time. */
   leftover_files?: string[];
 }
@@ -827,6 +831,8 @@ function commandResult(
  * residual), which is what let a hung closing child wedge the fold.
  */
 const CLOSING_CHILD_DEADLINE_MS = 3_600_000;
+const AUTO_REMEDIATION_TAG = "auto-remediation";
+const AUTO_REMEDIATION_TAG_REF = `refs/tags/${AUTO_REMEDIATION_TAG}`;
 
 async function runTrackedCommand(
   root: string,
@@ -1130,12 +1136,13 @@ async function commitClosingFiles(
   root: string,
   files: readonly string[],
   message: string,
-  run: (command: string, args: string[]) => Promise<boolean>,
+  run: (command: string, args: string[], finishesAction?: boolean) => Promise<boolean>,
   commands: ClosingCommandResult[],
+  finishesAction: boolean,
 ): Promise<boolean> {
   const foldCollision = new Set(files.map(normalizeRepoPath)).size < files.length;
   if (!foldCollision) {
-    return run("git", ["commit", "-m", message, "--", ...files]);
+    return run("git", ["commit", "-m", message, "--", ...files], finishesAction);
   }
   const listed = await readGitPathList(root,
     ["diff", "--cached", "--name-only", "--no-renames", "--ignore-submodules=none", "-z"],
@@ -1156,7 +1163,7 @@ async function commitClosingFiles(
     });
     return false;
   }
-  return run("git", ["commit", "-m", message]);
+  return run("git", ["commit", "-m", message], finishesAction);
 }
 
 /**
@@ -1169,6 +1176,7 @@ async function commitClosingFiles(
 export async function executeClosingAction(
   state: RemediationState,
   options: OrchestratorOptions,
+  recordCommand?: (receipts: ClosingCommandResult[], inFlight: string[] | null, terminal?: ClosingResult) => Promise<void>,
 ): Promise<ClosingResult> {
   admitRemediationDirtyBaseline(state);
   const action = state.closing_plan!.action;
@@ -1182,15 +1190,31 @@ export async function executeClosingAction(
   }
 
   const commands: ClosingCommandResult[] = [];
-  const run = async (command: string, args: string[]): Promise<boolean> => {
+  let leftoverFiles: string[] = [];
+  const resultForReceipts = (): ClosingResult => ({
+    contract_version: "remediate-code-closing-result/v1alpha1",
+    action,
+    status: commands.every(isSuccess) ? "success" : "failed",
+    commands,
+    ...(leftoverFiles.length > 0 ? { leftover_files: leftoverFiles } : {}),
+  });
+  const run = async (command: string, args: string[], finishesAction = false): Promise<boolean> => {
+    const argv = [command, ...args];
+    await recordCommand?.(commands, argv);
     const result = await runTrackedCommand(options.root, command, args);
     commands.push(result);
+    // A timeout or signal is not a receipt of the affected destination.
+    if (result.exit_code === null) {
+      await recordCommand?.(commands, argv);
+    } else if (finishesAction || !isSuccess(result)) {
+      // Promote actual terminal command receipts directly into report recovery.
+      // There is no intermediate "all commands recorded, but outcome unknown".
+      await recordCommand?.(commands, null, resultForReceipts());
+    } else {
+      await recordCommand?.(commands, null);
+    }
     return isSuccess(result);
   };
-  // Populated only on the commit/push/open-pr branch below; threaded into
-  // every return of this function so the caller always sees the same
-  // untouched-user-dirt set the preview (checkClosingPreview) computed.
-  let leftoverFiles: string[] = [];
 
   if (action === "commit" || action === "push" || action === "open-pr") {
     // Recomputed here (not reused from the preview) so a file the user
@@ -1209,13 +1233,7 @@ export async function executeClosingAction(
     // so `commands` stays empty and the status is success.
     if (files.length === 0) {
       console.warn("No modified files to stage — skipping commit.");
-      return {
-        contract_version: "remediate-code-closing-result/v1alpha1",
-        action,
-        status: "success",
-        commands: [],
-        ...(leftoverFiles.length > 0 ? { leftover_files: leftoverFiles } : {}),
-      };
+      return resultForReceipts();
     }
     const commitMessage = state.closing_plan!.closing_action_preview?.commit_message
       ?? generateCommitMessage(state);
@@ -1240,22 +1258,22 @@ export async function executeClosingAction(
       (present.length === 0 || (await run("git", ["add", "--", ...present]))) &&
       (absent.length === 0 ||
         (await run("git", ["rm", "--cached", "--ignore-unmatch", "-q", "--", ...absent])));
-    const committed = staged && (await commitClosingFiles(options.root, files, commitMessage, run, commands));
+    const committed = staged && (await commitClosingFiles(options.root, files, commitMessage, run, commands, action === "commit"));
     if (committed && action === "push") {
-      await run("git", ["push"]);
+      await run("git", ["push"], true);
     } else if (committed && action === "open-pr") {
       if (await run("git", ["push"])) {
-        await run("gh", ["pr", "create", "--fill"]);
+        await run("gh", ["pr", "create", "--fill"], true);
       }
     }
   } else if (action === "publish") {
-    await run("npm", ["publish"]);
+    await run("npm", ["publish"], true);
   } else if (action === "tag") {
-    await run("git", ["tag", "auto-remediation"]);
+    await run("git", ["tag", AUTO_REMEDIATION_TAG], true);
   } else if (action === "custom") {
     const custom = state.closing_plan!.custom_command;
     if (custom?.length) {
-      await run(custom[0], custom.slice(1));
+      await run(custom[0], custom.slice(1), true);
     } else {
       // A chosen `custom` with no command attached must never read as a green
       // no-op: nothing ran, and the result says so. `custom` is reachable from
@@ -1268,13 +1286,7 @@ export async function executeClosingAction(
     }
   }
 
-  return {
-    contract_version: "remediate-code-closing-result/v1alpha1",
-    action,
-    status: commands.every(isSuccess) ? "success" : "failed",
-    commands,
-    ...(leftoverFiles.length > 0 ? { leftover_files: leftoverFiles } : {}),
-  };
+  return resultForReceipts();
 }
 
 
@@ -1747,6 +1759,13 @@ export function buildRemediationReportMarkdown(
 
   reportContent += `\n## Closing Action\n\nAction: ${state.closing_plan!.action}\n`;
   reportContent += `Status: ${closingResult.status}\n`;
+  if (closingResult.status === "failed") {
+    reportContent += "A command failed. This does not establish that the destination was unchanged.\n";
+  }
+  if (closingResult.observed_git_ref) {
+    const { ref, object_id } = closingResult.observed_git_ref;
+    reportContent += `Reconciled from the actual local Git ref: \`${ref}\` points to \`${object_id}\`; no command was repeated.\n`;
+  }
 
   // V2 staging-manifest fix, finding 3: leftover (untouched user dirt) must be
   // visible in the HUMAN report too — on a pre_authorized/autonomous run there
@@ -1867,10 +1886,10 @@ export function buildRemediationReportMarkdown(
   // a reader has to be able to tell "the tree-wide gates ran and passed" from
   // "no gate was ever run", and an absent gate set is a real fact about a target
   // repository that declares none (see `verifyLandingGates`).
-  reportContent += `\n## Landing Gates\n\n`;
+  reportContent += `\n## Landing Gates (advisory)\n\n${LANDING_GATE_EFFECT}\n\n`;
   if (landingGates.commands.length === 0) {
     reportContent +=
-      "No landing gates were discovered: this repository's `package.json` scripts declare none of the gate roles this tool knows. The per-item required tests were the only checks run at this close.\n";
+      "No landing gates were discovered: this repository's `package.json` scripts declare none of the gate roles this tool knows.\n";
   } else {
     for (const gate of landingGates.gates) {
       reportContent += `- \`${gate.command}\` — ${gate.passed ? "passed" : "**FAILED**"}${gate.refuses ? ` (refuses ${gate.refuses})` : ""}\n`;
@@ -2209,6 +2228,7 @@ export async function runClosePhase(
     runCombined: () => runCombinedTestSuite(state, options),
   });
   if (acceptance.gate && !acceptance.gate.passed) {
+    console.warn("Blocking final acceptance failed; the closing action was withheld.");
     await options.onFinalGateRed?.(acceptance.gate);
     return state;
   }
@@ -2356,14 +2376,14 @@ export async function runClosePhase(
   } else {
     for (const gate of landingGates.gates) {
       console.log(
-        `Landing gate ${gate.command}: ${gate.passed ? "passed" : "FAILED"}`,
+        `Advisory landing gate ${gate.command}: ${gate.passed ? "passed" : "FAILED"}`,
       );
       if (!gate.passed) {
         runLogger?.event({
           phase: "close",
           kind: "error",
           obligation: "closing",
-          note: `Landing gate failed: ${gate.command}${gate.refuses ? ` (${gate.refuses})` : ""}`,
+          note: `Advisory landing gate failed: ${gate.command}${gate.refuses ? ` (${gate.refuses})` : ""}. ${LANDING_GATE_EFFECT}`,
         });
       }
     }
@@ -2376,19 +2396,46 @@ export async function runClosePhase(
   const contractReviews = await readContractReviewOutcomes(options.artifactsDir);
   await assertClosingPlanAuthority(state, options);
 
-  // 4. Execute the closing action and record exact command outcomes before
-  // reporting success.
+  // 4. Record intent before each spawn and the returned receipt before the
+  // next spawn. Replacing this record with the final report receipt is the
+  // only successful exit; process interruption cannot implicitly replay it.
   console.log(`Executing closing action: ${state.closing_plan.action}`);
-  const closingResult = await executeClosingAction(state, options);
-  const context: CloseReportContext = {
-    combinedTest, e2eResult, landingGates, contractReviews, endedAt: new Date().toISOString(),
+  const resultPath = join(options.artifactsDir, CLOSING_RESULT_FILENAME);
+  const tagTarget = state.closing_plan.action === "tag"
+    ? await readNewTagTarget(options.root)
+    : undefined;
+  const intent = {
+    root: options.root,
+    plan_id: state.plan.plan_id,
+    started_at: state.started_at,
+    review_revision_sha256: state.plan.review_revision_sha256,
+    action: state.closing_plan.action,
   };
-  // Persist the irreversible action's result and the facts needed to report it in
-  // one atomic rename, before attempting any ledger read or report write.
-  await writeJsonFile(join(options.artifactsDir, CLOSING_RESULT_FILENAME), {
-    ...closingResult,
-    pending_report: { verified_state: state, context, sha256: contentSha256([closingResult, state, context]) },
-  } satisfies RecordedClosingResult);
+  let context: CloseReportContext | undefined;
+  const recordOutcome = async (closingResult: ClosingResult) => {
+    const reportContext: CloseReportContext = {
+      combinedTest, e2eResult, landingGates, contractReviews, endedAt: new Date().toISOString(),
+    };
+    await writePendingCloseReport(resultPath, closingResult, state, reportContext);
+    return reportContext;
+  };
+  const closingResult = await executeClosingAction(state, options, async (receipts, inFlight, terminal) => {
+    if (terminal) {
+      context = await recordOutcome(terminal);
+    } else {
+      const inProgress = { ...intent, receipts, in_flight: inFlight,
+        ...(tagTarget ? {
+          tag_target: tagTarget, verified_state: state,
+          report_inputs: { combinedTest, e2eResult, landingGates, contractReviews },
+        } : {}),
+      };
+      await writeJsonFile(resultPath, { in_progress: { ...inProgress, sha256: contentSha256(inProgress) } });
+      if (inFlight !== null && receipts.at(-1)?.exit_code === null) {
+        throw new UnresolvedClosingActionError(resultPath);
+      }
+    }
+  });
+  context ??= await recordOutcome(closingResult);
   return reportRecordedClose(state, options, closingResult, context, runLogger, false);
 }
 
@@ -2407,13 +2454,105 @@ interface RecordedClosingResult extends ClosingResult {
   pending_report?: { verified_state: RemediationState; context: CloseReportContext; sha256: string };
 }
 
+/** One atomic write before any ledger or report IO. */
+function writePendingCloseReport(
+  path: string,
+  closingResult: ClosingResult,
+  state: RemediationState,
+  context: CloseReportContext,
+): Promise<void> {
+  return writeJsonFile(path, {
+    ...closingResult,
+    pending_report: { verified_state: state, context, sha256: contentSha256([closingResult, state, context]) },
+  } satisfies RecordedClosingResult);
+}
+
+/** A prior close started, but no final action receipt proves its outcome. */
+export class UnresolvedClosingActionError extends Error {
+  constructor(readonly receiptPath: string) {
+    super(
+      "Closing action outcome is unresolved. No closing command was repeated. " +
+      "Inspect the recorded command receipts and verify the actual local or destination state before further closing work.",
+    );
+  }
+}
+
+interface ClosingIntent {
+  root: string;
+  action: ClosingAction;
+  plan_id: string;
+  review_revision_sha256?: string;
+  started_at?: string;
+  in_flight: string[] | null;
+  receipts: ClosingCommandResult[];
+  sha256: string;
+  tag_target?: string;
+  verified_state?: RemediationState;
+  report_inputs?: Omit<CloseReportContext, "endedAt">;
+}
+
+async function readClosingRecord(artifactsDir: string) {
+  return readOptionalJsonFile<RecordedClosingResult | { in_progress: ClosingIntent }>(
+    join(artifactsDir, CLOSING_RESULT_FILENAME),
+  );
+}
+
+async function readGitObjectId(root: string, ref: string): Promise<string | undefined> {
+  const read = await runTrackedCommand(root, "git", ["rev-parse", "--verify", ref]);
+  return read.exit_code === 0 && read.stdout && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(read.stdout)
+    ? read.stdout : undefined;
+}
+
+async function readNewTagTarget(root: string): Promise<string | undefined> {
+  const tag = await runTrackedCommand(root, "git", ["show-ref", "--verify", "--quiet", AUTO_REMEDIATION_TAG_REF]);
+  return tag.exit_code === 1 ? readGitObjectId(root, "HEAD") : undefined;
+}
+
+/** Check before next-step changes lifecycle, plan, or source for this directory. */
+export async function assertNoUnresolvedClosingAction(artifactsDir: string): Promise<void> {
+  const saved = await readClosingRecord(artifactsDir);
+  if (saved && "in_progress" in saved) throw new UnresolvedClosingActionError(join(artifactsDir, CLOSING_RESULT_FILENAME));
+}
+
+async function reconcileClosingTag(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  intent: ClosingIntent,
+  runLogger?: RunLogger,
+): Promise<RemediationState> {
+  const path = join(options.artifactsDir, CLOSING_RESULT_FILENAME);
+  const { sha256, ...body } = intent;
+  // Only tool-owned evidence for this exact run, a previously absent tag and
+  // an exact observed target can authorize report-only recovery.
+  if (sha256 !== contentSha256(body) || state.status !== "closing" ||
+      state.closing_plan?.action !== "tag" || intent.action !== "tag" ||
+      intent.root !== options.root || intent.plan_id !== state.plan?.plan_id || intent.started_at !== state.started_at ||
+      intent.review_revision_sha256 !== state.plan?.review_revision_sha256 || !intent.verified_state ||
+      !intent.report_inputs || !intent.tag_target ||
+      JSON.stringify(intent.in_flight) !== JSON.stringify(["git", "tag", AUTO_REMEDIATION_TAG]) ||
+      await readGitObjectId(options.root, AUTO_REMEDIATION_TAG_REF) !== intent.tag_target) {
+    throw new UnresolvedClosingActionError(path);
+  }
+
+  const result: ClosingResult = {
+    contract_version: "remediate-code-closing-result/v1alpha1",
+    action: "tag", status: "success", commands: intent.receipts,
+    observed_git_ref: { ref: AUTO_REMEDIATION_TAG_REF, object_id: intent.tag_target },
+  };
+  const verified = intent.verified_state;
+  const context = { ...intent.report_inputs, endedAt: new Date().toISOString() };
+  await writePendingCloseReport(path, result, verified, context);
+  return reportRecordedClose(verified, options, result, context, runLogger, true);
+}
+
 /** Resume after the authorized action, including when a report write failed before state became complete. */
 export async function retryIncompleteCloseReport(
   state: RemediationState,
   options: OrchestratorOptions,
   runLogger?: RunLogger,
 ): Promise<RemediationState | undefined> {
-  const saved = await readOptionalJsonFile<RecordedClosingResult>(join(options.artifactsDir, CLOSING_RESULT_FILENAME));
+  const saved = await readClosingRecord(options.artifactsDir);
+  if (saved && "in_progress" in saved) return reconcileClosingTag(state, options, saved.in_progress, runLogger);
   if (!saved || !("pending_report" in saved)) return;
   const { pending_report: retry, ...closingResult } = saved;
   const verified = retry?.verified_state;
@@ -2524,10 +2663,12 @@ async function finishCloseReport(
       failure_summary?: string;
     };
     e2e_result?: { passed: boolean };
+    landing_checks: LandingGateVerifyOutcome & { blocking: false };
     closing_result: {
       action: ClosingAction;
       status: string;
       commands: ClosingCommandResult[];
+      observed_git_ref?: ClosingResult["observed_git_ref"];
       leftover_files?: string[];
     };
     plan_coverage?: OutcomeCoverageLedger;
@@ -2543,10 +2684,12 @@ async function finishCloseReport(
       ...(combinedTest.output ? { failure_summary: combinedTest.output } : {}),
     },
     ...(e2eResult.ran ? { e2e_result: { passed: e2eResult.passed } } : {}),
+    landing_checks: { ...landingGates, blocking: false },
     closing_result: {
       action: closingResult.action,
       status: closingResult.status,
       commands: closingResult.commands,
+      ...(closingResult.observed_git_ref ? { observed_git_ref: closingResult.observed_git_ref } : {}),
       // Untouched-user-dirt set collectStagingFiles left alone (never staged) —
       // see ClosingResult.leftover_files / ClosingActionPreviewSchema.leftover_files.
       ...(closingResult.leftover_files?.length

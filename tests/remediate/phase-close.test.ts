@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   runClosePhase,
   collectStagingFiles,
@@ -8,12 +8,12 @@ import {
   blockResolvedItemsOnCombinedFailure,
 } from "../../src/remediate/phases/close.js";
 import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
-import { writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSyncHidden as execSync } from "../helpers/spawn.mjs";
-import { RunLogger } from "audit-tools/shared";
+import { RunLogger, runTrackedAsync } from "audit-tools/shared";
 import { StateStore, type RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
 import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
@@ -23,6 +23,11 @@ import { validateVerificationReport } from "../../src/remediate/validation/verif
 import { scratchDir } from "../helpers/scratch.js";
 import { submissionLedgerPath } from "../../src/shared/submission/submissionLedger.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
+
+vi.mock("audit-tools/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("audit-tools/shared")>();
+  return { ...actual, runTrackedAsync: vi.fn(actual.runTrackedAsync) };
+});
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_DIR = scratchDir(".test-close-repo");
@@ -105,6 +110,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.mocked(runTrackedAsync).mockClear();
   await rm(REPO_DIR, { recursive: true, force: true });
 });
 
@@ -210,6 +216,100 @@ describe("runClosePhase", () => {
     expect(await readFile(join(REPO_DIR, "action-count"), "utf8")).toBe("x");
     const events = (await readFile(log, "utf8")).trim().split("\n").map(line => JSON.parse(line));
     expect(events.filter(event => event.kind === "outcome")).toHaveLength(1);
+  });
+
+  it.each([null, 1])("journals a PR with exit status %s without assuming no effect or replaying", async exit => {
+    const state = makeState({
+      items: { U1: { status: "blocked", failure_reason: "Preserve close artifacts" } },
+      applied_edit_surface: ["initial.txt"],
+      plan: { blocks: [{ block_id: "B", items: ["U1"], touched_files: ["initial.txt"] }] },
+      closing_plan: { action: "open-pr", pre_authorized: true },
+    });
+    const receiptPath = join(TEST_DIR, "remediation-closing-result.json");
+    writeFileSync(join(REPO_DIR, "initial.txt"), "remediation edit");
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    await new StateStore(TEST_DIR).saveState(state);
+    const actual = await vi.importActual<typeof import("audit-tools/shared")>("audit-tools/shared");
+    const inspect = () => JSON.parse(readFileSync(receiptPath, "utf8")).in_progress;
+    let pushIntent: ReturnType<typeof inspect>;
+    let prIntent: ReturnType<typeof inspect>;
+    const mocked = vi.mocked(runTrackedAsync);
+    mocked.mockImplementation(async (argv, opts) => {
+      if (argv[0] === "git" && argv[1] === "push") {
+        pushIntent = inspect();
+        return { argv, duration_ms: 1, status: 0, stdout: "synthetic push receipt", stderr: "" };
+      }
+      if (argv[0] === "gh" && argv[1] === "pr") {
+        prIntent = inspect();
+        return { argv, duration_ms: 1, status: exit, stdout: "", stderr: "synthetic remote failure" };
+      }
+      return actual.runTrackedAsync(argv, opts);
+    });
+    try {
+      if (exit === null) await expect(runClosePhase(state, BASE_OPTIONS)).rejects.toThrow("outcome is unresolved");
+      else expect((await runClosePhase(state, BASE_OPTIONS)).status).toBe("complete");
+      expect(pushIntent).toMatchObject({ action: "open-pr", in_flight: ["git", "push"] });
+      const [staged, committed] = pushIntent.receipts;
+      expect(staged).toMatchObject({ command: ["git", "add", "--", "initial.txt"], exit_code: 0 });
+      expect(committed).toMatchObject({ command: ["git", "commit", "-m", expect.any(String), "--", "initial.txt"], exit_code: 0 });
+      expect(prIntent).toMatchObject({
+        root: REPO_DIR, plan_id: state.plan?.plan_id, review_revision_sha256: state.plan?.review_revision_sha256,
+        in_flight: ["gh", "pr", "create", "--fill"],
+        receipts: [staged, committed, { command: ["git", "push"], exit_code: 0, stdout: "synthetic push receipt" }],
+      });
+      const closeCallCount = mocked.mock.calls.length;
+      if (exit === null) {
+        expect(inspect().receipts.at(-1)).toMatchObject({ exit_code: null, stderr: "synthetic remote failure" });
+        for (const options of [{}, { finalizeClosing: true }]) {
+          const blocked = await decideNextStep({ root: REPO_DIR, ...options });
+          expect(blocked.step_kind).toBe("close_run");
+          expect(blocked.status).toBe("blocked");
+          expect(blocked.allowed_commands).toEqual([]);
+        }
+        expect(existsSync(join(OUTPUT_DIR, "remediation-report.md"))).toBe(false);
+      } else {
+        expect((await decideNextStep({ root: REPO_DIR })).step_kind).toBe("present_report");
+        const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+        expect(report).toContain("Status: failed");
+        expect(report).toContain("This does not establish that the destination was unchanged");
+      }
+      expect(mocked.mock.calls).toHaveLength(closeCallCount);
+    } finally {
+      mocked.mockImplementation(actual.runTrackedAsync);
+    }
+  });
+
+  it("reconciles an interrupted local tag only after the exact expected ref is observed", async () => {
+    const state = makeState({ closing_plan: { action: "tag" } });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    await new StateStore(TEST_DIR).saveState(state);
+    const expected = execSync("git rev-parse HEAD", { cwd: REPO_DIR }).toString().trim();
+    const actual = await vi.importActual<typeof import("audit-tools/shared")>("audit-tools/shared");
+    const mocked = vi.mocked(runTrackedAsync);
+    let tagAttempts = 0;
+    mocked.mockImplementation(async (argv, opts) => {
+      if (argv[0] === "git" && argv[1] === "tag") {
+        tagAttempts++;
+        return { argv, duration_ms: 1, status: null, stdout: "", stderr: "synthetic interrupted tag" };
+      }
+      return actual.runTrackedAsync(argv, opts);
+    });
+    try {
+      await expect(runClosePhase(state, BASE_OPTIONS)).rejects.toThrow("outcome is unresolved");
+      expect((await decideNextStep({ root: REPO_DIR })).status).toBe("blocked");
+      execSync("git tag auto-remediation", { cwd: REPO_DIR });
+      expect((await decideNextStep({ root: REPO_DIR })).step_kind).toBe("present_report");
+      const outcomes = JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
+      expect(outcomes.closing_result).toMatchObject({
+        status: "success", action: "tag",
+        observed_git_ref: { ref: "refs/tags/auto-remediation", object_id: expected },
+        commands: [{ exit_code: null }],
+      });
+      expect(await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8")).toContain("Reconciled from the actual local Git ref:");
+      expect(tagAttempts).toBe(1);
+    } finally {
+      mocked.mockImplementation(actual.runTrackedAsync);
+    }
   });
 
   it("throws when plan is missing", async () => {

@@ -18,7 +18,7 @@ export async function presentReportStep(
     runId: stateRunId(state),
     repoRoot: root,
     artifactsDir,
-    prompt: `# Present Remediation Report\n\nRead \`${reportPath}\` and summarize the remediation outcome.\nMention resolved, ignored, and deemed-inappropriate counts plus the closing action.`,
+    prompt: `# Present Remediation Report\n\nRead \`${reportPath}\` and summarize the remediation outcome.\nMention resolved, ignored, and deemed-inappropriate counts plus the closing action and its disposition. Distinguish advisory landing-check failures from a withheld action.`,
     stopCondition: "Present the remediation report summary and stop.",
     artifactPaths: { final_report: reportPath },
   });

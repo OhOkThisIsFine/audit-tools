@@ -110,7 +110,9 @@ describe("the landing-gate close leg", () => {
     // Red with the `landingGates.passed` term removed from `fullyGreen` in
     // `cleanupTempBranchesAndArtifacts`: the run then lands green, deletes the
     // artifacts dir, and a tree-wide red is reported as a clean close.
-    const state = makeState();
+    const state = makeState({ closing_plan: { action: "custom", custom_command: [
+      process.execPath, "-e", "require('node:fs').writeFileSync('did-close', 'yes')",
+    ] } });
     const leg = stubbedLeg({ passed: false, output: "gate refused: cycle" });
     await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     await runClosePhase(state, {
@@ -121,7 +123,12 @@ describe("the landing-gate close leg", () => {
     expect(leg.verified, "the declared gate must reach the leg").toEqual([["npm", "run", "check:lint"]]);
     expect(existsSync(TEST_DIR), "artifacts dir must be preserved for diagnosis").toBe(true);
     const report = readFileSync(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
-    expect(report).toMatch(/## Landing Gates/);
+    expect(report).toContain("## Landing Gates (advisory)");
+    expect(report).toContain("Landing checks do not withhold the closing action");
+    expect(readFileSync(join(REPO_DIR, "did-close"), "utf8")).toBe("yes");
+    const outcomes = JSON.parse(readFileSync(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
+    expect(outcomes.landing_checks).toMatchObject({ blocking: false, passed: false });
+    expect(outcomes.closing_result).toMatchObject({ action: "custom", status: "success" });
     // The failure names the command AND carries its output tail — a report that
     // says only "a gate failed" leaves an operator with nothing to act on.
     expect(report).toMatch(/FAILED/);
