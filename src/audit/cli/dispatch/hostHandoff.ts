@@ -632,6 +632,7 @@ const QuestionWorkloadSchema = z.strictObject({
   source_files: z.array(QuestionSourceFileSchema),
   graph_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
   graph_indexed: z.literal(true).optional(),
+  graph_index_failed: z.literal(true).optional(),
   inventory_omission_count: z.number().int().positive().optional(),
   evidence: z.array(ReviewEvidenceSchema),
   work_items: z.array(z.strictObject({ binding: QuestionHandoffBindingSchema, result_path: z.string().min(1) })),
@@ -775,9 +776,13 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
     }
   }
   let indexed;
+  let graphIndexFailed = false;
   if (params.graph) {
     try { indexed = await prepareReviewerCbm(paths.runDir, params.sourceRoot, sourceFiles); }
-    catch { console.warn("[audit-code] Codebase Memory index unavailable; continuing with native file relationships."); }
+    catch (error) {
+      graphIndexFailed = true;
+      console.warn("[audit-code] Codebase Memory index unavailable: " + errorMessage(error));
+    }
   }
   const graphText = params.graph ? buildReviewerGraph(params.graph, sourceFiles.map(({ path }) => path), indexed) : undefined;
   const graphSha256 = graphText === undefined ? undefined : hashContent(graphText);
@@ -786,6 +791,7 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
     source_files: sourceFiles,
     ...(graphSha256 && { graph_sha256: graphSha256 }),
     ...(indexed && { graph_indexed: true }),
+    ...(graphIndexFailed && { graph_index_failed: true }),
     ...(params.inventoryOmissionCount ? { inventory_omission_count: params.inventoryOmissionCount } : {}),
     evidence: [...evidence.values()].sort((a, b) => compareCodeUnits(a.evidence_id, b.evidence_id)),
     work_items: params.bindings.map((binding) => {

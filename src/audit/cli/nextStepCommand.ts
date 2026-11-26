@@ -1813,9 +1813,15 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
       artifactPaths: { host_workload: result.workloadPath, review_routing: result.routingPath },
       prompt: [
         "# Review the issued questions",
+        ...(result.graphIndexFailed ? [
+          "## Repair indexed graph tooling before dispatch if possible",
+          "Codebase Memory failed qualification on the host. Read the command diagnostic. Check the installed CLI, its current JSON contract, and its local environment. If you can fix it within existing permissions (for example, resolve the current release or correct the executable path), do that and rerun " + next + " before dispatching. Do not pin a tested release or change audit scope.",
+          "If you cannot repair it, use the issued native file links and frozen source. Record the missing indexed coverage and why; do not report it as reviewed.",
+        ] : []),
         "Read only the routing metadata at: " + toPromptPathToken(result.routingPath),
         "For each chosen assignment ID, invoke the current audit-code wrapper with prepare_review_argv_prefix followed by --work-item and that assignment ID. The command returns a prompt_path, not the prompt.",
         "Pass that file directly to the reviewer harness, or send the reviewer only the instruction to read that path. Share the frozen workspace and the named read_paths. Do not open the reviewer prompt or the host workload in the dispatcher conversation.",
+        "If indexed graph lookup fails during review, diagnose it on the host and rerun next-step after repair. If it cannot be repaired, tell reviewers to use native file links and frozen source, and record the missing indexed coverage.",
         ...(rejected ? [
           "## Saved results not accepted",
           rejectionSummary + " Rejections did not change any accepted answers.",

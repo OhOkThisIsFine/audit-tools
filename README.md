@@ -254,14 +254,17 @@ When present, the packet’s shared graph handle is for read-only navigation: ca
 It returns a page of incoming and outgoing file links; narrow with \`--direction\`
 or \`--relation\`, or continue with the returned \`--offset\`. Inspect frozen source
 before treating a link as evidence. Do not load the full index into reviewer context.
-If Codebase Memory MCP 0.12.1 is on PATH or AUDIT_TOOLS_CBM_BIN points to its
-absolute native executable, the host indexes the same admitted frozen files
-once per run and source binding. It does not install or update the engine.
+Use the latest Codebase Memory MCP on PATH or point AUDIT_TOOLS_CBM_BIN to
+an absolute native executable. The adapter checks the actual index and query
+commands, not a version label. It does not download or update the engine.
+The host indexes the admitted frozen files once per run and installed build.
 Use --detail symbols or --detail call-sites, optionally --symbol for an exact
-name, and continue with the returned --cursor. The reviewer host needs the
-same engine version and access to the shared run artifacts. This is indexed
-navigation: absence is not proof of no references or no call sites. If the
-engine is unavailable, the ordinary file lookup still works.
+name, and continue with the returned --cursor. Use the host/build that made
+the index; reissue the workload after a tool upgrade to rebuild it.
+If compatibility fails, the orchestrator diagnoses the error and retries after
+any authorized repair. If it cannot fix the tool, it records the coverage gap
+and proceeds with native file links and frozen source. Missing indexed rows
+are not proof that a symbol or call site does not exist.
 
 The packet contains just that question, linked evidence and submission
 instructions. Reviewers can look up related code in the admitted, frozen

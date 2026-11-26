@@ -171,23 +171,6 @@
         "src/shared/submission/submissionLedger.ts": "27569dfd185f7e17e1d60c34b2c164f8a75b1c46"
       }
     },
-    "16b29b738c01e4fd": {
-      "reviewed_by": "dot",
-      "attester_class": "agent",
-      "checked": "Checked immutable workload binding and write ordering, shared source admission, exclusion and tamper refusal on the frozen worker route, retry and resume tests, and worker output bounds.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "68c9511cb3613ae038b268498666f2af16b6756d",
-        "ran_at": "2026-11-26T05:04:47.191Z"
-      },
-      "attested_at": "2026-11-26T05:04:51.089Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "e1ba6d1feb5db09a6a98b21ebc5f6e2a328678a7",
-        "src/audit/cli/nextStepHelpers.ts": "c160f17a95ff998ae1cbd8a9cdd4a23ada91eba1"
-      }
-    },
     "185e1a9338c25bfc": {
       "reviewed_by": "/root/serial_followup_review",
       "attester_class": "agent",
@@ -434,22 +417,6 @@
       "vouches": {
         "src/audit/cli/confirmIntentStep.ts": "ca7f34f3ab1d309c7c3226dc0b2e139b0c6f3222",
         "src/audit/reporting/criticalFlowFallbackPrompt.ts": "bacda78481a44508d215c5d7160ea80d4d587ffc"
-      }
-    },
-    "49d710c1b1d20ab7": {
-      "reviewed_by": "dot",
-      "attester_class": "agent",
-      "checked": "Reviewed frozen-source admission and fingerprint validation, native-only fallback, one local cache per source binding, and reviewer projection without sharing the graph; verified real index declarations and cross-file call sites offline.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "10b084c0d3fd4f138d97dd1b9a11bdf60a934cb8",
-        "ran_at": "2026-11-26T05:16:53.888Z"
-      },
-      "attested_at": "2026-11-26T05:16:54.839Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "d7e5e0f8f7871ed07a30eb23a53db46d85be6cc7"
       }
     },
     "51642764524969f9": {
@@ -866,6 +833,24 @@
         "src/audit/orchestrator/acquisitionExecutor.ts": "4af2ecb30a5a002b62afe7b936cbfb3867cee852"
       }
     },
+    "f206f0a333a054a2": {
+      "reviewed_by": "dot",
+      "attester_class": "agent",
+      "checked": "Reviewed actual frozen handoff, retry command and sparse native fallback; full npm test on exact staged code including orchestrator prompt and legacy clipped-result regressions; native Windows synthetic symbols, call sites, admitted scope and cache checked on installed dev and current official release, and real cursor continuation checked on the current release.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "7886a802a7ab6e191dfa42bcedcb7d3ad6644ba0",
+        "ran_at": "2026-11-26T05:29:31.768Z"
+      },
+      "attested_at": "2026-11-26T05:29:49.992Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "10e0269031a3f3c5815626957e32c90fbfed5f04",
+        "src/audit/cli/nextStepCommand.ts": "0c5d8b94b91c2711ffd72c6f2c5aba4a01f6573f",
+        "src/audit/cli/nextStepHelpers.ts": "d6a5e9101c86bef1e0e238edb51f0f7670488ada"
+      }
+    },
     "f20b857654eebefb": {
       "reviewed_by": "claude-opus-5-5 session 48f746a3 (orchestrator) + four simplify reviewer subagents (reuse, simplification, efficiency, altitude)",
       "attester_class": "agent",
@@ -965,7 +950,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "49d710c1b1d20ab7"
+      "review": "f206f0a333a054a2"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -986,10 +971,10 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "f5e055f6b40aad65"
+      "review": "f206f0a333a054a2"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "16b29b738c01e4fd"
+      "review": "f206f0a333a054a2"
     },
     "src/audit/cli/prompts.ts": {
       "review": "e36223304299f9c6"

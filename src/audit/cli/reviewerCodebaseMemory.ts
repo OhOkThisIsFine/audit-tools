@@ -1,5 +1,5 @@
 // sites-pinned: tests/audit/reviewer-codebase-memory.test.ts
-import { access, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import {
@@ -9,12 +9,12 @@ import {
 import { resolveExecutableFile } from "../../shared/tooling/resolveExecutable.js";
 
 const ENGINE = "codebase-memory-mcp";
-const VERSION = "0.12.1";
+
 const PROJECT = "audit-review";
 const MANIFEST = "ready.json";
 interface SourceFile { path: string; fingerprint: string }
 export const ReviewerCbmSchema = z.strictObject({
-  key: z.string().refine(isSha256), engine: z.literal(ENGINE), version: z.literal(VERSION),
+  key: z.string().refine(isSha256), engine: z.literal(ENGINE), build: z.string().refine(isSha256).optional(), version: z.string().optional(),
 });
 export type ReviewerCbm = z.infer<typeof ReviewerCbmSchema>;
 const cacheDirectory = (graphIndex: string, key: string) => join(dirname(graphIndex), "..", "review-cbm", key);
@@ -28,34 +28,51 @@ function executable(): string | null {
   return resolveExecutableFile(process.platform === "win32" ? ENGINE + ".exe" : ENGINE, { cwd: dirname(process.execPath) });
 }
 
-async function run(binary: string, home: string, args: string[], timeout: number): Promise<string> {
-  const result = await runTrackedAsync([binary, ...args], {
-    cwd: home, timeout, maxBuffer: 1024 * 1024,
+async function executableBuild(binary: string): Promise<string> {
+  const resolved = await realpath(binary).catch(() => { throw new Error("Codebase Memory executable was not found."); });
+  const file = await stat(resolved, { bigint: true });
+  if (!file.isFile()) throw new Error("Codebase Memory executable is not a regular file.");
+  // Invalidate an index when the installed tool changes, even if its label stays "dev".
+  // Use file identity rather than reading the executable on every graph query.
+  return hashContent(JSON.stringify([resolved, ...[file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].map(String)]));
+}
+
+async function run(binary: string, home: string, operation: string, args: object, timeout: number): Promise<unknown> {
+  const result = await runTrackedAsync([binary, "cli", "--json", operation], {
+    cwd: home, timeout, maxBuffer: 1024 * 1024, input: JSON.stringify(args) + "\n",
     env: {
       HOME: home, USERPROFILE: home, XDG_CACHE_HOME: join(home, ".cache"),
       XDG_CONFIG_HOME: join(home, ".config"), APPDATA: join(home, "appdata"),
-      LOCALAPPDATA: join(home, "localappdata"),
+      LOCALAPPDATA: join(home, "localappdata"), TMPDIR: home, TEMP: home, TMP: home,
       ...(process.platform === "win32" && { SystemRoot: process.env.SystemRoot }),
     },
   });
-  if (result.status !== 0 || result.error) throw new Error("Codebase Memory could not complete the local graph operation.");
-  return result.stdout;
-}
-
-async function verifyVersion(binary: string, home: string) {
-  if ((await run(binary, home, ["--version"], 5000)).trim() !== ENGINE + " " + VERSION) {
-    throw new Error("Codebase Memory " + VERSION + " is required by this graph adapter.");
+  const failure = new Error("Codebase Memory " + operation + " did not return compatible JSON.");
+  if (result.status !== 0 || result.error) {
+    const detail = /secure CLI coordination/u.test(result.stderr) ? "host rejected the secure coordination directory"
+      : /saved runtime settings/u.test(result.stderr) ? "could not load isolated runtime settings"
+      : result.error ? "process could not complete within the runner bounds" : "exit " + result.status;
+    throw new Error("Codebase Memory " + operation + " failed: " + detail + ".");
   }
+  let raw: unknown;
+  try { raw = JSON.parse(result.stdout); } catch { throw failure; }
+  const response = z.looseObject({ isError: z.literal(false).optional(), structuredContent: z.unknown() }).safeParse(raw);
+  if (!response.success || response.data.structuredContent === undefined) throw failure;
+  return response.data.structuredContent;
 }
 
 /** Source-only local index. Stage only admitted bytes, never the live workspace,
  * Git metadata, or file links. Remove the staging tree before publishing. */
 export async function prepareReviewerCbm(runDir: string, sourceRoot: string, files: readonly SourceFile[]): Promise<ReviewerCbm | undefined> {
   const binary = executable();
-  if (!binary) return undefined;
-  const identity = { engine: ENGINE, version: VERSION, files };
+  if (!binary) {
+    if (process.env.AUDIT_TOOLS_CBM_BIN !== undefined) throw new Error("AUDIT_TOOLS_CBM_BIN must name an absolute native executable.");
+    return undefined;
+  }
+  const build = await executableBuild(binary);
+  const identity = { engine: ENGINE, build, files };
   const key = hashContent(stableStringify(identity));
-  const meta = ReviewerCbmSchema.parse({ key, engine: ENGINE, version: VERSION });
+  const meta = ReviewerCbmSchema.parse({ key, engine: ENGINE, build });
   const cache = join(runDir, "review-cbm");
   const final = join(cache, key);
   const ready = async () => ReviewerCbmSchema.parse(JSON.parse(await readFile(join(final, MANIFEST), "utf8"))).key === key;
@@ -64,7 +81,9 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
   const scratch = await mkdtemp(join(cache, "build-"));
   const input = join(scratch, "source");
   try {
-    await verifyVersion(binary, scratch);
+    if (process.platform === "win32") {
+      await Promise.all(["appdata", "localappdata"].map(path => mkdir(join(scratch, path))));
+    }
     await mkdir(input);
     const root = await realpath(sourceRoot);
     for (const file of files) {
@@ -81,11 +100,13 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, content, { flag: "wx" });
     }
-    const response = z.looseObject({ status: z.literal("indexed") }).parse(JSON.parse(await run(binary, scratch, [
-      "cli", "--quiet", "index_repository", "--repo-path", input, "--name", PROJECT, "--mode", "full",
-      "--doc-candidates", "false",
-    ], 60_000)));
-    if (response.status !== "indexed") throw new Error("Codebase Memory index did not finish.");
+    const response = z.looseObject({ status: z.literal("indexed") }).safeParse(await run(binary, scratch, "index_repository", {
+      repo_path: input, name: PROJECT, mode: "full", doc_candidates: false,
+    }, 60_000));
+    if (!response.success) throw new Error("Codebase Memory did not confirm that indexing finished.");
+    if (files[0]) {
+      await queryPage(binary, scratch, { path: files[0].path, symbol: "__audit_tools_empty_probe__", direction: "outbound", detail: "call-sites", limit: 1 });
+    }
     await rm(input, { recursive: true, force: true });
     await writeFile(join(scratch, MANIFEST), JSON.stringify(meta) + "\n", { flag: "wx" });
     try { await rename(scratch, final); }
@@ -100,7 +121,8 @@ type Query = { path: string; symbol?: string; direction: "inbound" | "outbound" 
   detail: "symbols" | "call-sites"; limit: number; cursor?: string };
 const answer = z.looseObject({
   columns: z.array(z.string()), rows: z.array(z.array(z.string())),
-  has_more: z.boolean(), truncated: z.boolean(), next_cursor: z.string().optional(),
+  has_more: z.boolean().optional(), truncated: z.boolean().optional(), next_cursor: z.string().optional(),
+  total: z.number().int().nonnegative().optional(),
 });
 
 // Double-quoted literals use JSON escapes; no caller-provided query fragments.
@@ -114,12 +136,7 @@ const location = (value: string | undefined) => {
   return Number.isSafeInteger(line) && line > 0 ? line : undefined;
 };
 
-export async function queryReviewerCbm(index: string, meta: ReviewerCbm, allowed: ReadonlySet<string>, q: Query) {
-  const binary = executable();
-  if (!binary) throw new Error("Codebase Memory is not configured on this host.");
-  const home = cacheDirectory(index, meta.key);
-  await access(join(home, MANIFEST));
-  await verifyVersion(binary, home);
+async function queryPage(binary: string, home: string, q: Query) {
   const symbols = q.detail === "symbols";
   const columns = symbols
     ? ["a.name", "a.qualified_name", "a.file_path", "a.start_line", "a.end_line"]
@@ -130,14 +147,34 @@ export async function queryReviewerCbm(index: string, meta: ReviewerCbm, allowed
   ];
   const cypher = (symbols ? "MATCH (a)" : "MATCH (a)-[r:CALLS]->(b)") + " WHERE "
     + filters.join(" OR ") + " RETURN " + columns.join(",");
-  const result = answer.parse(JSON.parse(await run(binary, home, [
-    "cli", "--quiet", "query_graph", "--project", PROJECT, "--format", "json", "--query", cypher,
-    "--max-rows", String(q.limit), "--max-output-tokens", "4000", ...(q.cursor ? ["--cursor", q.cursor] : []),
-  ], 20_000)));
+  const page = answer.safeParse(await run(binary, home, "query_graph", {
+    project: PROJECT, format: "json", query: cypher, max_rows: q.limit, max_output_tokens: 4000,
+    ...(q.cursor && { cursor: q.cursor }),
+  }, 20_000));
+  if (!page.success) throw new Error("Codebase Memory query_graph returned an incompatible page schema.");
+  const result = page.data;
   if (result.columns.join(",") !== columns.join(",") || result.rows.some(row => row.length !== columns.length) ||
       result.rows.length > q.limit || (result.has_more ? !result.next_cursor || result.next_cursor === q.cursor : result.truncated)) {
-    throw new Error("Codebase Memory did not return a usable graph page.");
+    throw new Error("Codebase Memory query_graph did not return a usable graph page.");
   }
+  // Older builds can report the clipped row count as their total. Never treat
+  // a page at the requested bound as complete without pagination metadata.
+  if (result.has_more === undefined && (q.cursor || result.rows.length === q.limit || result.total !== result.rows.length)) {
+    throw new Error("Codebase Memory query_graph cannot continue this page. Use a newer build, narrow the query, or use native file links.");
+  }
+  return result;
+}
+
+export async function queryReviewerCbm(index: string, meta: ReviewerCbm, allowed: ReadonlySet<string>, q: Query) {
+  const binary = executable();
+  if (!binary) throw new Error("Codebase Memory is not configured on this host. Use native file links or rebuild the indexed graph on this host.");
+  const home = cacheDirectory(index, meta.key);
+  await access(join(home, MANIFEST));
+  if (meta.build !== await executableBuild(binary)) {
+    throw new Error("The installed Codebase Memory build changed or is on a different host. Run next-step on that host to rebuild or use native file links.");
+  }
+  const result = await queryPage(binary, home, q);
+  const symbols = q.detail === "symbols";
   const entries = result.rows.flatMap<
     { name: string; symbol: string; path: string; start_line?: number; end_line?: number } |
     { from: string; to: string; caller: string; callee: string; line?: number }

@@ -1410,6 +1410,28 @@ test("every row returns a PLAN — a row cannot write or log a step itself", asy
   });
 });
 
+test("a failed indexed graph qualification tells the orchestrator to repair and retry before using native links", async () => {
+  await withTempDir(async artifactsDir => {
+    const row = NEXT_STEP_EMISSION_TABLE.question_review;
+    const result = {
+      kind: "question_review", state: { status: "active", obligations: [] }, bundle: {},
+      runId: "fixture", pendingCount: 1, rejectedCount: 0, rejections: [],
+      workloadPath: join(artifactsDir, "host-workload.json"),
+      routingPath: join(artifactsDir, "review-routing.json"),
+      graphIndexFailed: true,
+    };
+    const plan = await row({
+      argv: [], root: artifactsDir, sourceRoot: artifactsDir, artifactsDir,
+      analyzerPolicy: { analyzers: {}, analyzer_consent: {} }, result,
+    } as Parameters<typeof row>[0]);
+    expect(plan.via).toBe("current");
+    if (plan.via !== "current") throw new Error("Expected a review dispatch prompt");
+    expect(plan.params.prompt).toMatch(/do that and rerun .*next-step.*before dispatching/u);
+    expect(plan.params.prompt).toContain("If you cannot repair it, use the issued native file links and frozen source");
+    expect(plan.params.prompt).toContain("Record the missing indexed coverage and why");
+  });
+});
+
 // ── The analyzer-policy precondition on the acquisition-bearing rows ─────────
 
 test("durable analyzer settings ride acquisition, but legacy consent is not inherited", () => {
