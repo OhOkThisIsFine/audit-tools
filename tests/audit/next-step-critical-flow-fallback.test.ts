@@ -59,6 +59,14 @@ async function persistFallbackState(
     throw new Error("advanced bundle missing critical_flows");
   }
   bundle.critical_flows.fallback_required = true;
+  bundle.external_analyzer_acquisition = {
+    enabled: true,
+    tool_statuses: [
+      { tool: "semgrep", command: "fixture", resolved: true, status: "failed", stage: "scan", exit_code: 0 },
+      { tool: "eslint", command: "fixture", resolved: true, status: "success" },
+      { tool: "knip", command: "fixture", resolved: false, status: "skipped" },
+    ],
+  };
   delete bundle.artifact_metadata;
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, bundle);
@@ -115,6 +123,19 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     // the LANE file; the step prompt is the capability-neutral instruction.
     const stepPrompt = await readFile(paused.prompt_path, "utf8");
     expect(stepPrompt).toMatch(/critical-flow fallback/i);
+    const recovery = stepPrompt.indexOf("## Analyzer recovery (orchestrator only)");
+    expect(recovery).toBeGreaterThanOrEqual(0);
+    expect(recovery).toBeLessThan(stepPrompt.indexOf("# audit-code critical-flow fallback"));
+    expect(stepPrompt).toContain("semgrep (unknown version; scan)");
+    expect(stepPrompt).not.toMatch(/(?:eslint|knip) \(unknown version/);
+    expect(stepPrompt).toContain("apply a targeted fix");
+    expect(stepPrompt).toContain("do not repeat an unchanged attempt");
+    expect(stepPrompt).toContain("applicable repo-declared command");
+    expect(stepPrompt).toContain("not an allowlist");
+    expect(stepPrompt).toContain("honor run-specific declines");
+    expect(stepPrompt).toContain("Preserve valid findings from the partial run");
+    expect(paused.access?.read_paths).toContain(join(artifactsDir, "external_analyzer_acquisition.json"));
+
     expect(stepPrompt.replaceAll("\\", "/")).toContain(
       resultsPath.replaceAll("\\", "/"),
     );

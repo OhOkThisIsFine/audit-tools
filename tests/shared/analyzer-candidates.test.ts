@@ -698,7 +698,7 @@ test("parseTypeCoverage maps real pinned details, including distinct sites on li
   expect(items[0].rule).toBe("type-coverage-any");
   expect(items[0].summary).toMatch(/first/);
   expect(reportOf(parseTypeCoverage(await typeCoverageFixture("clean")))).toEqual({ items: [] });
-  expect(reportOf(parseTypeCoverage(await typeCoverageFixture("error"))).note).toContain("paramter");
+  expect(reportOf(parseTypeCoverage(await typeCoverageFixture("error"))).note).toContain("project path is not a file or directory");
   expect(reportOf(parseTypeCoverage(await typeCoverageFixture("error"))).measurement_failed).toBe(true);
   for (const bad of ["", "not json", "{}"]) {
     expect(reportOf(parseTypeCoverage(bad)).parse_failed).toBe(true);
@@ -1454,7 +1454,7 @@ test("type-coverage engine keeps absolute paths, site identity and degradation v
       expect(outcome.status.status).toBe("failed");
       expect(outcome.status.exit_code).toBe(0);
       expect(outcome.results.results).toHaveLength(details.length ? 3 : 0);
-      expect(outcome.status.error).toContain("threshold unmet");
+      expect(outcome.status.error).toContain("measurement did not succeed");
       expect(outcome.status.dropped_rows ?? 0).toBe(details.includes(null) ? 1 : 0);
       expect(isDegradedExternalAnalyzerStatus(outcome.status)).toBe(true);
     }
@@ -1464,8 +1464,61 @@ test("type-coverage engine keeps absolute paths, site identity and degradation v
         run: scriptedRunner(() => ({ status: exit, stdout: error, stderr: "" })),
       });
       expect(outcome.status.status).toBe("failed");
-      expect(outcome.status.output_snippet).toContain("paramter");
+      expect(outcome.status.error).toContain("project path is not a file or directory");
+      expect(outcome.status.output_snippet).toBeUndefined();
     }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Semgrep retains partial findings with bounded diagnostic identities, not raw error text", async () => {
+  const root = await mkdtemp(join(tmpdir(), "semgrep-partial-"));
+  try {
+    await writeFile(join(root, "package.json"), "{}");
+    const errors = [
+      { type: ["PartialParsing", []], path: join(root, "fixture.js"), rule_id: "fixture.rule", message: "private detail" },
+      { type: "Internal matching error", path: join(root, "..", "private.js"), rule_id: "private rule" },
+      ...Array.from({ length: 15 }, () => ({ type: "PartialParsing", path: "../private.js" })),
+      { type: "PartialParsing", path: "private.js\n", rule_id: "private.rule\n" },
+      ...Array.from({ length: 25 }, (_, i) => ({ type: "PartialParsing", path: "file-" + i + ".js" })),
+    ];
+    const stdout = JSON.stringify({ errors, results: [{ path: "fixture.js", check_id: "fixture.lead" }] });
+    const outcome = await runExternalAnalyzer(semgrepCandidate, root, {
+      consentToken: { value: "synthetic-consent", tools: ["semgrep"] },
+      run: scriptedRunner(() => ({ status: 0, stdout, stderr: "private stderr" })),
+    });
+    expect(outcome.status).toMatchObject({ status: "failed", stage: "scan" });
+    expect(outcome.results.results).toHaveLength(1);
+    expect(outcome.status.error).toContain("43 error(s)");
+    expect(outcome.status.error).toContain("path file-0.js");
+    expect(outcome.status.error).toContain("partial parsing (rule fixture.rule, path fixture.js)");
+    expect(outcome.status.error).toContain("internal matching error");
+    expect(outcome.status.error).toContain("more");
+    expect(outcome.status.error).not.toMatch(/private|semgrep-partial-/);
+    expect(outcome.status.stderr_snippet).toBeUndefined();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("type-coverage compiler compatibility is actionable without raw child text", async () => {
+  const root = await mkdtemp(join(tmpdir(), "type-coverage-compiler-"));
+  try {
+    await writeFile(join(root, "package.json"), "{}");
+    const stdout = JSON.stringify({
+      succeeded: false,
+      error: "type-coverage needs the TypeScript compiler API (ts.createProgram), which typescript@7.0.2 does not export.\nprivate version advice",
+    });
+    const outcome = await runExternalAnalyzer(typeCoverageCandidate, root, {
+      run: scriptedRunner(() => ({ status: 1, stdout, stderr: "private stderr" })),
+    });
+    expect(outcome.status).toMatchObject({ status: "failed", stage: "scan" });
+    expect(outcome.status.error).toContain("TypeScript 7.0.2 is missing ts.createProgram");
+    expect(outcome.status.error).toContain("compatible");
+    expect(outcome.status.error).not.toContain("private");
+    expect(outcome.status.output_snippet).toBeUndefined();
+    expect(outcome.status.stderr_snippet).toBeUndefined();
   } finally {
     await rm(root, { recursive: true, force: true });
   }

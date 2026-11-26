@@ -192,7 +192,7 @@ export interface ExternalAnalyzerCandidate {
    * carrying `parse_failed` / `dropped_rows` so the engine can classify the run,
    * because a bare `[]` is byte-identical to a genuinely clean scan.
    */
-  parse(stdout: string): ExternalAnalyzerParseOutcome;
+  parse(stdout: string, root?: string): ExternalAnalyzerParseOutcome;
   /**
    * For tools that ONLY report to a file (e.g. gitleaks) rather than stdout: the
    * report path the tool was told to write (must match `buildArgv`). When set, the
@@ -829,7 +829,7 @@ export async function runExternalAnalyzer(
 
       let parsed: ReturnType<typeof readParseOutcome>;
       try {
-        parsed = readParseOutcome(candidate.parse(parseInput));
+        parsed = readParseOutcome(candidate.parse(parseInput, root));
       } catch (error) {
         return {
           results: emptyResults(candidate.id),
@@ -838,6 +838,7 @@ export async function runExternalAnalyzer(
             command,
             resolved: true,
             status: "parse_error",
+            stage: "parse",
             exit_code: result.status,
             error: candidate.managedReport ? "analyzer operation failed (private report)" : error instanceof Error ? error.message : String(error),
             ...(captureSnippets ? { output_snippet: result.stdout.slice(0, 200) } : {}),
@@ -910,6 +911,7 @@ export async function runExternalAnalyzer(
               command,
               resolved: true,
               status: "failed",
+              stage: "scan",
               error: exitMissing
                 ? "analyzer terminated without an exit status (killed by a signal) and produced no parsable findings"
                 : exitedNonZero
@@ -928,6 +930,7 @@ export async function runExternalAnalyzer(
               command,
               resolved: true,
               status: "parse_error",
+              stage: "parse",
               error:
                 (candidate.managedReport ? undefined : parsed.note) ??
                 (parsed.parse_failed
@@ -947,6 +950,7 @@ export async function runExternalAnalyzer(
           command,
           resolved: true,
           status: parsed.measurement_failed ? "failed" : normalized.results.length > 0 ? "findings" : "success",
+          ...(parsed.measurement_failed ? { stage: "scan" as const } : droppedRows > 0 ? { stage: "parse" as const } : {}),
           ...(parsed.measurement_failed && captureSnippets ? { output_snippet: parseInput.slice(0, 200) } : {}),
           ...(parsed.note !== undefined ? { error: candidate.managedReport
             ? "analyzer reported degraded output (private report)" : parsed.note } : {}),

@@ -1,6 +1,7 @@
 // sites-pinned: tests/shared/analyzer-candidates.test.ts, tests/shared/analyzer-pipx-contract.test.ts
 import { parseGitleaksVersion, parseOsvScannerVersion, parseHadolintVersion, parseActionlintVersion } from "./binaryVersions.js";
 import { join } from "node:path";
+import { normalizeRepoRelPath } from "../paths.js";
 import { tmpdir } from "node:os";
 import { existsSync, readdirSync } from "node:fs";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
@@ -179,8 +180,28 @@ const gitleaksCandidate: ExternalAnalyzerCandidate = {
   parse: parseGitleaks,
 };
 
+// Retain structured identities, never tool prose or snippets. These tokens are
+// diagnostic hints, not instructions or authority to access a file.
+function semgrepErrorIdentity(value: unknown, root?: string): string {
+  if (!isRecord(value)) return "scan diagnostic";
+  const type = Array.isArray(value.type) ? value.type[0] : value.type;
+  const kind = type === "PartialParsing" ? "partial parsing"
+    : type === "Internal matching error" ? "internal matching error"
+    : type === "Parse error" ? "parse error" : "scan diagnostic";
+  const rule = typeof value.rule_id === "string" && value.rule_id.length > 0 && value.rule_id.length <= 160
+    && !/[^A-Za-z0-9_.-]/.test(value.rule_id)
+    ? value.rule_id : undefined;
+  const reported = typeof value.path === "string" ? normalizeRepoRelPath(value.path) : "";
+  const prefix = root && normalizeRepoRelPath(root).replace(/\/+$/, "") + "/";
+  const path = prefix && reported.startsWith(prefix) ? reported.slice(prefix.length) : reported;
+  const safePath = path.length <= 180 && path.split("/").every(part =>
+    part.length > 0 && part !== "." && part !== ".." && !/[^A-Za-z0-9_.@+-]/.test(part));
+  const identity = [rule && "rule " + rule, safePath && "path " + path].filter(Boolean).join(", ");
+  return identity ? kind + " (" + identity + ")" : kind;
+}
+
 /** Parse semgrep `--json` stdout into generic items. */
-function parseSemgrep(stdout: string): ExternalAnalyzerParseReport {
+function parseSemgrep(stdout: string, root?: string): ExternalAnalyzerParseReport {
   let payload: unknown;
   try {
     payload = JSON.parse(stdout || "{}");
@@ -188,9 +209,24 @@ function parseSemgrep(stdout: string): ExternalAnalyzerParseReport {
     return parseFailure("semgrep", "output is not valid JSON");
   }
   if (!isRecord(payload)) return parseFailure("semgrep", "output is not a JSON object");
-  const scanError = Array.isArray(payload.errors)
-    ? payload.errors.length > 0 ? `semgrep: scan reported ${payload.errors.length} error(s)` : undefined
-    : payload.errors !== undefined ? "semgrep: output has a malformed errors field" : undefined;
+  let scanError: string | undefined;
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    const sampleLimit = 8;
+    const details = new Map<string, number>();
+    let omitted = 0;
+    for (const error of payload.errors) {
+      const identity = semgrepErrorIdentity(error, root);
+      const prior = details.get(identity);
+      if (prior !== undefined) details.set(identity, prior + 1);
+      else if (details.size < sampleLimit) details.set(identity, 1);
+      else omitted += 1;
+    }
+    const summary = [...details].map(([identity, count]) => count > 1 ? identity + " ×" + count : identity);
+    scanError = "semgrep: scan reported " + payload.errors.length + " error(s): " +
+      summary.join("; ") + (omitted ? "; " + omitted + " more" : "");
+  } else if (payload.errors !== undefined && !Array.isArray(payload.errors)) {
+    scanError = "semgrep: output has a malformed errors field";
+  }
   if (!Array.isArray(payload.results)) {
     return scanError
       ? { items: [], measurement_failed: true, note: scanError }
@@ -1052,9 +1088,13 @@ function parseTypeCoverage(stdout: string): ExternalAnalyzerParseReport {
   } catch {
     return parseFailure("type-coverage", "output is not valid JSON");
   }
-  const failure = isRecord(payload) && typeof payload.error === "string"
-    ? `measurement failed: ${payload.error.slice(0, 200)}`
-    : "measurement did not succeed";
+  const error = isRecord(payload) && typeof payload.error === "string" ? payload.error : "";
+  const missingCompilerApi = /^type-coverage needs the TypeScript compiler API \(ts\.createProgram\), which typescript@(\d{1,4}\.\d{1,4}\.\d{1,4}) does not export\./.exec(error);
+  const failure = missingCompilerApi
+    ? "TypeScript " + missingCompilerApi[1] + " is missing ts.createProgram; use a compatible TypeScript and type-coverage pair"
+    : /^param(?:ter|eter) 'project' should be a file or directory\./.test(error)
+      ? "project path is not a file or directory"
+      : "measurement did not succeed";
   if (!isRecord(payload) || !Array.isArray(payload.details)) {
     if (isRecord(payload) && payload.succeeded === false) {
       return { items: [], measurement_failed: true, note: `type-coverage: ${failure}` };
@@ -1116,6 +1156,7 @@ const typeCoverageCandidate: ExternalAnalyzerCandidate = {
     ...prefix, "--json-output", "--detail", "--no-update", "--no-update-if-higher",
     "--no-history-file", "--no-cache",
   ],
+  diagnosticSnippets: false,
   parse: parseTypeCoverage,
 };
 
