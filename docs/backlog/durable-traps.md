@@ -504,7 +504,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   suite, and knip's `include` issue-type whitelist in `knip.json` excludes the dependency checks, so only the
   packaged smoke hits `ERR_MODULE_NOT_FOUND` (when you add an `import` to any `src/` module that lands
   in `dist/` on a production path, confirm the package is under `dependencies`; bit once 2026-07-04 by
-  `zod-to-json-schema` in `src/audit/contracts/workerSchemas.ts` — now correctly a `dependency`);
+  the former `zod-to-json-schema` import in `src/audit/contracts/workerSchemas.ts`);
   (2) deleting a *shipped* file that the `requiredPackagedPaths` list asserts — that list lives ONLY in
   `scripts/audit/smoke-packaged-audit-code.mjs`; the remediate smoke
   packs+installs but asserts no path list, and `scripts/audit/verify-hosts.mjs` is a *sibling* gate over

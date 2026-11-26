@@ -4,20 +4,18 @@ import { pathToFileURL } from "node:url";
 
 import {
   ZodArray,
-  ZodBranded,
   ZodCatch,
   ZodDefault,
-  ZodDiscriminatedUnion,
-  ZodEffects,
   ZodEnum,
   ZodIntersection,
   ZodNullable,
   ZodObject,
   ZodOptional,
+  ZodPipe,
   ZodReadonly,
   ZodUnion,
   type ZodRawShape,
-  type ZodTypeAny,
+  core,
 } from "zod";
 import { describe, expect, it } from "vitest";
 
@@ -130,7 +128,7 @@ describe(FAILURE_SIGNATURE, () => {
         prompt,
         `the prompt must name provenance kind '${member}' — the validator accepts it ` +
           `and a prompt that omits it teaches a smaller contract than the tool enforces`,
-      ).toContain(member);
+      ).toContain(String(member));
     }
   });
 
@@ -251,7 +249,7 @@ describe(FAILURE_SIGNATURE, () => {
         prompt,
         `the comparison prompt must name provenance kind '${member}' — the validator ` +
           "accepts it and a prompt that omits it teaches a smaller contract",
-      ).toContain(member);
+      ).toContain(String(member));
     }
   });
 
@@ -304,7 +302,7 @@ describe(FAILURE_SIGNATURE, () => {
         shown,
         `the fidelity example must show verdict '${member}' — a reader copies the ` +
           "example, and only the example says which fields go with which verdict",
-      ).toContain(member);
+      ).toContain(String(member));
     }
   });
 
@@ -587,7 +585,7 @@ describe(FAILURE_SIGNATURE, () => {
         prompt,
         `the prompt must name severity '${member}' — the validator accepts it, and a ` +
           "prompt that omits it teaches a smaller contract than the tool enforces",
-      ).toContain(member);
+      ).toContain(String(member));
     }
 
     // The alternation is a FIELD RULE. In a value it is a refused submission.
@@ -650,15 +648,14 @@ describe(FAILURE_SIGNATURE, () => {
   });
 });
 
-function unwrapSchema(schema: ZodTypeAny): ZodTypeAny {
+function unwrapSchema(schema: core.$ZodType): core.$ZodType {
   let current = schema;
   while (true) {
-    if (current instanceof ZodEffects) {
-      current = current.innerType();
+    if (current instanceof ZodPipe) {
+      current = current.in;
     } else if (
       current instanceof ZodOptional ||
       current instanceof ZodNullable ||
-      current instanceof ZodBranded ||
       current instanceof ZodReadonly
     ) {
       current = current.unwrap();
@@ -672,7 +669,7 @@ function unwrapSchema(schema: ZodTypeAny): ZodTypeAny {
   }
 }
 
-function objectShape(schema: ZodTypeAny): ZodRawShape {
+function objectShape(schema: core.$ZodType): ZodRawShape {
   const unwrapped = unwrapSchema(schema);
   expect(unwrapped, "a registered derived/projection object must resolve to z.object").toBeInstanceOf(
     ZodObject,
@@ -681,13 +678,13 @@ function objectShape(schema: ZodTypeAny): ZodRawShape {
 }
 
 function collectClosedEnums(
-  schema: ZodTypeAny,
+  schema: core.$ZodType,
   level: number,
-  found: ZodEnum<[string, ...string[]]>[],
+  found: ZodEnum[],
 ): void {
   const unwrapped = unwrapSchema(schema);
   if (unwrapped instanceof ZodEnum) {
-    found.push(unwrapped as ZodEnum<[string, ...string[]]>);
+    found.push(unwrapped);
     return;
   }
   if (unwrapped instanceof ZodArray) {
@@ -698,13 +695,9 @@ function collectClosedEnums(
     for (const option of unwrapped.options) collectClosedEnums(option, level, found);
     return;
   }
-  if (unwrapped instanceof ZodDiscriminatedUnion) {
-    for (const option of unwrapped.options.values()) collectClosedEnums(option, level, found);
-    return;
-  }
   if (unwrapped instanceof ZodIntersection) {
-    collectClosedEnums(unwrapped._def.left, level, found);
-    collectClosedEnums(unwrapped._def.right, level, found);
+    collectClosedEnums(unwrapped.def.left, level, found);
+    collectClosedEnums(unwrapped.def.right, level, found);
     return;
   }
   if (unwrapped instanceof ZodObject && level < 2) {
@@ -731,21 +724,21 @@ describe("prompt-contract registry: derived rows", () => {
       const prompt = row.render!();
       const shape = objectShape(row.schema!.object!);
       for (const [key, field] of Object.entries(shape)) {
-        if (field.safeParse(undefined).success) continue;
+        if (core.safeParse(field, undefined).success) continue;
         expect(
           prompt,
           `${row.builder} must render required top-level schema key '${key}'`,
         ).toContain(key);
       }
 
-      const enums: ZodEnum<[string, ...string[]]>[] = [];
+      const enums: ZodEnum[] = [];
       collectClosedEnums(row.schema!.object!, 0, enums);
       for (const schemaEnum of enums) {
         for (const member of schemaEnum.options) {
           expect(
             prompt,
             `${row.builder} must render every member of closed enum ${schemaEnum.options.join("|")}`,
-          ).toContain(member);
+          ).toContain(String(member));
         }
         expect(
           prompt,

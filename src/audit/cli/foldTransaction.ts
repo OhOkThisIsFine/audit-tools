@@ -426,7 +426,7 @@ export async function recoverStagedSubmissions(
 const ReceiptSchema = z.object({
   version: z.literal(1),
   core: z.object({
-    writes: z.record(z.unknown()),
+    writes: z.record(z.string(), z.unknown()),
     prunes: z.array(z.string()),
     graphEdgeCache: z.unknown().optional(),
   }).strict(),
@@ -435,7 +435,7 @@ const ReceiptSchema = z.object({
     schema_version: z.literal("audit-code/design-review-snapshot/v2alpha1"),
     reviewed_at: z.string(),
     prior_findings: z.array(z.unknown()),
-    reviewed_inputs: z.record(z.unknown()),
+    reviewed_inputs: z.record(z.string(), z.unknown()),
     reviewed_task: z.unknown(),
   }).strict()),
   applied: z.array(z.object({

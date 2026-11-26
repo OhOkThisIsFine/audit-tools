@@ -21,7 +21,7 @@ export const AuditReviewBindingSchema = z.object({
 export type AuditReviewBinding = z.infer<typeof AuditReviewBindingSchema>;
 const BindingsSchema = z.object({
   version: z.literal("audit-review-bindings/v1"),
-  bindings: z.record(AuditReviewBindingSchema),
+  bindings: z.record(z.string(), AuditReviewBindingSchema),
 }).strict();
 
 function bindingStore(artifactsDir: string) {

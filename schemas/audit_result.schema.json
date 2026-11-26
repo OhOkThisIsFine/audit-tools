@@ -33,6 +33,7 @@
       "type": "string"
     },
     "file_coverage": {
+      "minItems": 1,
       "type": "array",
       "items": {
         "type": "object",
@@ -42,11 +43,13 @@
           },
           "total_lines": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "reviewed_lines": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -54,8 +57,7 @@
           "total_lines"
         ],
         "additionalProperties": false
-      },
-      "minItems": 1
+      }
     },
     "findings": {
       "type": "array",
@@ -111,6 +113,7 @@
             "type": "string"
           },
           "affected_files": {
+            "minItems": 1,
             "type": "array",
             "items": {
               "type": "object",
@@ -158,8 +161,7 @@
                   }
                 }
               ]
-            },
-            "minItems": 1
+            }
           },
           "impact": {
             "type": "string"
@@ -168,35 +170,36 @@
             "type": "string"
           },
           "evidence": {
+            "minItems": 1,
             "type": "array",
             "items": {
               "type": "string"
-            },
-            "minItems": 1
+            }
           },
           "reproduction": {
+            "minItems": 1,
             "type": "array",
             "items": {
               "type": "string"
-            },
-            "minItems": 1
+            }
           },
           "systemic": {
             "type": "boolean"
           },
           "related_findings": {
+            "minItems": 1,
             "type": "array",
             "items": {
               "type": "string"
-            },
-            "minItems": 1
+            }
           },
           "theme_id": {
             "type": "string"
           },
           "blast_radius": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "evidence_grounded": {
             "type": "boolean"
@@ -205,14 +208,14 @@
             "type": "object",
             "properties": {
               "command": {
+                "minItems": 1,
                 "type": "array",
                 "items": {
                   "type": "string"
-                },
-                "minItems": 1
+                }
               },
               "confirm_if": {
-                "anyOf": [
+                "oneOf": [
                   {
                     "type": "object",
                     "properties": {
@@ -307,6 +310,7 @@
             }
           },
           "analyzer_provenance": {
+            "description": "Content-anchored identity of the analyzer lead this finding was born from. Copy it VERBATIM from the injected lead's provenance object; omit for findings not born from an analyzer lead.",
             "type": "object",
             "properties": {
               "analyzer_id": {
@@ -327,8 +331,7 @@
               "path",
               "snippet_hash"
             ],
-            "additionalProperties": false,
-            "description": "Content-anchored identity of the analyzer lead this finding was born from. Copy it VERBATIM from the injected lead's provenance object; omit for findings not born from an analyzer lead."
+            "additionalProperties": false
           }
         },
         "required": [
@@ -423,17 +426,21 @@
                 ]
               },
               "file_paths": {
+                "minItems": 1,
                 "type": "array",
                 "items": {
                   "type": "string"
-                },
-                "minItems": 1
+                }
               },
               "file_line_counts": {
                 "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
                 "additionalProperties": {
                   "type": "integer",
-                  "minimum": 0
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "coverage_policy": {
@@ -465,6 +472,9 @@
                     },
                     "prior_findings": {
                       "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
                       "additionalProperties": {
                         "type": "number"
                       }
@@ -490,11 +500,13 @@
                     },
                     "start": {
                       "type": "integer",
-                      "minimum": 1
+                      "minimum": 1,
+                      "maximum": 9007199254740991
                     },
                     "end": {
                       "type": "integer",
-                      "minimum": 1
+                      "minimum": 1,
+                      "maximum": 9007199254740991
                     }
                   },
                   "required": [
@@ -507,6 +519,9 @@
               },
               "inputs": {
                 "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
                 "additionalProperties": {
                   "type": "string"
                 }
@@ -532,11 +547,11 @@
                 "maximum": 1
               },
               "tags": {
+                "minItems": 1,
                 "type": "array",
                 "items": {
                   "type": "string"
-                },
-                "minItems": 1
+                }
               },
               "status": {
                 "type": "string",
@@ -575,7 +590,8 @@
     },
     "submitted_at": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     },
     "instance_id": {
       "type": "string"
@@ -597,7 +613,8 @@
     },
     "attempt": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "maximum": 9007199254740991
     }
   },
   "required": [

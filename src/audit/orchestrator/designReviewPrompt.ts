@@ -34,7 +34,7 @@ import { REVIEW_LENS_PLAYBOOKS } from "./reviewLensPlaybooks.js";
  * beside `result` — a placement the validator refuses. Typing the key against
  * the envelope's shape means a renamed envelope key breaks the build here.
  */
-const ENVELOPE_SHAPE = ReviewSubmissionEnvelopeSchema.innerType().shape;
+const ENVELOPE_SHAPE = ReviewSubmissionEnvelopeSchema.shape;
 const ENVELOPE_RESULT_KEY: keyof typeof ENVELOPE_SHAPE = "result";
 const ENVELOPE_CONTRACT_VERSION = ENVELOPE_SHAPE.contract_version.value;
 const JUDGE_RESULT_KEYS = Object.keys(ConceptualJudgeSubmissionSchema.shape);

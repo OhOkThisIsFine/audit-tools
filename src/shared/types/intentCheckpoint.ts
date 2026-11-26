@@ -141,7 +141,7 @@ export const IntentCheckpointSchema = z
       .object({
         include: z.array(z.string()).optional(),
         exclude: z.array(z.string()).optional(),
-        omission_reasons: z.record(z.string()).optional(),
+        omission_reasons: z.record(z.string(), z.string()).optional(),
       })
       .strict()
       .optional(),

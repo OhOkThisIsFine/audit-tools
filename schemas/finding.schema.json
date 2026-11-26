@@ -53,6 +53,7 @@
       "type": "string"
     },
     "affected_files": {
+      "minItems": 1,
       "type": "array",
       "items": {
         "type": "object",
@@ -100,8 +101,7 @@
             }
           }
         ]
-      },
-      "minItems": 1
+      }
     },
     "impact": {
       "type": "string"
@@ -110,35 +110,36 @@
       "type": "string"
     },
     "evidence": {
+      "minItems": 1,
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "minItems": 1
+      }
     },
     "reproduction": {
+      "minItems": 1,
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "minItems": 1
+      }
     },
     "systemic": {
       "type": "boolean"
     },
     "related_findings": {
+      "minItems": 1,
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "minItems": 1
+      }
     },
     "theme_id": {
       "type": "string"
     },
     "blast_radius": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9007199254740991
     },
     "evidence_grounded": {
       "type": "boolean"
@@ -147,14 +148,14 @@
       "type": "object",
       "properties": {
         "command": {
+          "minItems": 1,
           "type": "array",
           "items": {
             "type": "string"
-          },
-          "minItems": 1
+          }
         },
         "confirm_if": {
-          "anyOf": [
+          "oneOf": [
             {
               "type": "object",
               "properties": {
@@ -249,6 +250,7 @@
       }
     },
     "analyzer_provenance": {
+      "description": "Content-anchored identity of the analyzer lead this finding was born from. Copy it VERBATIM from the injected lead's provenance object; omit for findings not born from an analyzer lead.",
       "type": "object",
       "properties": {
         "analyzer_id": {
@@ -269,8 +271,7 @@
         "path",
         "snippet_hash"
       ],
-      "additionalProperties": false,
-      "description": "Content-anchored identity of the analyzer lead this finding was born from. Copy it VERBATIM from the injected lead's provenance object; omit for findings not born from an analyzer lead."
+      "additionalProperties": false
     }
   },
   "required": [

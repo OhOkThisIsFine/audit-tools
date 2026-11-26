@@ -6,7 +6,6 @@
 //   derives the sites from the staged diff and refuses an unbound one.
 
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
   FindingSchema,
@@ -177,7 +176,7 @@ export const WorkerAuditResultsSchema = z.array(WorkerAuditResultSchema).min(1);
 
 export const WORKER_SCHEMA_SOURCES: Record<
   string,
-  { schema: z.ZodTypeAny; title: string }
+  { schema: z.ZodType; title: string }
 > = {
   "lens.schema.json": { schema: LensSchema, title: "Lens" },
   "finding.schema.json": { schema: WorkerFindingSchema, title: "Audit Finding" },
@@ -263,18 +262,25 @@ export function renderWorkerJsonSchema(
   if (!entry) {
     throw new Error(`No worker schema source registered for "${filename}"`);
   }
-  const generated = zodToJsonSchema(entry.schema, {
-    $refStrategy: "none",
-    target: "jsonSchema7",
-    // Zod refinements do not project automatically. oneOf accepts exactly one
-    // branch whose field is present and nonblank, just like the runtime check.
-    postProcess: (schema, def) => def === WorkerFindingLocationSchema._def && schema
-      ? { ...schema, oneOf: LOCATION_EVIDENCE_FIELDS.map(field => ({
+  const generated = z.toJSONSchema(entry.schema, {
+    target: "draft-07",
+    io: "input",
+    // Refinements are not projected automatically. Preserve the portable
+    // nonblank-evidence XOR wherever this input schema is embedded.
+    override: ({ zodSchema, jsonSchema }) => {
+      // The portable worker contract has always rejected undeclared keys
+      // even in nested plain objects whose runtime parser strips them.
+      if (zodSchema instanceof z.ZodObject && jsonSchema.additionalProperties === undefined) {
+        jsonSchema.additionalProperties = false;
+      }
+      if (zodSchema === WorkerFindingLocationSchema) {
+        jsonSchema.oneOf = LOCATION_EVIDENCE_FIELDS.map(field => ({
           required: [field],
           properties: { [field]: { pattern: NONBLANK_LOCATION_TEXT.source } },
-        })) }
-      : schema,
-  }) as Record<string, unknown>;
+        }));
+      }
+    },
+  });
   delete generated.$schema;
   return {
     $schema: "http://json-schema.org/draft-07/schema#",

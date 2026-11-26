@@ -271,12 +271,11 @@ describe(FAILURE_SIGNATURE, () => {
 
     // Every min(1) constraint the projection enforces — required or optional,
     // array or string — is stated in the prompt, detected FROM the schema node
-    // (zodToJsonSchema emits minItems/minLength) rather than a hand list.
-    const { zodToJsonSchema } = await import("zod-to-json-schema");
-    const schema = (zodToJsonSchema as (s: unknown, o: object) => { properties: Record<string, { type?: string; minItems?: number; minLength?: number }> })(
-      WorkerFindingSchema,
-      { $refStrategy: "none", target: "jsonSchema7" },
-    );
+    // (native JSON Schema rendering emits minItems/minLength) rather than a hand list.
+    const { z } = await import("zod");
+    const schema = z.toJSONSchema(WorkerFindingSchema, {
+      target: "draft-07", io: "input",
+    }) as { properties: Record<string, { minItems?: number; minLength?: number }> };
     const constrained = Object.entries(schema.properties)
       .filter(([, node]) => (node.minItems ?? 0) >= 1 || (node.minLength ?? 0) >= 1)
       .map(([name]) => name);

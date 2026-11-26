@@ -15,7 +15,7 @@
 // entirely while downstream validation required it.
 
 // sites-pinned: tests/audit/host-result-finding-contract.test.ts, tests/audit/host-ingest-grounding.test.ts
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import {
   AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
   CONFIDENCES,
@@ -86,9 +86,9 @@ let renderedContract: readonly string[] | undefined;
  */
 export function findingContractPromptLines(): readonly string[] {
   if (renderedContract !== undefined) return renderedContract;
-  const schema = zodToJsonSchema(PROMPTED_FINDING_SCHEMA, {
-    $refStrategy: "none",
-    target: "jsonSchema7",
+  const schema = z.toJSONSchema(PROMPTED_FINDING_SCHEMA, {
+    target: "draft-07",
+    io: "input",
   }) as SchemaNode;
   const properties = schema.properties ?? {};
   const required = [...(schema.required ?? [])].sort();

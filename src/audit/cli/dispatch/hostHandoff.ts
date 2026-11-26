@@ -943,7 +943,7 @@ function questionSchemaCorrection(issue: z.ZodError["issues"][number]): string {
   const field = issue.path.join(".") || "<root>";
   const guidance = issue.code === "invalid_type" ? "expected " + issue.expected + "."
     : issue.code === "unrecognized_keys" ? "remove fields not declared by the contract."
-      : issue.code === "invalid_enum_value" || issue.code === "invalid_literal" || issue.code === "invalid_union" || issue.code === "invalid_union_discriminator" ? "use a value or shape allowed by the contract."
+      : issue.code === "invalid_value" || issue.code === "invalid_union" ? "use a value or shape allowed by the contract."
         : issue.code === "too_small" ? "provide the required non-empty value."
           : "check the field's contract constraints.";
   return "Answer schema mismatch at " + field + ": " + guidance;
@@ -2207,7 +2207,7 @@ function refuse(check: IngestionCheckId, detail: string): HostResultParse {
 /** `findings[2].affected_files.0.path` — a zod issue path, host-readable. */
 function issueLocation(
   prefix: string,
-  path: readonly (string | number)[],
+  path: readonly PropertyKey[],
 ): string {
   return [prefix, ...path.map((segment) => String(segment))].join(".");
 }

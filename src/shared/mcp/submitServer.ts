@@ -81,7 +81,7 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
           .optional()
           .describe("The artifacts directory, only when your prompt names one"),
         work_item_id: z.string().describe("The work-item id your prompt names"),
-        result: z.record(z.unknown()).describe("The result document, as a JSON object"),
+        result: z.record(z.string(), z.unknown()).describe("The result document, as a JSON object"),
       },
     },
     (args) =>
@@ -103,7 +103,7 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
       artifacts_dir: z.string().optional(),
       lane: z.enum(gate.lanes),
       work_item_id: z.string().optional().describe("Work-item id, required for item-bound gate lanes"),
-      result: z.union([z.record(z.unknown()), z.array(z.unknown())]),
+      result: z.union([z.record(z.string(), z.unknown()), z.array(z.unknown())]),
     },
   }, args => toolReply(() => gate.submit({ root: args.root, artifactsDir: args.artifacts_dir, lane: args.lane, ...(args.work_item_id === undefined ? {} : { workItemId: args.work_item_id }), source: JSON.stringify(args.result, null, 2) })));
   return server;
