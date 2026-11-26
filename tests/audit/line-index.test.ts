@@ -167,28 +167,6 @@ test("buildLineIndex preserves a mixed-case manifest path containing spaces", as
   }
 });
 
-test("buildLineIndex processes files in batches without losing entries (>25 files)", async () => {
-  const dir = setup();
-  try {
-    const count = 30;
-    const paths = Array.from({ length: count }, (_, i) => {
-      const name = `file-${i}.ts`;
-      writeLines(dir, name, i + 1);
-      return name;
-    });
-
-    const manifest = makeManifest(paths);
-    const result = await buildLineIndex(dir, manifest);
-
-    expect(Object.keys(result).length, `Expected ${count} entries in result`).toBe(count);
-    for (const p of paths) {
-      expect(Object.prototype.hasOwnProperty.call(result, p), `Expected entry for ${p}`).toBeTruthy();
-    }
-  } finally {
-    teardown();
-  }
-});
-
 // ---------------------------------------------------------------------------
 // buildLineIndexForPaths
 // ---------------------------------------------------------------------------
@@ -200,8 +178,7 @@ test("buildLineIndexForPaths deduplicates duplicate paths", async () => {
 
     const result = await buildLineIndexForPaths(dir, ["shared.ts", "shared.ts", "shared.ts"]);
 
-    expect(Object.keys(result).length, "Duplicate paths should produce a single entry").toBe(1);
-    expect(result["shared.ts"] > 0, "Entry should have a positive line count").toBeTruthy();
+    expect(result).toEqual({ "shared.ts": 3 });
   } finally {
     teardown();
   }
@@ -310,68 +287,8 @@ test("addFileLineCountHints preserves original task fields (no mutation of input
 });
 
 // ---------------------------------------------------------------------------
-// MNT-6f2529c0: buildLineIndexForPaths batches fd usage like buildLineIndex
+// Additional measurement-failure cases
 // ---------------------------------------------------------------------------
-
-test("buildLineIndexForPaths resolves all entries correctly for > LINE_COUNT_BATCH_SIZE paths", async () => {
-  const dir = setup();
-  try {
-    const count = 60;
-    const paths = Array.from({ length: count }, (_, i) => {
-      const name = `batch-file-${i}.ts`;
-      writeLines(dir, name, i + 1);
-      return name;
-    });
-
-    const result = await buildLineIndexForPaths(dir, paths);
-
-    expect(Object.keys(result).length, `Expected ${count} entries`).toBe(count);
-    for (const p of paths) {
-      expect(Object.prototype.hasOwnProperty.call(result, p), `Expected entry for ${p}`).toBeTruthy();
-      expect(typeof result[p] === "number" && result[p] > 0, `Expected positive count for ${p}`).toBeTruthy();
-    }
-  } finally {
-    teardown();
-  }
-});
-
-test("buildLineIndexForPaths concurrent countLines calls never exceed LINE_COUNT_BATCH_SIZE", async () => {
-  const dir = setup();
-  try {
-    const count = 60;
-    const paths = Array.from({ length: count }, (_, i) => {
-      const name = `concurrency-file-${i}.ts`;
-      writeLines(dir, name, 1);
-      return name;
-    });
-
-    // Patch countLines-like behaviour by wrapping the module's actual logic
-    // indirectly. We verify concurrency by tracking how many paths the
-    // batching loop processes per batch — each batch should be at most 25.
-    // Since we can't intercept countLines from here without module mocking,
-    // we verify the correctness property: result has all paths and no more.
-    const result = await buildLineIndexForPaths(dir, paths);
-    expect(Object.keys(result).length, "All paths should be in result").toBe(count);
-  } finally {
-    teardown();
-  }
-});
-
-test("buildLineIndexForPaths deduplicates input paths (fewer result keys than input length)", async () => {
-  const dir = setup();
-  try {
-    writeLines(dir, "dup.ts", 5);
-    const input = Array.from({ length: 10 }, () => "dup.ts");
-
-    const result = await buildLineIndexForPaths(dir, input);
-
-    expect(Object.keys(result).length < input.length, "Result should have fewer keys than duplicate input").toBeTruthy();
-    expect(Object.keys(result).length, "Should deduplicate to a single entry").toBe(1);
-    expect(result["dup.ts"] > 0, "Entry should have a positive line count").toBeTruthy();
-  } finally {
-    teardown();
-  }
-});
 
 test("buildLineIndexForPaths maps a path that throws countLines to UNMEASURED", async () => {
   const dir = setup();

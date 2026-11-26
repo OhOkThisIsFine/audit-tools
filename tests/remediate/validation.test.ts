@@ -90,28 +90,12 @@ describe("validateRemediationPlan", () => {
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("errors when plan_id is missing", () => {
-    const issues = validateRemediationPlan({
-      findings: [],
-      blocks: [],
-      project_type: "ts",
-    });
-    expect(issues.filter((i) => i.severity === "error").length).toBeGreaterThan(
-      0,
-    );
-  });
-
-  it("errors when candidate_closing_actions is missing", () => {
-    const issues = validateRemediationPlan({
-      plan_id: "plan-1",
-      findings: [],
-      blocks: [],
-      project_type: "ts",
-    });
-    const errors = issues.filter((i) => i.severity === "error");
-    expect(
-      errors.some((e) => e.path.includes("candidate_closing_actions")),
-    ).toBe(true);
+  it.each(["plan_id", "candidate_closing_actions"] as const)("names the sole missing field: %s", (field) => {
+    const input: Record<string, unknown> = { ...canonicalPlanFixture() };
+    expect(validateRemediationPlan(input)).toEqual([]);
+    delete input[field];
+    const errors = validateRemediationPlan(input).filter(issue => issue.severity === "error");
+    expect(errors.map(issue => issue.path)).toEqual(["remediation_plan." + field]);
   });
 });
 
