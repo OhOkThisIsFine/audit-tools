@@ -339,7 +339,7 @@ export interface CarriedAdvisoryNotice {
 }
 
 export type NextStepResult = (
-  | { kind: "question_review"; state: AuditState; bundle: ArtifactBundle; runId: string; workloadPath: string; pendingCount: number; rejectedCount: number; rejections: readonly { assignmentId: string; guidance: string }[] }
+  | { kind: "question_review"; state: AuditState; bundle: ArtifactBundle; runId: string; workloadPath: string; routingPath: string; pendingCount: number; rejectedCount: number; rejections: readonly { assignmentId: string; guidance: string }[] }
   | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
@@ -2976,7 +2976,7 @@ async function runHostDelegationObligation(
   return {
     kind: "emit",
     step: { kind: "question_review", state: deriveAuditState(carried, { emitStaleness: false }), bundle: carried,
-      runId: cycle.runId, workloadPath: published.workload_path, pendingCount: cycle.pending.length,
+      runId: cycle.runId, workloadPath: published.workload_path, routingPath: published.routing_path, pendingCount: cycle.pending.length,
       rejectedCount: cycle.issues.length, rejections },
     state: carried,
   };

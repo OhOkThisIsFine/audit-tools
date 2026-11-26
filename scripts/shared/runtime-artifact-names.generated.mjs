@@ -80,6 +80,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "remediation_plan.json",
   "repo_manifest.json",
   "review-history.json",
+  "review-routing.json",
   "review-run.json",
   "review_decision.json",
   "review_filter_dispositions.json",

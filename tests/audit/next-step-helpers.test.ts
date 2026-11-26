@@ -1382,7 +1382,7 @@ test("every row returns a PLAN — a row cannot write or log a step itself", asy
       analyzer_install: { unresolved: [] },
       analyzer_consent: { pending: [] },
       edge_reasoning: { candidates: [] },
-      question_review: { runId: "fixture", pendingCount: 1, rejectedCount: 0, rejections: [], workloadPath: join(artifactsDir, "host-workload.json") },
+      question_review: { runId: "fixture", pendingCount: 1, rejectedCount: 0, rejections: [], workloadPath: join(artifactsDir, "host-workload.json"), routingPath: join(artifactsDir, "review-routing.json") },
     };
 
     for (const kind of Object.keys(NEXT_STEP_EMISSION_TABLE)) {

@@ -64,6 +64,7 @@ const cmdModuleMap = [
   ["score-audit", "scoreAuditCommand.js", "cmdScoreAudit"],
   ["recover-submission", "recoverSubmissionCommand.js", "cmdRecoverSubmission"],
   ["submit", "submitCommand.js", "cmdSubmit"],
+  ["prepare-review", "prepareReviewCommand.js", "cmdPrepareReview"],
   ["consolidate-findings", "submitCommand.js", "cmdConsolidateFindings"],
   ["reopen-questions", "submitCommand.js", "cmdReopenQuestions"],
   ["mcp", "submitCommand.js", "cmdMcp"],

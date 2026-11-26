@@ -238,6 +238,21 @@ Run them from anywhere inside the target repository — each resolves that repos
 from the working directory. `--root <repo>` is the explicit override for running from outside
 it (or for targeting a sub-project inside a larger repo).
 
+For targeted review, `next-step` provides a `review_routing` artifact listing only
+the pending assignment IDs, issued workload fingerprint and bound command arguments. The dispatch
+host runs `audit-code prepare-review --work-item <assignment_id> --workload-sha256
+<workload_sha256>` for each selected assignment, using the same root and artifacts
+directory. Use the routing artifact's `prepare_review_argv_prefix`, then append
+`--work-item` and the assignment ID. The command returns a `prompt_path` and
+`read_paths`, not reviewer content. Hand those files and the frozen workspace
+to the reviewer harness, or send a reviewer in that workspace only the packet
+path. Do not read the full workload or packet into the dispatcher's conversation.
+A separate machine must be able to access the advertised paths; the command does
+not transfer or remap the workspace. Ordinary host command permissions apply.
+The packet contains just that question, linked evidence and submission
+instructions. Reviewers can look up related code in the admitted, frozen
+source using the shared index. The worker MCP remains submit-only.
+
 If an accepted answer in an **active** audit addressed the wrong question, run
 `audit-code reopen-questions --from <review-reopen.json>` with a unique `reopen_id`,
 a `reason`, and a `questions` array. Each entry names the exact `question_id`,

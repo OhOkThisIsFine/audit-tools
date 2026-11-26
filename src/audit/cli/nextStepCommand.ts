@@ -11,7 +11,6 @@ import { INDEPENDENT_CONTEXT, SEPARATE_CONTEXT_OR_SELF } from "../../shared/prom
 import { errorMessage } from "../../shared/io/json.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   loadAnalyzerPolicy,
   loadSessionIntent,
@@ -1811,30 +1810,24 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
         rejected_tasks: result.rejectedCount,
       },
       stopCondition: "Submit the bound question answers and then run next-step.",
-      artifactPaths: { host_workload: result.workloadPath },
+      artifactPaths: { host_workload: result.workloadPath, review_routing: result.routingPath },
       prompt: [
         "# Review the issued questions",
-        "Read the workload at: " + toPromptPathToken(result.workloadPath),
-        "Capture each work item by its exact assignment_id, not array position. Keep using this manifest and its result paths for dispatched work; next-step can issue a different manifest with a different pending order.",
+        "Read only the routing metadata at: " + toPromptPathToken(result.routingPath),
+        "For each chosen assignment ID, invoke the current audit-code wrapper with prepare_review_argv_prefix followed by --work-item and that assignment ID. The command returns a prompt_path, not the prompt.",
+        "Pass that file directly to the reviewer harness, or send the reviewer only the instruction to read that path. Share the frozen workspace and the named read_paths. Do not open the reviewer prompt or the host workload in the dispatcher conversation.",
         ...(rejected ? [
           "## Saved results not accepted",
           rejectionSummary + " Rejections did not change any accepted answers.",
           ...result.rejections.map(({ assignmentId, guidance }) => "- `" + assignmentId + "`: " + guidance),
           ...(result.rejectedCount > result.rejections.length
             ? ["Some rejections are not listed above. Use only assignments in the current workload."] : []),
-          "For pending assignments, correct the saved result at the matching workload item's result_path, or submit the corrected bound answer through MCP.",
+          "For pending assignments, return the sanitized refusal to the reviewer. Correct the saved result at its bound result_path, or submit the corrected bound answer through MCP.",
         ] : []),
-        "Use the frozen source, question scope and supplied evidence in each binding. Suggested source files are starting points, not the review boundary.",
         ...(result.bundle.review_plan?.omissions.length ? [
           `${result.bundle.review_plan.omissions.length} inventory entr${result.bundle.review_plan.omissions.length === 1 ? "y was" : "ies were"} omitted from issued questions. See the review plan for reasons. Omission is not evidence of clean coverage; do not treat these entries as reviewed.`,
         ] : []),
-        "Cite the relevant code or identifiable declaration. Line numbers help locate the evidence; they do not establish the claim.",
-        "Record scoped supported observations and any unanswered parts. Do not convert missing evidence into a clean answer.",
-        "Read the submission shape at: " + toPromptPathToken(fileURLToPath(new URL("../../../schemas/review_submission.schema.json", import.meta.url))),
-        "Write the whole submission object, not only its nested answer. The top-level limitations field is an array of strings; use [] when there are none.",
-        "Copy the exact assignment_id, question_id, revision_id and snapshot_id into the answer. Use a distinct submission_id for each independent answer and replay only the same answer under the same ID.",
-        "For each part marked findings, include at least one claim linked by observation_ids to a supported observation in that part. This applies to leads and design opportunities as well as confirmed defects; a claim on a different part does not count.",
-        "For MCP submit_result, set work_item_id to the issued assignment_id and pass the whole submission as the result JSON object. Without MCP, write the whole submission to that item's result_path (relative to the repository root). Then run: " + next,
+        "Wait for the bound reviewer submissions, then run: " + next,
       ].join("\n\n"),
     }};
   },

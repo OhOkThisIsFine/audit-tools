@@ -132,6 +132,9 @@ describe("question-led audit planning", () => {
       ({ path: file.path, fingerprint: file.hash!, line_count: 10 })));
     expect(bindings.slice(0, 4).map(b => b.question.question_id))
       .toEqual(expect.arrayContaining([...accepted, target("charter:material")].map(q => q.question_id)));
+    const behaviorBinding = bindings.find(binding => binding.question === behavior)!;
+    expect(behaviorBinding.assignment.suggested_sources[0]).toEqual({ path: "src/manual.ts" });
+    expect(behaviorBinding.assignment.suggested_sources).toContainEqual({ path: related.path });
     const issued = bindings.find(b => b.question.question_id === accepted[0]!.question_id)!;
     expect(issued.assignment.suggested_sources).toEqual([{ path: "src/manual.ts", start_line: 3, end_line: 6 }]);
     expect(issued.dependencies).toContainEqual(expect.objectContaining({ key: "design-contract:DR-001", kind: "evidence" }));

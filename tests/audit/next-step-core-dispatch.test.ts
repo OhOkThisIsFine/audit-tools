@@ -35,7 +35,8 @@ test.concurrent("next-step publishes a provider-neutral bound question workload"
       expect(assignment.assignment_id).toMatch(/^review-/);
       expect(dirname(resolve(root, result_path))).toBe(resultDir);
     }
-    expect(prompt).toMatch(/Read the workload at:/);
+    expect(prompt).toMatch(/Read only the routing metadata at:/);
+    expect(step.artifact_paths.review_routing).toMatch(/review-routing\.json$/u);
     expect(prompt).toMatch(/next-step/);
     // The PROPERTY is the absence of execution vocabulary, not the presence of
     // the words "provider-neutral". The prompt used to carry that label and the
@@ -43,7 +44,7 @@ test.concurrent("next-step publishes a provider-neutral bound question workload"
     // "provider" — a wording assertion guarding itself. Owner review of prompt
     // 13, 2026-09-17: the host needs the path, not the architecture label.
     expect(prompt).not.toMatch(
-      /merge-and-ingest|\bprovider\b|\bmodel(?:_id)?\b|\b(?:route|routing)\b|\bquota\b/i,
+      /merge-and-ingest|\bprovider\b|\bmodel(?:_id)?\b|\broute\b|\bquota\b/i,
     );
   });
 });

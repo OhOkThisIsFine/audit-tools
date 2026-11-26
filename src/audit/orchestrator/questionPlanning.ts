@@ -223,8 +223,14 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
   const statements = bundle.charter_register?.lanes.find(({ kind }) => kind === "stated")?.nodes ?? [];
   const externalPaths = getExternalSignalPaths(bundle.external_analyzer_results);
   const add: AddSubject = (lens, key, kind, title, refs, contract, expectation, linked) => {
+    // The bound question and its structured starting list must agree on where
+    // to start; the remaining source and contract refs still provide context.
+    const start = linked?.context?.start;
+    const startKey = start && stableStringify(start);
+    const startIndex = startKey === undefined ? -1 : refs.findIndex(ref => stableStringify(ref) === startKey);
+    const startingRefs = startIndex > 0 ? [refs[startIndex]!, ...refs.slice(0, startIndex), ...refs.slice(startIndex + 1)] : refs;
     const item: ReviewInventoryItem = { inventory_item_id: ids(kind, key), kind,
-      title, source_refs: refs, contract_refs: contract, scope: "in_scope" };
+      title, source_refs: startingRefs, contract_refs: contract, scope: "in_scope" };
     if (!inventory.some(({ inventory_item_id }) => inventory_item_id === item.inventory_item_id)) inventory.push(item);
     subjects.push({ lens, inventory: item, expectation,
       parts: linked?.parts ?? [{ part_id: "supported-outcome", expectation }],

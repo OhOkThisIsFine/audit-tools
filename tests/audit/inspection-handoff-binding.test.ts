@@ -8,6 +8,7 @@ import {
   ingestAuditHostResults,
   ingestAuditQuestionResults,
   prepareAuditHostHandoff,
+  prepareAuditQuestionReview,
   readAuditQuestionWorkload,
 } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
@@ -26,12 +27,15 @@ test("issued question assignments bind their scope, submission and fallback path
     const { run_id: runId } = JSON.parse(workloadBytes) as { run_id: string };
     const boundary = { root, artifactsDir, runId };
     const workload = await readAuditQuestionWorkload(boundary);
-    const prompt = await readFile(step.prompt_path, "utf8");
-    expect(prompt).toContain("Use the frozen source, question scope and supplied evidence");
-    expect(prompt).toContain("Suggested source files are starting points, not the review boundary");
+    const { workload_sha256: workloadSha256 } = JSON.parse(await readFile(step.artifact_paths.review_routing, "utf8"));
+    const { prompt_path: promptPath } = await prepareAuditQuestionReview({ ...boundary, workloadSha256,
+      assignmentId: workload.work_items[0]!.binding.assignment.assignment_id });
+    const prompt = await readFile(promptPath, "utf8");
+    expect(prompt).toContain("Use the frozen source and admitted source index");
+    expect(prompt).toContain("Suggested sources are starting points, not the review boundary");
     expect(prompt).toContain("Copy the exact assignment_id, question_id, revision_id and snapshot_id");
-    expect(prompt).toContain("set work_item_id to the issued assignment_id");
-    expect(prompt).toContain("result_path (relative to the repository root)");
+    expect(prompt).toContain("this assignment_id as work_item_id");
+    expect(prompt).toContain("bound result_path relative to repo_root");
 
     expect(workload.work_items.length).toBeGreaterThan(1);
     expect(step.progress?.pending_tasks).toBe(workload.work_items.length);
