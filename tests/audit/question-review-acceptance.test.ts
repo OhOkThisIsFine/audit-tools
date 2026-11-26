@@ -1,3 +1,4 @@
+import { projectQuestionForReport } from "../../src/audit/reporting/questionReport.js";
 import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -152,8 +153,8 @@ describe("question review acceptance", () => {
       expect(resumed.answers.map((row) => row.submission.assignment_id)).toEqual([first]);
       await publish();
       expect(await readFile(workload_path, "utf8")).toBe(workloadBytes);
-      expect(projectQuestionReview(a.question, resumed.answers, [source, membership]).parts.map((part) => part.state)).toEqual([
-        first === "a" ? "clean" : "findings", "open",
+      expect(projectQuestionForReport(a.question, resumed.answers, [], new Map(), [source, membership]).row.parts.map((part) => part.state)).toEqual([
+        first === "a" ? "clean" : "findings", "unreviewed",
       ]);
       const item = workload.work_items.find((row) => row.binding.assignment.assignment_id === second)!;
       const result = join(root, item.result_path);
@@ -163,7 +164,7 @@ describe("question review acceptance", () => {
       expect((await submit(first)).kind).toBe("replay");
       const loaded = await ingestAuditQuestionResults(params);
       expect(loaded.accepted_count).toBe(0);
-      expect(projectQuestionReview(a.question, loaded.answers, [source, membership]).parts.map((part) => part.state)).toEqual(["disputed", "open"]);
+      expect(projectQuestionForReport(a.question, loaded.answers, [], new Map(), [source, membership]).row.parts.map((part) => part.state)).toEqual(["conflicted", "unreviewed"]);
       expect(loaded.answers).toHaveLength(2);
       expect(loaded.answers[0]).toEqual(resumed.answers[0]);
       await expect(submitAuditQuestionResult({ ...params, assignmentId: "a", source: JSON.stringify(submission("a", "findings")) })).rejects.toThrow(/Conflicting reuse/);
@@ -172,7 +173,7 @@ describe("question review acceptance", () => {
       expect((await readAuditQuestionWorkload(params)).work_items).toHaveLength(2);
       await expect(adjudicateAuditQuestionResult({ ...params, adjudication: { ...identity, adjudication_id: "comparison", reviewer: "independent reviewer", decision: "resolved", rationale: "Rechecked the manual outcome", submission_ids: ["response-a", "response-b"], selected_submission_ids: ["response-a"] } })).resolves.toBe("accepted");
       const resolved = await ingestAuditQuestionResults(params);
-      expect(projectQuestionReview(a.question, resolved.answers, [source, membership], resolved.adjudications).parts.map((part) => part.state)).toEqual(["clean", "open"]);
+      expect(projectQuestionForReport(a.question, resolved.answers, resolved.adjudications, new Map(), [source, membership]).row.parts.map((part) => part.state)).toEqual(["clean", "unreviewed"]);
     });
   });
 
@@ -206,8 +207,8 @@ describe("question review acceptance", () => {
       await submitAuditQuestionResult({ ...params, assignmentId: "b", source: JSON.stringify(response) });
       const resumed = await ingestAuditQuestionResults(params);
       const changed = { ...membership, fingerprint: "manual,schedule,restore" };
-      expect(projectQuestionReview(a.question, resumed.answers, [source, changed]).parts.every((part) => part.state === "open")).toBe(true);
-      expect(projectQuestionReview(unrelated.question, resumed.answers, [source, invariant]).parts.map((part) => part.state)).toEqual(["clean", "open"]);
+      expect(projectQuestionForReport(a.question, resumed.answers, [], new Map(), [source, changed]).row.parts.map((part) => part.state)).toEqual(["stale", "unreviewed"]);
+      expect(projectQuestionForReport(unrelated.question, resumed.answers, [], new Map(), [source, invariant]).row.parts.map((part) => part.state)).toEqual(["clean", "unreviewed"]);
       // A referenced source outside the suggested entrypoints is still a binding.
       expect(projectQuestionReview(unrelated.question, resumed.answers, [{ ...source, fingerprint: "manual-v2" }, invariant]).stale).toHaveLength(1);
     });

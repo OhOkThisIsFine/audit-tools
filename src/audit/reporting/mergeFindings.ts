@@ -16,34 +16,48 @@ import {
   findingReEmissionKey,
 } from "audit-tools/shared";
 
-// sites-pinned: tests/audit/reporting-remediation.test.ts, tests/audit/orchestration.test.ts
-function relevantRuntimeEvidence(
-  finding: Finding,
-  report?: RuntimeValidationReport,
-  taskById?: ReadonlyMap<string, RuntimeValidationTaskManifest["tasks"][number]>,
-): string[] {
-  if (!report || !taskById) return [];
-  const findingPaths = new Set(finding.affected_files.map((f) => f.path));
-  return report.results
-    .filter((result) => result.status !== "pending")
-    .filter((result) => {
-      const taskPaths = taskById.get(result.task_id)?.target_paths ?? [];
-      return taskPaths.some((p) => findingPaths.has(p));
-    })
-    .map((result) => `${result.task_id}: ${result.status} — ${result.summary}`);
-}
+interface EvidenceRow { ordinal: number; text: string }
 
-function relevantExternalEvidence(
-  finding: Finding,
-  results?: ExternalAnalyzerResults[],
-): string[] {
-  if (!results || results.length === 0) return [];
-  const findingPaths = new Set(finding.affected_files.map((f) => f.path));
-  return results.flatMap((tool) =>
-    tool.results
-      .filter((item) => findingPaths.has(item.path))
-      .map((item) => `external:${tool.tool}:${item.path}:${item.summary}`),
-  );
+/** Match exact affected paths; gather only matching rows in original order. */
+// sites-pinned: tests/audit/reporting-remediation.test.ts, tests/audit/orchestration.test.ts
+function indexEvidence(
+  report?: RuntimeValidationReport,
+  tasks?: RuntimeValidationTaskManifest,
+  external?: ExternalAnalyzerResults[],
+): (finding: Finding) => string[] {
+  const byPath = new Map<string, EvidenceRow[]>();
+  let ordinal = 0;
+  const add = (paths: readonly string[], text: string) => {
+    if (paths.length === 0) return;
+    const row = { ordinal: ordinal++, text };
+    for (const path of new Set(paths)) {
+      const bucket = byPath.get(path);
+      if (bucket) bucket.push(row);
+      else byPath.set(path, [row]);
+    }
+  };
+  if (report && tasks) {
+    const targets = new Map(tasks.tasks.map(task => [task.id, task.target_paths]));
+    for (const row of report.results) {
+      const paths = targets.get(row.task_id);
+      if (row.status !== "pending" && paths?.length) {
+        add(paths, `${row.task_id}: ${row.status} — ${row.summary}`);
+      }
+    }
+  }
+  for (const tool of external ?? []) {
+    for (const item of tool.results) {
+      add([item.path], `external:${tool.tool}:${item.path}:${item.summary}`);
+    }
+  }
+  if (!byPath.size) return () => [];
+  return finding => {
+    const matching = new Set<EvidenceRow>();
+    for (const { path } of finding.affected_files) {
+      for (const row of byPath.get(path) ?? []) matching.add(row);
+    }
+    return [...matching].sort((a, b) => a.ordinal - b.ordinal).map(row => row.text);
+  };
 }
 
 export function mergeFindings(
@@ -133,20 +147,11 @@ export function mergeFindings(
     }
   }
 
-  const runtimeTaskById = runtimeTasks
-    ? new Map(runtimeTasks.tasks.map((task) => [task.id, task]))
-    : undefined;
-  for (const finding of merged.values()) {
-    const runtimeEv = relevantRuntimeEvidence(finding, runtimeReport, runtimeTaskById);
-    const externalEv = relevantExternalEvidence(finding, externalAnalyzerResults);
-    if (runtimeEv.length > 0 || externalEv.length > 0) {
-      finding.evidence = [
-        ...new Set([
-          ...(finding.evidence ?? []),
-          ...runtimeEv,
-          ...externalEv,
-        ]),
-      ];
+  if (merged.size) {
+    const evidenceFor = indexEvidence(runtimeReport, runtimeTasks, externalAnalyzerResults);
+    for (const finding of merged.values()) {
+      const attached = evidenceFor(finding);
+      if (attached.length) finding.evidence = [...new Set([...(finding.evidence ?? []), ...attached])];
     }
   }
 

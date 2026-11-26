@@ -158,10 +158,9 @@ export function indexQuestionDependencies(dependencies: readonly ReviewDependenc
   return new Set(dependencies.map(row => dependencyIdentity([row])));
 }
 
-/** Report current observations without ever changing the accepted originals. */
+/** Classify accepted answer currency; part verdicts belong to the report projection. */
 export function projectQuestionReview(question: ReviewQuestion, answers: readonly ReviewAcceptedAnswer[],
   dependencies: CurrentQuestionDependencies | undefined,
-  adjudications: readonly ReviewAdjudication[] = [],
 ) {
   const shared = dependencies && "sourceIndex" in dependencies ? dependencies.sourceIndex : undefined;
   const local = dependencies && "local" in dependencies ? dependencies.local : dependencies;
@@ -178,21 +177,5 @@ export function projectQuestionReview(question: ReviewQuestion, answers: readonl
     }) &&
     required.every((dependency) => row.dependency_bindings.some((item) => dependencyIdentity([item]) === dependencyIdentity([dependency]))));
   const stale = sameQuestion.filter((row) => !current.includes(row));
-  const parts = question.requested_parts.map(({ part_id }) => {
-    const observations = current.flatMap(({ submission }) => submission.answer.parts
-      .filter((part) => part.part_id === part_id)
-      .map((part) => ({ ...part, assignment_id: submission.assignment_id, submission_id: submission.submission_id })));
-    const supported = observations.filter((part) => part.outcome !== "inconclusive" && part.observation_ids.length > 0);
-    const verdicts = new Set(supported.map((part) => part.outcome));
-    const supportedIds = new Set(supported.map((part) => part.submission_id));
-    const decisions = adjudications.filter((decision) => decision.question_id === question.question_id &&
-      decision.revision_id === question.revision_id && decision.snapshot_id === question.snapshot_id &&
-      [...supportedIds].every((id) => decision.submission_ids.includes(id)) &&
-      supported.some((part) => decision.selected_submission_ids.includes(part.submission_id)));
-    const resolution = decisions.length === 1 && decisions[0]?.decision === "resolved" ? decisions[0] : undefined;
-    const selected = resolution ? new Set(supported.filter((part) => resolution.selected_submission_ids.includes(part.submission_id)).map((part) => part.outcome)) : verdicts;
-    const state = selected.size > 1 ? "disputed" : selected.has("findings") ? "findings" : selected.has("clean") ? "clean" : "open";
-    return { part_id, state, ...(resolution ? { resolution } : {}), observations: observations.sort((a, b) => compareCodeUnits(a.submission_id, b.submission_id)) };
-  });
-  return { current, stale, parts };
+  return { current, stale };
 }

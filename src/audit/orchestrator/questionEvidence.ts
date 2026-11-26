@@ -2,7 +2,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import { resolveWithinRoot } from "../../shared/io/pathContainment.js";
-import { analyzerProvenanceKey, hashAnalyzerSnippet } from "../../shared/analyzers/provenance.js";
+import { analyzerProvenanceKey, hashAnalyzerSnippetLines } from "../../shared/analyzers/provenance.js";
 import type { ExternalAnalyzerResults } from "../../shared/analyzers/types.js";
 import { hashContent } from "../../shared/hash.js";
 import type { ReviewDependency, ReviewEvidence } from "../../shared/types/reviewQuestion.js";
@@ -153,10 +153,10 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
   const current = [...currentDependencies, ...[...sourceFiles].map(([key, fingerprint]) =>
     ({ kind: "source" as const, key, fingerprint }))];
   const sourceRoot = await realpath(input.sourceRoot);
-  const cache = new Map<string, string | undefined>();
-  async function loadFrozen(path: string): Promise<string | undefined> {
+  const cache = new Map<string, readonly string[] | undefined>();
+  async function loadFrozen(path: string): Promise<readonly string[] | undefined> {
     if (cache.has(path)) return cache.get(path);
-    let source: string | undefined;
+    let source: readonly string[] | undefined;
     const fingerprint = sourceFiles.get(path);
     if (fingerprint) {
       try {
@@ -166,7 +166,7 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
         const target = candidate && resolveWithinRoot(sourceRoot, await realpath(candidate), { allowRoot: false });
         if (target) {
           const bytes = await readFile(target);
-          if (hashContent(bytes) === fingerprint) source = bytes.toString("utf8");
+          if (hashContent(bytes) === fingerprint) source = bytes.toString("utf8").split(/\r?\n/u);
         }
       } catch {
         // Missing or unreadable frozen source cannot anchor a receipt.
@@ -179,7 +179,7 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
     const source = await loadFrozen(ref.path);
     const start = ref.start_line ?? 1, end = ref.end_line ?? start;
     return source !== undefined && Number.isInteger(start) && Number.isInteger(end) &&
-      start >= 1 && end >= start && end <= source.split(/\r?\n/u).length;
+      start >= 1 && end >= start && end <= source.length;
   }
   const records = new Map<string, ReviewEvidence>();
   for (const result of input.analyzerResults ?? []) {
@@ -190,7 +190,7 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
       const ref = { path: p.path, start_line: start, end_line: item.line_end ?? start };
       if (!await isFrozenRef(ref)) continue;
       const source = await loadFrozen(ref.path);
-      if (source === undefined || hashAnalyzerSnippet(source, start, ref.end_line) !== p.snippet_hash) continue;
+      if (source === undefined || hashAnalyzerSnippetLines(source, start, ref.end_line) !== p.snippet_hash) continue;
       const evidence_id = `lead-${hashContent(JSON.stringify([analyzerProvenanceKey(p), start, ref.end_line]))}`;
       records.set(evidence_id, {
         schema_version: "audit-tools/question-review/v1", evidence_id, snapshot_id, kind: "source",

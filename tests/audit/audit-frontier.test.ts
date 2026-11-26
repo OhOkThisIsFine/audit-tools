@@ -1,3 +1,4 @@
+import { projectQuestionForReport } from "../../src/audit/reporting/questionReport.js";
 import { test, expect } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -209,9 +210,9 @@ test("the published question frontier resumes from accepted answers, reuses unre
     expect(resumed.runId).toBe(first.runId);
     expect(resumed.answers).toHaveLength(2);
     expect(resumed.pending).toHaveLength(1);
-    const observed = projectQuestionReview(shared.question, resumed.answers,
+    const observed = projectQuestionForReport(shared.question, resumed.answers, resumed.adjudications, new Map(),
       resumed.dependenciesByQuestion.get(shared.question.question_id));
-    expect(observed.parts.map(part => part.state)).toEqual(["clean", "open"]);
+    expect(observed.row.parts.map(part => part.state)).toEqual(["clean", "unreviewed"]);
 
     const edited = structuredClone(bundle);
     await registerRetry(root, edited);

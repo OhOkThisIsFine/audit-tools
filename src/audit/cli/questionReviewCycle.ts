@@ -65,7 +65,7 @@ export async function deriveQuestionCycleUnlocked(options: QuestionCycleOptions)
   }] as const));
   const pending = bindings.filter(binding => {
     const active = projectQuestionReview(binding.question, ingestion.answers,
-      dependenciesByQuestion.get(binding.question.question_id), ingestion.adjudications);
+      dependenciesByQuestion.get(binding.question.question_id));
     // An accepted inconclusive answer is not a clean result or a reason for
     // infinite redispatch. Reporting keeps its unanswered parts visible.
     return active.current.length === 0;

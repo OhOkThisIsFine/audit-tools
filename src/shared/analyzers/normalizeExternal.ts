@@ -4,7 +4,7 @@ import type {
   ExternalAnalyzerResults,
 } from "./types.js";
 import {
-  hashAnalyzerSnippet,
+  hashAnalyzerSnippetLines,
   type AnalyzerLeadProvenance,
 } from "./provenance.js";
 import { normalizeRepoRelPath } from "../paths.js";
@@ -124,10 +124,10 @@ export function normalizeGenericExternalResults(
       }) + "\n",
     );
   }
-  const sourceCache = new Map<string, string | undefined>();
-  const readCached = (path: string): string | undefined => {
+  const sourceCache = new Map<string, readonly string[] | undefined>();
+  const readCached = (path: string): readonly string[] | undefined => {
     if (!options.readSource) return undefined;
-    if (!sourceCache.has(path)) sourceCache.set(path, options.readSource(path));
+    if (!sourceCache.has(path)) sourceCache.set(path, options.readSource(path)?.split(/\r?\n/u));
     return sourceCache.get(path);
   };
   // An item with BOTH a path and a line number is anchorable; if its source cannot
@@ -147,7 +147,7 @@ export function normalizeGenericExternalResults(
       if (options.readSource) sourceReadFailures += 1;
       return undefined;
     }
-    const snippet_hash = hashAnalyzerSnippet(source, item.line_start, item.line_end);
+    const snippet_hash = hashAnalyzerSnippetLines(source, item.line_start, item.line_end);
     if (snippet_hash === undefined) return undefined;
     return {
       analyzer_id: tool,

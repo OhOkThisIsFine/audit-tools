@@ -56,10 +56,20 @@ export function hashAnalyzerSnippet(
   lineEnd?: number,
 ): string | undefined {
   if (!Number.isInteger(lineStart) || lineStart < 1) return undefined;
+  return hashAnalyzerSnippetLines(source.split(/\r?\n/u), lineStart, lineEnd);
+}
+
+/** Equivalent hashing for callers that already indexed frozen source lines. */
+export function hashAnalyzerSnippetLines(
+  sourceLines: readonly string[],
+  lineStart: number,
+  lineEnd?: number,
+): string | undefined {
+  if (!Number.isInteger(lineStart) || lineStart < 1) return undefined;
   const last = lineEnd !== undefined && Number.isInteger(lineEnd) && lineEnd >= lineStart
     ? lineEnd
     : lineStart;
-  const lines = source.split(/\r?\n/).slice(lineStart - 1, last);
+  const lines = sourceLines.slice(lineStart - 1, last);
   if (lines.length === 0) return undefined;
   const normalized = normalizeAnalyzerSnippet(lines.join("\n"));
   if (normalized.length === 0) return undefined;

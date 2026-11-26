@@ -107,11 +107,19 @@ test("mergeFindings deduplicates duplicate findings and aggregates runtime plus 
             path: "src/api/auth.ts",
             summary: "Analyzer corroborates missing auth logging.",
           },
+          {
+            id: "sg-session", category: "security", severity: "warning",
+            path: "src/lib/session.ts", summary: "Second path in a later analyzer row.",
+          },
+          {
+            id: "sg-auth-again", category: "security", severity: "warning",
+            path: "src/api/auth.ts", summary: "Analyzer corroborates missing auth logging.",
+          },
         ],
       },
     ],
     undefined, undefined, undefined, undefined,
-    { tasks: [{ id: "rv-confirmed", kind: "unit-risk-check", target_paths: ["src/api/auth.ts"],
+    { tasks: [{ id: "rv-confirmed", kind: "unit-risk-check", target_paths: ["src/lib/session.ts", "src/api/auth.ts", "src/lib/session.ts"],
       reason: "Auth risk", priority: "high" }] },
   );
 
@@ -134,6 +142,7 @@ test("mergeFindings deduplicates duplicate findings and aggregates runtime plus 
     "second-pass-review",
     "rv-confirmed: confirmed — Runtime replay reproduced the missing log path.",
     "external:semgrep:src/api/auth.ts:Analyzer corroborates missing auth logging.",
+    "external:semgrep:src/lib/session.ts:Second path in a later analyzer row.",
   ]);
   expect(merged[0].evidence!.some((entry) => /pending runtime evidence/i.test(entry))).toBe(false);
   expect(merged[1].title).toBe("Secondary note");
