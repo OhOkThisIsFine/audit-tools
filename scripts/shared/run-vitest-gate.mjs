@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sites-pinned: tests/shared/vitest-gate-false-red.test.ts
+// sites-pinned: tests/shared/vitest-gate-false-red.test.ts, tests/shared/vitest-windows-cancellation.test.ts
 // Single-sourced vitest GATE. Every local script and CI step that runs vitest
 // in a gate context (must actually fail the pipeline on a test failure) should
 // invoke this instead of `vitest run` / `npx vitest run` directly.
@@ -81,14 +81,21 @@ const vitestEntry = require.resolve("vitest/vitest.mjs");
 // stderr is PIPED (stdout stays inherited, so progress still streams live) purely
 // so the false-RED check below can identify a harness fault by its signature. It
 // is echoed verbatim immediately after the run, so nothing is hidden.
-const result = spawnSync(process.execPath, [vitestEntry, "run", ...vitestArgs], {
-  cwd: repoRoot,
-  stdio: ["inherit", "inherit", "pipe"],
-  encoding: "utf8",
-  maxBuffer: 64 * 1024 * 1024,
-  windowsHide: true,
-  env: { ...process.env, VITEST_GATE_TOKEN: token },
-});
+const npmOwner = new AbortController();
+let ownWindowsSuite = false;
+if (process.platform === "win32" && process.env.AUDIT_TOOLS_ISOLATED_LOAD_DIAGNOSTIC !== "1") {
+  const { isWindowsNpmTest, watchNpmTestOwner } = await import("./vitest-windows-owner.mjs");
+  ownWindowsSuite = isWindowsNpmTest(repoRoot, process.platform, process.env);
+  if (ownWindowsSuite) {
+    try {
+      const unwatch = await watchNpmTestOwner(() => npmOwner.abort());
+      process.once("exit", unwatch);
+    } catch (error) {
+      failClosed(error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+const result = await runNode([vitestEntry, "run", ...vitestArgs], { ...process.env, VITEST_GATE_TOKEN: token });
 
 const stderrText = result.stderr ?? "";
 if (stderrText) process.stderr.write(stderrText);
@@ -219,6 +226,62 @@ if (isFullSuiteRun(vitestArgs)) {
 process.exit(0);
 
 /**
+ * Keep the synchronous path for non-npm and non-Windows callers. The owned Job
+ * uses inherited stdin/stdout and only buffers stderr, as the old gate did.
+ * @param {string[]} args
+ * @param {NodeJS.ProcessEnv} env
+ * @param {boolean} [liveStderr]
+ */
+async function runNode(args, env, liveStderr = false) {
+  if (!ownWindowsSuite) {
+    return spawnSync(process.execPath, args, {
+      cwd: repoRoot, stdio: ["inherit", "inherit", liveStderr ? "inherit" : "pipe"],
+      encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true, env,
+    });
+  }
+  const { spawnOwnedProcess } = await import("../../dist/shared/tooling/ownedProcessLifecycle.js");
+  if (npmOwner.signal.aborted) return { status: null, signal: null, error: new Error("Windows npm test owner exited.") };
+  const owned = spawnOwnedProcess([process.execPath, ...args], { cwd: repoRoot, env, inheritTerminal: true });
+  const { child } = owned;
+  return new Promise(resolveResult => {
+    /** @type {Buffer[]} */
+    const chunks = [];
+    let total = 0;
+    /** @type {Error | undefined} */
+    let error;
+    /** @param {Error} cause */
+    const stop = (cause) => {
+      if (error) return;
+      error = cause;
+      owned.terminate("SIGKILL");
+    };
+    const cancel = () => stop(new Error("Windows npm test owner exited."));
+    npmOwner.signal.addEventListener("abort", cancel, { once: true });
+    if (npmOwner.signal.aborted) cancel();
+    child.on("error", stop);
+    child.stderr.on("data", (chunk) => {
+      if (liveStderr) {
+        process.stderr.write(chunk);
+      } else if (!error) {
+        total += chunk.length;
+        if (total > 64 * 1024 * 1024) stop(new Error("vitest exceeded its stderr capture limit."));
+        else chunks.push(chunk);
+      }
+    });
+    child.once("close", (code, signal) => {
+      npmOwner.signal.removeEventListener("abort", cancel);
+      const cleanup = owned.cleanup(false);
+      owned.release();
+      const rootSignal = owned.rootSignal();
+      if (!error && (!cleanup.cleanup_verified || !cleanup.root_exit_observed || (code !== 0 && owned.rootStatus() === 0))) {
+        error = new Error("Windows Vitest Job ended without verified completion.");
+      }
+      resolveResult({ status: owned.rootStatus(), signal: rootSignal ?? signal, error, stderr: Buffer.concat(chunks).toString("utf8") });
+    });
+  });
+}
+
+/**
  * A full-suite failure is still RED, but it no longer leaves diagnosis to a
  * remembered file list. Every attributable failing file is rerun alone. A
  * full-suite fail followed by a solo pass is recorded from the tool's own
@@ -234,12 +297,10 @@ async function runIsolatedDiagnostics({ record, attribution }) {
   const tree = worktreeTree(repoRoot);
   for (const file of [...new Set(attribution.failedFiles)]) {
     console.error(`[vitest-gate] isolated diagnostic: rerunning ${file} alone; the original gate remains RED.`);
-    const solo = spawnSync(process.execPath, [fileURLToPath(import.meta.url), file], {
-      cwd: repoRoot,
-      stdio: "inherit",
-      windowsHide: true,
-      env: { ...process.env, AUDIT_TOOLS_ISOLATED_LOAD_DIAGNOSTIC: "1" },
-    });
+    const solo = await runNode([fileURLToPath(import.meta.url), file], {
+      ...process.env, AUDIT_TOOLS_ISOLATED_LOAD_DIAGNOSTIC: "1",
+    }, true);
+    if (npmOwner.signal.aborted) failClosed("Windows npm test owner exited.");
     const soloExit = solo.status ?? (solo.error || solo.signal ? 1 : 0);
     if (soloExit !== 0) {
       console.error(

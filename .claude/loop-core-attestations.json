@@ -482,22 +482,6 @@
         "src/audit/cli/semanticReviewStep.ts": "28122f453d1c22e0a162b7e3e0035712c0444b50"
       }
     },
-    "6460287616c57f3a": {
-      "reviewed_by": "dot-root",
-      "attester_class": "agent",
-      "checked": "Parent independently reviewed the exact staged prompt diff: withheld implementation orientation until after outside comparison, retained bound graph provenance, preserved other lanes, general categories and non-defect option judgment. Full npm test on the exact staged source; new CLI receipt check proves shared implementation evidence is available without seeding the outside-in lane.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "ef2c29fc76c968e21d14e204dca23587fb61ca62",
-        "ran_at": "2026-11-26T05:47:22.612Z"
-      },
-      "attested_at": "2026-11-26T05:47:42.779Z",
-      "vouches": {
-        "src/audit/orchestrator/designReviewPrompt.ts": "afc5ff719470b4e94b99e6220aef7b2f0f136e82"
-      }
-    },
     "677face55f9a5a77": {
       "reviewed_by": "independent-sonnet-reviewer-subagent",
       "attester_class": "agent",
@@ -920,6 +904,23 @@
         "src/audit/orchestrator/taskAffinityGraph.ts": "259eb5c8a84f8a4e368278168aa5ab21ac4cdda6"
       }
     },
+    "f543f1c1a24ee55d": {
+      "reviewed_by": "dot",
+      "attester_class": "agent",
+      "checked": "Reviewed outside-in option-by-option cost and benefit comparison, checked protected-main Git merge routing with native Git baseline-red cases, verified native Windows npm parent-only cancellation versus the baseline and natural completion, and ran the full suite on the exact staged tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "a5cecd448f8dd1afb8af38e565e75a4389aa0099",
+        "ran_at": "2026-11-26T06:18:45.217Z"
+      },
+      "attested_at": "2026-11-26T06:18:45.285Z",
+      "vouches": {
+        "src/audit/cli/nextStepCommand.ts": "a778d781bc4eb980cc4304b40c354a6c252de2b9",
+        "src/audit/orchestrator/designReviewPrompt.ts": "7764d1c6ed55cb37854adf548b222ce30aa6f1f5"
+      }
+    },
     "f5e055f6b40aad65": {
       "reviewed_by": "/root/implement_planner",
       "attester_class": "agent",
@@ -987,7 +988,7 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "f206f0a333a054a2"
+      "review": "f543f1c1a24ee55d"
     },
     "src/audit/cli/nextStepHelpers.ts": {
       "review": "f206f0a333a054a2"
@@ -1071,7 +1072,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "6460287616c57f3a"
+      "review": "f543f1c1a24ee55d"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "3e7d0736a83209a4"

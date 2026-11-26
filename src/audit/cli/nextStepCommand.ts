@@ -1795,7 +1795,7 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
 export const NEXT_STEP_EMISSION_TABLE: Readonly<
   Record<NextStepEmissionKind, NextStepEmissionRow>
 > = {
-  question_review: async ({ result, root, sourceRoot, artifactsDir }) => {
+  question_review: async ({ result, root, artifactsDir }) => {
     if (result.kind !== "question_review") throw new Error("Expected a question review step");
     const next = nextStepCommand(root, artifactsDir);
     const rejected = result.rejectedCount > 0;

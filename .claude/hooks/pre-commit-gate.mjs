@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/pre-commit-gate-commit-creating.test.ts
 // PreToolUse hook: the THIN tool-boundary half of the commit gate (P53, owner
 // decision 2026-09-05). Receives the hook payload on stdin:
 // { tool_name, tool_input: { command }, cwd?, session_id? }. Exit 0 = allow,
@@ -25,8 +26,9 @@
 //   • the child-session refusal for a PUSH (there is no pre-push gate of ours;
 //     the commit half is enforced again at git's boundary from the environment).
 //   • MERGE routing: a fast-forward `git merge` writes no commit and runs no
-//     hook, so a merge that introduces loop-core or constitutional content must
-//     be a merge COMMIT (`--no-ff`) — then pre-merge-commit runs the full gate.
+//     hook. Newly introduced loop-core or constitutional content must go through
+//     a merge COMMIT (`--no-ff`); synchronizing to the known protected main
+//     with an explicit, proven fast-forward is not a new landing.
 //   • healing a crashed staged-snapshot round-trip left by the git-boundary gate
 //     (this hook runs on every shell call, so it is the prompt healer).
 // An unresolvable target with none of those is OUT of jurisdiction: exit 0.
@@ -74,7 +76,7 @@ try {
 }
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-const { git, recoverInterruptedRoundTrip } = treeSnapshotTools(root, { label: 'pre-commit gate' });
+const { recoverInterruptedRoundTrip } = treeSnapshotTools(root, { label: 'pre-commit gate' });
 // Heal the tree/index a CRASHED git-boundary round-trip left behind — first,
 // on every invocation (a live lock means an instance is legitimately mid-flight).
 recoverInterruptedRoundTrip();
@@ -307,7 +309,9 @@ const possiblyOwned = (i) => statementJurisdiction(i) !== 'other';
 // feed the bypass refusal; the two refusals below that need real jurisdiction
 // read the RESOLVED sets.
 const commitSubCmds = subCmds.filter((s, i) => isCommitCreating(s) && possiblyOwned(i));
-const ownedCommitSubCmds = subCmds.filter((s, i) => isCommitCreating(s) && owned(i));
+const ownedCommitStatements = subCmds.flatMap((statement, i) =>
+  isCommitCreating(statement) && owned(i) ? [{ statement, index: i, dir: gitTargetDir(statement, stmtCwd[i]) }] : [],
+);
 const ownedPushSubCmds = subCmds.filter((s, i) => isPush(s) && owned(i));
 
 // Every detected commit/push lands in a DIFFERENT repository — this hook has
@@ -371,7 +375,7 @@ if (!payloadSessionId) {
     noteFailOpen('child-session refusal skipped: the hook payload carried no session_id');
   }
 } else if (
-  (ownedCommitSubCmds.length > 0 || ownedPushSubCmds.length > 0) &&
+  (ownedCommitStatements.length > 0 || ownedPushSubCmds.length > 0) &&
   registry.isUnregisteredChild &&
   !bypassEnabled('AUDIT_TOOLS_AGENT_GIT', stripHeredocBodies(cmd))
 ) {
@@ -399,7 +403,6 @@ function noteFailOpen(reason) {
 // Look up the paths in a cherry-pick or revert with git show, and the paths in
 // a merge with git diff. Route gated incoming content through the Git commit
 // hook. Mailboxes and continuation flags do not supply an incoming ref.
-const INCOMING_REF_VERBS = { 'cherry-pick': 'show', revert: 'show', merge: 'diff' };
 const REF_LESS_FLAGS = new Set(['--continue', '--abort', '--skip', '--quit', '--edit-todo']);
 
 /**
@@ -424,35 +427,30 @@ function incomingRefOf(statement, verb) {
 }
 
 /**
- * Paths the pending history-moving commands will INTRODUCE.
- * @param {string[]} statements commit-creating statements targeting this repo
- * @returns {{ paths: string[], unresolved: string[] }} unresolved names the
- *   refs git could not read, so the caller can fail OPEN and say so.
+ * Exempt only an explicit single-ref fast-forward to this project's protected
+ * main as already recorded by Git's remote-tracking ref. Do not fetch in a
+ * tool hook. A local branch/tag, another repository, a divergent HEAD, or a
+ * chained statement that could change the inputs is not sufficient evidence.
  */
-function incomingPaths(statements) {
-  const paths = new Set();
-  const unresolved = [];
-  for (const s of statements) {
-    for (const [verb, mode] of Object.entries(INCOMING_REF_VERBS)) {
-      if (!isGitSubcommand(verb)(s)) continue;
-      const ref = incomingRefOf(collapseQuoted(s), verb);
-      if (!ref) continue;
-      const r =
-        mode === 'show'
-          ? git(['show', '--name-only', '--pretty=format:', ref])
-          : git(['diff', '--name-only', `HEAD...${ref}`]);
-      if (!r.ok) {
-        unresolved.push(`${verb} ${ref}`);
-        continue;
-      }
-      for (const line of r.stdout.split(/\r?\n/)) {
-        const p = line.trim();
-        if (p) paths.add(p.replace(/\\/g, '/'));
-      }
-    }
+function alreadyLandedFastForward(statement, index, git) {
+  if (subCmds.slice(0, index).some((previous) => !cdEffect(previous)?.to)) return false;
+  const tokens = tokenizeStatement(statement.trim());
+  if (tokens.shift() !== 'git') return false;
+  while (tokens[0] === '-C') {
+    if (tokens.length < 3 || resolvablePathToken(tokens[1]) === null) return false;
+    tokens.splice(0, 2);
   }
-  // Stable, content-derived order — never git's emission order.
-  return { paths: [...paths].sort(), unresolved };
+  if (tokens.shift() !== 'merge' || tokens.length !== 2 || !tokens.includes('--ff-only')) return false;
+  const requested = unquoteToken(tokens.find((token) => token !== '--ff-only'));
+  const remote = /^(?:refs\/remotes\/)?([A-Za-z0-9][A-Za-z0-9._-]*)\/main$/.exec(requested)?.[1];
+  if (!remote) return false;
+  const url = git(['remote', 'get-url', remote]);
+  if (!url.ok || !/^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)OhOkThisIsFine\/audit-tools(?:\.git)?\/?$/i.test(url.stdout.trim())) return false;
+
+  const protectedRef = `refs/remotes/${remote}/main`;
+  const symbolic = git(['rev-parse', '--verify', '--symbolic-full-name', requested]);
+  if (!symbolic.ok || symbolic.stdout.trim() !== protectedRef || symbolic.stderr) return false;
+  return git(['merge-base', '--is-ancestor', 'HEAD', protectedRef]).ok;
 }
 
 // ── Routing for the incoming-content verbs git cannot gate ───────────────────
@@ -477,19 +475,29 @@ const ROUTED_VERBS = {
   'cherry-pick': { flag: /(?:^|\s)(?:-n|--no-commit)(?=\s|$)/, hint: '`-n` / `--no-commit`, then `git commit` (which runs pre-commit)' },
   revert: { flag: /(?:^|\s)(?:-n|--no-commit)(?=\s|$)/, hint: '`-n` / `--no-commit`, then `git commit` (which runs pre-commit)' },
 };
-for (const [verb, route] of Object.entries(ROUTED_VERBS)) {
-  const statements = ownedCommitSubCmds.filter((s) => isGitSubcommand(verb)(s));
-  if (statements.length === 0) continue;
-  const incoming = incomingPaths(statements);
-  if (incoming.unresolved.length > 0) {
-    noteFailOpen(
-      `cannot resolve the incoming ref(s) ${incoming.unresolved.join(', ')} (\`git show\`/\`git diff\` failed) — ` +
+for (const { statement, index, dir } of ownedCommitStatements) {
+  for (const [verb, route] of Object.entries(ROUTED_VERBS)) {
+    if (!isGitSubcommand(verb)(statement)) continue;
+    const collapsed = collapseQuoted(statement);
+    if (route.flag.test(collapsed)) continue;
+    const ref = incomingRefOf(collapsed, verb);
+    if (!ref) continue;
+    const { git } = treeSnapshotTools(dir, { label: 'pre-commit gate' });
+    if (verb === 'merge' && alreadyLandedFastForward(statement, index, git)) continue;
+    const [mode, args] = verb === 'merge'
+      ? ['diff', ['diff', '--name-only', '-z', `HEAD...${ref}`, '--']]
+      : ['show', ['show', '--name-only', '-z', '--pretty=format:', ref, '--']];
+    const incoming = git(args);
+    if (!incoming.ok) {
+      noteFailOpen(
+        `cannot resolve the incoming ref(s) ${verb} ${ref} (${mode} probe failed) — ` +
         `the ${verb} routing check was SKIPPED for this command.`,
-    );
-  }
-  const gated = incoming.paths.filter((p) => isLoopCorePath(p) || isConstitutionalDocPath(p));
-  const unrouted = statements.some((s) => !route.flag.test(collapseQuoted(s)));
-  if (gated.length > 0 && unrouted) {
+      );
+      continue;
+    }
+    const gated = incoming.stdout.split('\0').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
+      .filter((p) => isLoopCorePath(p) || isConstitutionalDocPath(p)).sort();
+    if (gated.length === 0) continue;
     console.error(
       `pre-commit gate: ${verb} refused — it introduces loop-core or constitutional content, and this form ` +
         `writes history without running the commit gate, so nothing would judge it:\n` +

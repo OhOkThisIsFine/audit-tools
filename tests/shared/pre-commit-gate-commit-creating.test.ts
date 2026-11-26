@@ -164,3 +164,85 @@ describe("pre-commit gate: a history-moving verb is judged on its INCOMING paths
     expect(r.stderr).toMatch(/incoming ref/i);
   });
 });
+
+describe("merge routing in linked checkouts", () => {
+  const path = (...parts: string[]) => join(repo, ...parts);
+  const linked = () => path("review worktree");
+
+  function addChange(where: string, file: string) {
+    const absolute = join(where, file);
+    mkdirSync(dirname(absolute), { recursive: true });
+    writeFileSync(absolute, "new content\n");
+    gIn(where, "add", file);
+    gIn(where, "commit", "-qm", `change ${file}`);
+  }
+
+  function setProtectedMain() {
+    g("remote", "add", "origin", "https://github.com/OhOkThisIsFine/audit-tools.git");
+    g("update-ref", "refs/remotes/origin/main", "HEAD");
+  }
+
+  test("uses the linked checkout HEAD, including leading cd and git -C", () => {
+    g("worktree", "add", "-qb", "linked", linked());
+    addChange(linked(), STAGED_LOOP_CORE_PATH);
+    gIn(linked(), "checkout", "-qb", "tiny-update");
+    addChange(linked(), "notes.md");
+    gIn(linked(), "checkout", "-q", "linked");
+
+    // The project checkout still lacks the loop-core commit, but the shell
+    // target has it: only notes.md are incoming there.
+    expect(runGate("git merge --ff-only tiny-update").status).toBe(2);
+    for (const [command, cwd] of [
+      ["git merge --ff-only tiny-update", linked()],
+      [`cd "${linked()}"; git merge --ff-only tiny-update`, repo],
+      [`git -C "${linked()}" merge --ff-only tiny-update`, repo],
+    ]) {
+      const r = runGateIn(repo, command, { cwd });
+      expect(r.status, r.stderr).toBe(0);
+    }
+  });
+
+  test("permits only a proven fast-forward to protected main, not unseen or ambiguous targets", () => {
+    g("worktree", "add", "-qb", "linked", linked());
+    addChange(repo, STAGED_LOOP_CORE_PATH);
+    setProtectedMain();
+    g("branch", "unreviewed-alias");
+    g("checkout", "-qb", "unpublished");
+    addChange(repo, "src/shared/engine/unpublished.ts");
+
+    const inLinked = (command: string) => runGateIn(repo, command, { cwd: linked() });
+    expect(inLinked("git merge --ff-only origin/main").status).toBe(0);
+    expect(inLinked("git merge refs/remotes/origin/main --ff-only").status).toBe(0);
+    for (const command of [
+      "git merge origin/main",
+      "git merge --ff-only unpublished",
+      "git merge --ff-only unreviewed-alias",
+      "git merge --ff-only origin/main unpublished",
+      "git status; git merge --ff-only origin/main",
+    ]) expect(inLinked(command).status, command).toBe(2);
+
+    g("remote", "set-url", "origin", "https://github.com/other/audit-tools.git");
+    expect(inLinked("git merge --ff-only origin/main").status).toBe(2);
+    g("remote", "set-url", "origin", "git@github.com:OhOkThisIsFine/audit-tools.git");
+    g("branch", "origin/main", "unpublished");
+    expect(inLinked("git merge --ff-only origin/main").status).toBe(2);
+    expect(inLinked("git merge --ff-only refs/remotes/origin/main").status).toBe(0);
+    g("branch", "-D", "origin/main");
+
+    gIn(linked(), "merge", "--ff-only", "origin/main");
+    expect(gIn(linked(), "rev-parse", "HEAD").stdout).toBe(g("rev-parse", "refs/remotes/origin/main").stdout);
+  });
+
+  test("keeps true merges on the hooked path even when the other commit is already landed", () => {
+    g("worktree", "add", "-qb", "linked", linked());
+    addChange(repo, STAGED_LOOP_CORE_PATH);
+    setProtectedMain();
+    addChange(linked(), "local.md");
+
+    const inLinked = (command: string) => runGateIn(repo, command, { cwd: linked() });
+    const refused = inLinked("git merge --ff-only origin/main");
+    expect(refused.status, refused.stderr).toBe(2);
+    expect(refused.stderr).toContain("--no-ff");
+    expect(inLinked("git merge --no-ff origin/main").status).toBe(0);
+  });
+});

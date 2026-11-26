@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/exec-owned-bounds.test.ts, tests/shared/exec-utf8-capture.test.ts, tests/shared/allowlisted-exec-runner-internals.test.ts
+// sites-pinned: tests/shared/exec-owned-bounds.test.ts, tests/shared/exec-utf8-capture.test.ts, tests/shared/allowlisted-exec-runner-internals.test.ts, tests/shared/vitest-windows-cancellation.test.ts
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isOwnedJobMessage } from "./windowsOwnedJob.js";
@@ -31,7 +31,7 @@ export function beginOwnedProcessTermination(
 /** Ordinary descendant ownership; neither process groups nor Jobs are a sandbox. */
 export function spawnOwnedProcess(
   argv: string[],
-  options: { cwd?: string; env: NodeJS.ProcessEnv; deadlineAt?: number },
+  options: { cwd?: string; env: NodeJS.ProcessEnv; deadlineAt?: number; inheritTerminal?: boolean },
 ) {
   const windows = process.platform === "win32";
   let stopped = false;
@@ -44,7 +44,7 @@ export function spawnOwnedProcess(
   // The normal build publishes this executable helper in dist/**.
   const helper = fileURLToPath(new URL("../../../dist/shared/tooling/windowsOwnedJob.js", import.meta.url));
   const child = (windows
-    ? spawn(process.execPath, [helper], { cwd: options.cwd, env: { ...options.env, NODE_OPTIONS: undefined }, stdio: ["pipe", "pipe", "pipe", "ipc"], windowsHide: true, shell: false })
+    ? spawn(process.execPath, [helper], { cwd: options.cwd, env: { ...options.env, NODE_OPTIONS: undefined }, stdio: options.inheritTerminal ? ["inherit", "inherit", "pipe", "ipc"] : ["pipe", "pipe", "pipe", "ipc"], windowsHide: true, shell: false })
     : spawn(argv[0]!, argv.slice(1), { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, shell: false, detached: true })) as ChildProcessWithoutNullStreams;
   if (windows) {
     child.on("message", (message: unknown) => {

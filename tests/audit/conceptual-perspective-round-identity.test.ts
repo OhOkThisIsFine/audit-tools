@@ -315,7 +315,10 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     expect(outsideIn).not.toContain("## Project context");
     expect(outsideIn).not.toContain(marker);
     expect(pragmatist).toContain(marker);
-    expect(outsideIn).toContain("keeping, deleting, simplifying, or replacing");
+    expect(outsideIn).toContain("keeping, deleting, simplifying, replacing, and other feasible options");
+    expect(outsideIn).toContain("what keeping it preserves and costs");
+    expect(outsideIn).toContain("each alternative’s concrete costs and benefits against that baseline");
+    expect(outsideIn).toContain("label estimates, plausible ranges, or unknowns. Never invent numbers.");
     expect(outsideIn).toContain("label alternatives as unverified hypotheses");
     expect(outsideIn).toContain("Do not expose private identifiers, source, or project data");
     expect(outsideIn).toContain("[in scope]");
@@ -323,7 +326,8 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     expect(pragmatist).not.toContain("Look outside before reading implementation details");
     const judge = await readFile(firstManifest.judge.prompt_path, "utf8");
     expect(judge).toContain("A well-grounded alternative to working code can survive on its merits");
-    expect(judge).toContain("relevant local and external evidence, main trade-off and deciding check");
+    expect(judge).toContain("option-by-option costs and benefits versus the status quo (including what keeping it preserves and costs)");
+    expect(judge).toContain("distinction between measured values, estimates, ranges, and unknowns");
     const evidencePath = firstStep.access.read_paths.find((path: string) => basename(path) === "design-review-shared-evidence.md");
     expect(evidencePath).toBeDefined();
     expect(await readFile(evidencePath!, "utf8")).toContain(marker);
