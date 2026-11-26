@@ -127,7 +127,6 @@ describe("the landing-gate close leg", () => {
     expect(report).toContain("Landing checks do not withhold the closing action");
     expect(readFileSync(join(REPO_DIR, "did-close"), "utf8")).toBe("yes");
     const outcomes = JSON.parse(readFileSync(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
-    expect(outcomes.landing_checks).toMatchObject({ blocking: false, passed: false });
     expect(outcomes.closing_result).toMatchObject({ action: "custom", status: "success" });
     // The failure names the command AND carries its output tail — a report that
     // says only "a gate failed" leaves an operator with nothing to act on.

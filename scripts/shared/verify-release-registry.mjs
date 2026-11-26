@@ -3,7 +3,8 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { isScriptEntry } from "./primitives.mjs";
+import { guardArgv } from "./argvGuard.mjs";
 
 /** @param {string} expectedSRI @param {string} tag @param {string} version @param {unknown} integrity @param {unknown} tags */
 export function registryReleaseStatus(expectedSRI, tag, version, integrity, tags) {
@@ -19,7 +20,7 @@ export function registryReleaseStatus(expectedSRI, tag, version, integrity, tags
 /** @param {string} spec @param {string} field @returns {unknown} */
 function view(spec, field) {
   const result = spawnSync("npm", ["view", spec, field, "--json", "--prefer-online", "--registry=https://registry.npmjs.org"], {
-    encoding: "utf8", timeout: 4_000,
+    encoding: "utf8", timeout: 4_000, windowsHide: true,
   });
   if (result.error || result.status !== 0) return undefined;
   try {
@@ -29,7 +30,11 @@ function view(spec, field) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isScriptEntry(import.meta.url, process.argv)) {
+  guardArgv(process.argv.slice(2), {
+    name: "verify-release-registry",
+    usage: "node scripts/shared/verify-release-registry.mjs",
+  });
   const { RELEASE_TARBALL, PACKAGE_NAME, PACKAGE_VERSION, PUBLISH_TAG } = process.env;
   if (!RELEASE_TARBALL || !PACKAGE_NAME || !PACKAGE_VERSION || !PUBLISH_TAG) {
     throw new Error("Missing qualified tarball or release metadata.");

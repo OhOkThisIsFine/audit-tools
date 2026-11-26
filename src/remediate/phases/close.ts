@@ -2663,7 +2663,6 @@ async function finishCloseReport(
       failure_summary?: string;
     };
     e2e_result?: { passed: boolean };
-    landing_checks: LandingGateVerifyOutcome & { blocking: false };
     closing_result: {
       action: ClosingAction;
       status: string;
@@ -2684,7 +2683,6 @@ async function finishCloseReport(
       ...(combinedTest.output ? { failure_summary: combinedTest.output } : {}),
     },
     ...(e2eResult.ran ? { e2e_result: { passed: e2eResult.passed } } : {}),
-    landing_checks: { ...landingGates, blocking: false },
     closing_result: {
       action: closingResult.action,
       status: closingResult.status,
