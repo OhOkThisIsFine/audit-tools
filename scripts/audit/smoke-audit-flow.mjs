@@ -165,6 +165,19 @@ async function advanceToDispatchReady(runNextStep, log) {
       );
       continue;
     }
+    if (step.step_kind === "analyzer_selection" || step.step_kind === "analyzer_calibration") {
+      const prompt = await readFile(step.prompt_path, "utf8");
+      const input_sha256 = /"input_sha256": "([a-f0-9]{64})"/u.exec(prompt)?.[1];
+      if (!input_sha256) throw new Error("Analyzer step did not publish an input fingerprint");
+      const example = /"decisions": \[([\s\S]*?)\]/u.exec(prompt)?.[1] ?? "";
+      const tools = [...example.matchAll(/"tool": "([^"]+)"/gu)].map(match => match[1]);
+      const reason = "Offline smoke fixture";
+      const answer = step.step_kind === "analyzer_selection"
+        ? { input_sha256, decisions: tools.map(tool => ({ tool, action: "omit", reason })), additional_checks: [], gaps: [] }
+        : { input_sha256, decisions: tools.map(tool => ({ tool, action: "limited", reason, coverage: "No independent coverage claimed" })), unresolved: [] };
+      await writeFile(step.artifact_paths[step.step_kind], JSON.stringify(answer, null, 2) + "\n");
+      continue;
+    }
     if (step.step_kind === "analyzer_consent") {
       await writeFile(
         step.artifact_paths.analyzer_consent_decisions,

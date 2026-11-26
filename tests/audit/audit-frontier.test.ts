@@ -3,6 +3,9 @@ import { test, expect } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hashContent } from "audit-tools/shared";
+import { runDeterministicForNextStep } from "../../src/audit/cli/nextStepHelpers.js";
+import { updateRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js";
+import { queryReviewerGraph } from "../../src/audit/cli/reviewGraphCommand.js";
 import { cmdNextStep } from "../../src/audit/cli/nextStepCommand.js";
 import { deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
 import { publishAuditQuestionWorkload, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
@@ -272,5 +275,116 @@ test("same-source analyzer refresh reissues only changed pending bindings and ke
     expect(await readFile(second.workload_path, "utf8")).toBe(bytes);
     await expect(accept(manualOnly(shared, "late-before-refresh"))).rejects.toThrow(/not in the current issued workload/u);
     expect((await accept(manualOnly(reissued, "fresh-after-refresh"))).kind).toBe("accepted");
+  });
+});
+
+test("one shared checkpoint offers using evidence without accepting audit intent", async () => {
+  await withTempRepo(async root => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const bundle = await sourceFixture(root);
+    const manifest = '{"name":"fixture"}\n';
+    await writeFile(join(root, "package.json"), manifest);
+    bundle.repo_manifest!.files.push({ path: "package.json", language: "json", size_bytes: Buffer.byteLength(manifest), hash: hashContent(manifest) });
+    bundle.file_disposition!.files.push({ path: "package.json", status: "doc_only" });
+    delete bundle.intent_checkpoint;
+    await writeCoreArtifacts(artifactsDir, {
+      ...bundle, auto_fixes_applied: {}, syntax_resolution_status: {},
+      external_analyzer_acquisition: { enabled: true, tool_statuses: [
+        { tool: "gitleaks", status: "success", resolved: true, exit_code: 0 },
+        { tool: "semgrep", status: "findings", resolved: true, exit_code: 0, reported_coverage: { scanned: [MANUAL], skipped: [STORE, SCHEDULED] } },
+      ] }, external_analyzer_results: [{ tool: "semgrep", results: [
+        { id: "historical-scheduled", path: SCHEDULED, category: "correctness", severity: "low", summary: "Retain an earlier lead until this file is rescanned" },
+      ] }],
+      analyzer_capability: { coverage: "not_applicable", analyzers: [] },
+      design_assessment: { generated_at: "2026-01-01T00:00:00Z", findings: [], contract_reviewed: true, conceptual_reviewed: true },
+      docs_digest: { generated_at: "2026-01-01T00:00:00Z", docs: [] },
+      structure_decomposition: {
+        generated_at: "2026-01-01T00:00:00Z", target: "structure", node_universe_size: 1,
+        source_ids: [], consensus: [], contested: [], findings: [],
+      },
+    });
+    const argv = ["--root", root, "--artifacts-dir", artifactsDir];
+    const current = async () => JSON.parse(await readFile(join(artifactsDir, "steps/current-step.json"), "utf8"));
+    await cmdNextStep(argv);
+    const preparation = await current();
+    expect(preparation.step_kind).toBe("analyzer_calibration");
+    const prompt = await readFile(preparation.prompt_path, "utf8");
+    const fingerprint = /"input_sha256": "([a-f0-9]{64})"/u.exec(prompt)?.[1];
+    expect(fingerprint).toEqual(expect.any(String));
+    const healthy = { tool: "gitleaks", action: "accept", reason: "Already verified", coverage: "Secret scan covered the fixture" };
+    await writeFile(preparation.artifact_paths.analyzer_calibration, JSON.stringify({
+      input_sha256: fingerprint,
+      decisions: [healthy, { tool: "semgrep", action: "retry", reason: "Corrected fixture rules", coverage: "Store and scheduled files were skipped" }],
+      unresolved: [],
+    }));
+    await updateRunConsentUnlocked(root, artifactsDir, { semgrep: "granted" });
+    const executions: string[][] = [];
+    const retry = await runDeterministicForNextStep({
+      root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 15000,
+      externalAcquisition: { enabled: true, hostSelection: true, run: async argv => {
+        executions.push([...argv]);
+        return { argv, status: 0, stderr: "", duration_ms: 1,
+          stdout: JSON.stringify({ results: [], paths: { scanned: [MANUAL, STORE], skipped: [{ path: SCHEDULED }] } }) };
+      } },
+    });
+    expect(retry.kind).toBe("analyzer_calibration");
+    if (retry.kind !== "analyzer_calibration") throw new Error("Missing retry assessment");
+    expect(executions).toHaveLength(2);
+    expect(executions[0]).toEqual(["pipx", "--version"]);
+    expect(executions[1]).toContain("semgrep");
+    expect(retry.request.input_sha256).not.toBe(fingerprint);
+    expect(retry.request.tools.find(tool => tool.tool === "semgrep")?.admittedSkipped).toEqual([SCHEDULED]);
+    expect(retry.request.tools.find(tool => tool.tool === "gitleaks")).toMatchObject({ status: "success", exit_code: 0 });
+    expect(retry.bundle.external_analyzer_results?.find(row => row.tool === "semgrep")?.results)
+      .toEqual([expect.objectContaining({ id: "historical-scheduled" })]);
+    await writeFile(preparation.artifact_paths.analyzer_calibration, JSON.stringify({
+      input_sha256: retry.request.input_sha256,
+      decisions: [healthy, { tool: "semgrep", action: "limited", reason: "Retry fixed store coverage only", coverage: "Scheduled file remains skipped" }],
+      unresolved: [SCHEDULED + " still omitted by Semgrep"],
+    }));
+    await cmdNextStep(argv);
+    const first = await current();
+    expect(first.step_kind).toBe("confirm_intent");
+    expect(first.stop_condition).toMatch(/stop with the prepared evidence/);
+    expect(await readFile(first.prompt_path, "utf8")).toMatch(/whether to stop here/);
+    expect(first.artifact_paths.graph_index).toEqual(expect.any(String));
+    const graphIndex = first.artifact_paths.graph_index;
+    const graph = await readFile(graphIndex, "utf8");
+    expect(await queryReviewerGraph(graphIndex, hashContent(graph), { path: MANUAL })).toMatchObject({ path: MANUAL });
+    expect(first.artifact_paths.host_workload).toBeUndefined();
+    const finalReceipt = await readFile(first.artifact_paths.analyzer_calibration, "utf8");
+    expect(JSON.parse(finalReceipt).unresolved).toEqual([SCHEDULED + " still omitted by Semgrep"]);
+    const scanned = await readFile(first.artifact_paths.analyzer_acquisition, "utf8");
+    expect(scanned).toContain(STORE);
+    expect(JSON.parse(scanned).calibration_retries).toEqual([expect.objectContaining({
+      input_sha256: fingerprint, tools: [expect.objectContaining({ tool: "semgrep", reason: "Corrected fixture rules" })],
+    })]);
+    await expect(readFile(join(artifactsDir, "intent_checkpoint.json"), "utf8")).rejects.toMatchObject({code:"ENOENT"});
+    const snapshot = await readFile(join(artifactsDir, "run-snapshot.json"), "utf8");
+    await cmdNextStep(argv);
+    const audit = await current();
+    expect(audit.step_kind).toBe("confirm_intent");
+    for (const key of ["frozen_source", "repo_manifest", "native_graph", "graph_index", "analyzer_acquisition", "analyzer_results", "analyzer_capability"]) {
+      expect(audit.artifact_paths[key]).toEqual(first.artifact_paths[key]);
+    }
+    expect(await readFile(join(artifactsDir, "run-snapshot.json"), "utf8")).toBe(snapshot);
+    expect(await readFile(audit.artifact_paths.analyzer_acquisition, "utf8")).toBe(scanned);
+    expect(await readFile(audit.artifact_paths.analyzer_calibration, "utf8")).toBe(finalReceipt);
+    await writeFile(audit.artifact_paths.intent_checkpoint, JSON.stringify({
+      schema_version: "intent-checkpoint/v1", confirmed_at: "2026-01-01T00:00:00Z", confirmed_by: "host",
+      scope_summary: "Fixture source", intent_summary: "Audit the fixture", lens_selection: { include: ["behavior"] },
+    }));
+    const continued = await runDeterministicForNextStep({
+      root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 15000,
+      externalAcquisition: { enabled: true, hostSelection: true, run: async argv => {
+        executions.push([...argv]);
+        throw new Error("Continuing with valid evidence must not invoke an analyzer");
+      } },
+    });
+    expect(continued.bundle.intent_checkpoint?.intent_summary).toBe("Audit the fixture");
+    expect(continued.kind).not.toBe("confirm_intent");
+    expect(continued.kind).not.toBe("analyzer_calibration");
+    expect(executions).toHaveLength(2);
+    expect(await readFile(join(artifactsDir, "run-snapshot.json"), "utf8")).toBe(snapshot);
   });
 });

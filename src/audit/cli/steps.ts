@@ -33,6 +33,8 @@ export const StepKindSchema = z.enum([
   "intent_equivalence",
   "analyzer_install",
   "analyzer_consent",
+  "analyzer_selection",
+  "analyzer_calibration",
   "edge_reasoning_dispatch",
   "critical_flow_fallback",
   "synthesis_narrative",

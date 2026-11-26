@@ -1359,8 +1359,10 @@ const NEXT_STEP_SOURCE = await readFile(
 
 /** Every host-actionable result kind the emission table must carry a row for. */
 const EXPECTED_EMISSION_KINDS = [
+  "analyzer_calibration",
   "analyzer_consent",
   "analyzer_install",
+  "analyzer_selection",
   "blocked",
   "charter_clarification",
   "charter_comparison",
@@ -1423,6 +1425,8 @@ test("every row returns a PLAN — a row cannot write or log a step itself", asy
       blocked: { reason: "a stated cause" },
       analyzer_install: { unresolved: [] },
       analyzer_consent: { pending: [] },
+      analyzer_selection: { request: { input_sha256: "a".repeat(64), inventory: { languages: [], configuration: [] }, candidates: [] } },
+      analyzer_calibration: { request: { input_sha256: "a".repeat(64), tools: [] } },
       edge_reasoning: { candidates: [] },
       question_review: { runId: "fixture", pendingCount: 1, rejectedCount: 0, rejections: [], workloadPath: join(artifactsDir, "host-workload.json"), routingPath: join(artifactsDir, "review-routing.json") },
     };

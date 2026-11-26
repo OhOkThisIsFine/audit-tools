@@ -79,6 +79,8 @@ import {
  */
 export const GATE_LANES = {
   analyzer_consent: "analyzer_consent",
+  analyzer_selection: "analyzer_selection",
+  analyzer_calibration: "analyzer_calibration",
   analyzer_decisions: "analyzer_decisions",
   edge_reasoning: "edge_reasoning",
   design_review_contract: "design_review_contract",

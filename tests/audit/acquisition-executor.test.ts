@@ -14,7 +14,7 @@ import type {
 // enabled path with an injected fetch + command runner (gitleaks via a fake
 // PATH-resolved binary), asserting the marker + the upserted findings.
 
-const { runExternalAnalyzerAcquisitionExecutor } = await import(
+const { analyzerSelectionContext, incompleteAnalyzerStatuses, runExternalAnalyzerAcquisitionExecutor } = await import(
   "../../src/audit/orchestrator/acquisitionExecutor.js"
 );
 
@@ -327,7 +327,14 @@ test("fresh release is resolved once, failed scan stays visible, and resume reus
     expect(marker.tool_statuses.find(x => x.tool === "semgrep"))
       .toMatchObject({ version: "1.999.0", stage: "scan", status: "failed" });
     expect(first.progress_summary).toContain("rerun only that analyzer");
-    await runExternalAnalyzerAcquisitionExecutor(first.updated, root, options);
+    const healthy = { tool: "gitleaks", status: "success", resolved: true } as const;
+    first.updated.external_analyzer_acquisition!.tool_statuses =
+      marker.tool_statuses.map(row => row.tool === healthy.tool ? healthy : row);
+    const retry = await runExternalAnalyzerAcquisitionExecutor(first.updated, root, options, ["semgrep"]);
+    expect(retry.updated.external_analyzer_acquisition!.tool_statuses.find(row => row.tool === healthy.tool)).toEqual(healthy);
+    expect(retry.updated.external_analyzer_acquisition!.tool_statuses.find(row => row.tool === "semgrep")?.status).toBe("failed");
+    await expect(runExternalAnalyzerAcquisitionExecutor(first.updated, root, options, ["unregistered-tool"]))
+      .rejects.toThrow("previously attempted");
     expect(lookups).toEqual(["https://pypi.org/pypi/semgrep/json"]);
     expect(attempts.filter(argv => argv.includes("semgrep==1.999.0"))).toHaveLength(2);
   } finally {
@@ -387,4 +394,34 @@ test("an imported success by tool name alone does not clear the automatic covera
       tool_statuses: [{ tool: "semgrep", status: "success", resolved: true }],
     }],
   })).toEqual([failure]);
+});
+
+test("recovery keeps partial findings from an unsuccessful process visible", () => {
+  const status = { tool: "partial", resolved: true, status: "findings" as const, exit_code: 2 };
+  const killed = { tool: "killed", resolved: true, status: "findings" as const, exit_code: null };
+  const skipped = { tool: "declined", resolved: false, status: "skipped" as const };
+  const clean = { tool: "healthy", resolved: true, status: "success" as const, exit_code: 0 };
+  const bundle: ArtifactBundle = { external_analyzer_acquisition: {
+    generated_at: "2026-01-01T00:00:00Z", enabled: true,
+    tool_statuses: [status, killed, skipped, clean],
+  } };
+  expect(incompleteAnalyzerStatuses(bundle)).toEqual([status, killed]);
+});
+
+test("selection context counts admitted languages and points to real build/CI clues", () => {
+  const bundle = bundleAfterIntake();
+  bundle.repo_manifest!.files.push(
+    { path: "packages/tool/package.json", language: "json", size_bytes: 23 },
+    { path: ".github/workflows/check.yml", language: "yaml", size_bytes: 17 },
+    { path: "vendor/go.mod", language: "text", size_bytes: 20 },
+  );
+  bundle.file_disposition!.files.push(
+    { path: "packages/tool/package.json", status: "doc_only" },
+    { path: ".github/workflows/check.yml", status: "included" },
+    { path: "vendor/go.mod", status: "excluded" },
+  );
+  expect(analyzerSelectionContext(bundle)).toEqual({
+    languages: [["typescript", 1], ["yaml", 1]],
+    configuration: [".github/workflows/check.yml", "packages/tool/package.json"],
+  });
 });

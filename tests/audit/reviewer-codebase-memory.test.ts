@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { hashContent, runTrackedAsync } from "audit-tools/shared";
 import { prepareReviewerCbm, queryReviewerCbm } from "../../src/audit/cli/reviewerCodebaseMemory.js";
 import { buildReviewerGraph, queryReviewerGraph } from "../../src/audit/cli/reviewGraphCommand.js";
+import { publishAuditEvidenceGraph } from "../../src/audit/cli/dispatch/hostHandoff.js";
 
 vi.mock("audit-tools/shared", async importOriginal => {
   const original = await importOriginal<typeof import("audit-tools/shared")>();
@@ -129,4 +130,20 @@ test("missing ready manifest gives rebuild or native-file guidance before queryi
     path: "a.ts", detail: "symbols", direction: "both", limit: 1,
   })).rejects.toThrow(/missing.*rebuild.*native file links/i);
   expect(runner).not.toHaveBeenCalled();
+});
+
+test("publishes a queryable evidence graph before any reviewer work and keeps its handle stable", async () => {
+  const f = await setup();
+  runner.mockImplementation(async argv => {
+    if (argv.includes("query_graph")) return success(emptyPage);
+    expect(argv).toContain("index_repository");
+    return success({ status: "indexed" });
+  });
+  const graph = { graphs: {} };
+  const first = await publishAuditEvidenceGraph(f.run, f.frozen, f.files, graph);
+  expect(first).toMatchObject({ graphIndexFailed: false, indexed: { engine: "codebase-memory-mcp" } });
+  expect(await queryReviewerGraph(first.graphIndex!, first.graphSha256!, { path: "a.ts" })).toMatchObject({ path: "a.ts" });
+  const reviewerFiles = f.files.map(file => ({ ...file, line_count: 1 }));
+  expect(await publishAuditEvidenceGraph(f.run, f.frozen, reviewerFiles, graph)).toEqual(first);
+  expect(runner.mock.calls.filter(([argv]) => argv.includes("index_repository"))).toHaveLength(1);
 });

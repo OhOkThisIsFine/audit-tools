@@ -1,3 +1,5 @@
+import { analyzerCalibrationRequest, currentAnalyzerCalibration, type AnalyzerCalibrationRequest } from "../orchestrator/analyzerCalibration.js";
+import { analyzerSelectionRequest, currentAnalyzerSelection, type AnalyzerSelectionRequest } from "../orchestrator/analyzerSelection.js";
 import { nextStepCommand } from "./prompts.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { assertQualifiedReviewObligation, assertQualifiedReviewStillCurrent, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
@@ -159,7 +161,7 @@ import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import type { ExternalAnalyzerCandidate } from "audit-tools/shared";
 import { runAuditStepUnlocked } from "./auditStep.js";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
-import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
+import { runExternalAnalyzerAcquisitionExecutor, type ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import {
   writeHandoffOnly,
 } from "./reviewRun.js";
@@ -352,6 +354,8 @@ export type NextStepResult = (
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "intent_equivalence"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
+  | { kind: "analyzer_calibration"; state: AuditState; bundle: ArtifactBundle; request: AnalyzerCalibrationRequest }
+  | { kind: "analyzer_selection"; state: AuditState; bundle: ArtifactBundle; request: AnalyzerSelectionRequest }
   | { kind: "analyzer_consent"; state: AuditState; bundle: ArtifactBundle; pending: ExternalAnalyzerCandidate[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
   | { kind: "critical_flow_fallback"; state: AuditState; bundle: ArtifactBundle }
@@ -399,6 +403,8 @@ const NEXT_STEP_RETURN_KIND_TABLE: Readonly<
   intent_equivalence: true,
   analyzer_install: true,
   analyzer_consent: true,
+  analyzer_selection: true,
+  analyzer_calibration: true,
   edge_reasoning: true,
   critical_flow_fallback: true,
   synthesis_narrative: true,
@@ -2810,6 +2816,15 @@ function omittableObligation(
  * the executor for the selected id), so the obligation list cannot drift from the
  * priority scan it mirrors.
  */
+async function readOptionalJson(artifactsDir: string, file: string): Promise<unknown> {
+  try { return await readJsonFile(join(artifactsDir, file)); }
+  catch (error) { if (!isFileMissingError(error)) throw error; }
+}
+
+function emitCalibration(bundle: ArtifactBundle, request: AnalyzerCalibrationRequest): AuditOutcome {
+  return { kind: "emit", step: { kind: "analyzer_calibration", state: deriveAuditState(bundle, { emitStaleness: false }), bundle, request }, state: bundle };
+}
+
 export function buildAuditObligations(
 ): AuditObligationDef[] {
   // One memo per registry construction, shared by every def in it. Scoped to
@@ -2834,6 +2849,34 @@ export function buildAuditObligations(
     // does the deterministic acquisition executor run.
     external_analyzers_current: async (bundle, ctx): Promise<AuditOutcome> => {
       const state = deriveAuditState(bundle, { emitStaleness: false });
+      if (ctx.params.externalAcquisition?.hostSelection) {
+        const request = analyzerSelectionRequest(bundle, requireSourceRoot(ctx.params), ctx.params.analyzers);
+        const storedPath = join(ctx.params.artifactsDir, "analyzer-selection.json");
+        let selection;
+        try { selection = currentAnalyzerSelection(await readJsonFile(storedPath), request); }
+        catch (error) { if (!isFileMissingError(error)) throw error; }
+        if (!selection) {
+          const lane = GATE_LANES.analyzer_selection;
+          const incoming = await consumeObjectSubmission(ctx.params.artifactsDir, lane, ctx.tx);
+          if (incoming.status === "ok") {
+            selection = currentAnalyzerSelection(incoming.value, request);
+            if (selection) {
+              await writeJsonFile(storedPath, selection);
+              markSubmissionApplied(ctx.tx, incoming.path);
+            } else {
+              const quarantine = await quarantineSubmissionFile(ctx.params.artifactsDir, incoming.path, lane);
+              await recordLaneOutcome(ctx.params.artifactsDir, lane, {
+                kind: "rejected", issueCode: "submission_contract_invalid",
+                message: "Selection must name every offered tool exactly once and match the current intake fingerprint." + quarantineSurvivalNote(quarantine),
+              });
+            }
+          }
+          if (!selection) return { kind: "emit", step: { kind: "analyzer_selection", state, bundle, request }, state: bundle };
+        }
+        const skipped = Object.fromEntries(selection.decisions.filter(row => row.action === "omit").map(row => [row.tool, "skip" as const]));
+        ctx.analyzersRef.value = { ...ctx.params.analyzers, ...skipped };
+        ctx.params.externalAcquisition.analyzers = { ...ctx.params.externalAcquisition.analyzers, ...skipped };
+      }
       const branch = await handleAnalyzerConsentBranch(
         ctx.params,
         bundle,
@@ -2877,15 +2920,50 @@ export function buildAuditObligations(
     // Confirm-intent host step: the host writes intent_checkpoint.json (read by
     // deriveAuditState on re-invocation), so there is no submission to
     // consume — emit the step directly.
-    intent_checkpoint_current: async (bundle): Promise<AuditOutcome> => ({
-      kind: "emit",
-      step: {
-        kind: "confirm_intent",
-        state: deriveAuditState(bundle, { emitStaleness: false }),
-        bundle,
-      },
-      state: bundle,
-    }),
+    intent_checkpoint_current: async (bundle, ctx): Promise<AuditOutcome> => {
+      const { artifactsDir, externalAcquisition } = ctx.params;
+      if (externalAcquisition?.hostSelection && bundle.external_analyzer_acquisition?.enabled) {
+        const selection = await readOptionalJson(artifactsDir, "analyzer-selection.json");
+        const request = analyzerCalibrationRequest(bundle, selection);
+        const file = "analyzer-calibration.json";
+        const previous = currentAnalyzerCalibration(await readOptionalJson(artifactsDir, file), request);
+        if (!previous || previous.decisions.some(row => row.action === "retry")) {
+          const lane = GATE_LANES.analyzer_calibration;
+          const incoming = await consumeObjectSubmission(artifactsDir, lane, ctx.tx);
+          if (incoming.status === "ok") {
+            const answer = currentAnalyzerCalibration(incoming.value, request);
+            if (answer) {
+              const affected = answer.decisions.filter(row => row.action === "retry").map(row => row.tool);
+              if (affected.length > 0) {
+                const next = await runExternalAnalyzerAcquisitionExecutor(bundle, requireSourceRoot(ctx.params), externalAcquisition, affected);
+                const marker = next.updated.external_analyzer_acquisition!;
+                marker.calibration_retries = [...(marker.calibration_retries ?? []), {
+                  input_sha256: request.input_sha256, at: marker.generated_at ?? new Date().toISOString(),
+                  tools: answer.decisions.filter(row => affected.includes(row.tool)).map(({ tool, coverage, reason }) => {
+                    const measured = marker.tool_statuses.find(row => row.tool === tool);
+                    return { tool, coverage, reason, status: measured?.status, version: measured?.version };
+                  }),
+                }];
+                markSubmissionApplied(ctx.tx, incoming.path);
+                return emitCalibration(next.updated, analyzerCalibrationRequest(next.updated, selection));
+              }
+              await writeJsonFile(join(artifactsDir, file), answer);
+              markSubmissionApplied(ctx.tx, incoming.path);
+            } else {
+              const quarantine = await quarantineSubmissionFile(artifactsDir, incoming.path, lane);
+              await recordLaneOutcome(artifactsDir, lane, {
+                kind: "rejected", issueCode: "submission_contract_invalid",
+                message: "Calibrate each attempted tool exactly once against the current evidence. Degraded results cannot be accepted as complete." + quarantineSurvivalNote(quarantine),
+              });
+              return emitCalibration(bundle, request);
+            }
+          } else {
+            return emitCalibration(bundle, request);
+          }
+        }
+      }
+      return { kind: "emit", step: { kind: "confirm_intent", state: deriveAuditState(bundle, { emitStaleness: false }), bundle }, state: bundle };
+    },
     // DD-9 intent-equivalence gate: consume a judge verdict (validated +
     // quarantined-loudly), resolve the deterministic arms in-fold, or emit the
     // bounded prose-equivalence judge step.

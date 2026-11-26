@@ -875,6 +875,7 @@ export async function runExternalAnalyzer(
       const degradationFields = {
         exit_code: result.status,
         ...(droppedRows > 0 ? { dropped_rows: droppedRows } : {}),
+        ...(parsed.reported_coverage ? { reported_coverage: parsed.reported_coverage } : {}),
         ...(sourceReadFailures > 0 ? { source_read_failures: sourceReadFailures } : {}),
         ...stderrSnippet,
         duration_ms: result.duration_ms,

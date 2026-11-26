@@ -215,7 +215,10 @@ describe("renderAnalyzerConsentPrompt — tool-rendered offer", () => {
       continueCommand: "audit-code next-step",
     });
     expect(prompt).toContain("A grant does not install the runner it names");
-    expect(prompt).toContain("records it as not resolved and continues without it");
+    expect(prompt).toContain("records it as not resolved");
+    expect(prompt).toContain("attempt targeted repairs if authorized");
+    expect(prompt).toContain("A tool grant alone does not authorize installing its runner");
+    expect(prompt).toContain("The registry is a starter list, not an allowlist");
     expect(prompt).toContain(`(binary, version \`${binary.spec}\`)`);
     // The intro sentence ends; it does not dangle into the next one.
     expect(prompt).not.toMatch(/record their choices —/);

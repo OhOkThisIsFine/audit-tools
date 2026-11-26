@@ -1,3 +1,4 @@
+import { isDegradedExternalAnalyzerStatus } from "../../shared/analyzers/types.js";
 // sites-pinned: tests/audit/acquisition-executor.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
@@ -9,6 +10,7 @@ import type {
 import {
   runAcquisitionEngine,
   prepareAcquisition,
+  compareCodeUnits,
   defaultBinaryFetcher,
   resolveBinaryCandidates,
   resolveAnalyzerRelease,
@@ -41,6 +43,8 @@ export interface ExternalAcquisitionAdvanceOptions {
   resolveExecutable?: BinaryResolveOptions["resolveExecutable"];
   /** Hermeticity gate: acquisition runs ONLY when true. Default off (empty marker). */
   enabled?: boolean;
+  /** Ordinary CLI asks the host to select applicable checks before acquisition. */
+  hostSelection?: boolean;
   /** Resolve the current upstream release for each admitted, managed analyzer. */
   latestReleases?: boolean;
   /** Injected network fetch for binary acquisition; defaults to a global-fetch adapter. */
@@ -67,11 +71,30 @@ export interface ExternalAcquisitionAdvanceOptions {
   arch?: string;
 }
 
+/** Bounded selection context from frozen intake, not commands to execute. */
+export function analyzerSelectionContext(bundle: ArtifactBundle) {
+  const dispositions = new Map(bundle.file_disposition?.files.map(file => [file.path, file.status]));
+  const languages = new Map<string, number>();
+  const configuration: string[] = [];
+  for (const file of bundle.repo_manifest?.files ?? []) {
+    if (file.excluded) continue;
+    const status = dispositions.get(file.path);
+    if (status !== "included" && status !== "doc_only") continue;
+    if (status === "included" && file.language) languages.set(file.language, (languages.get(file.language) ?? 0) + 1);
+    const name = file.path.split("/").pop() ?? "";
+    if (/^(?:package\.json|pyproject\.toml|Cargo\.toml|go\.(?:mod|work)|pom\.xml|build\.gradle(?:\.kts)?|Gemfile|composer\.json|Makefile|CMakeLists\.txt|tsconfig(?:\.[^/]+)?\.json|eslint\.config\.[^/]+|\.semgrep\.ya?ml|\.golangci\.ya?ml|\.gitlab-ci\.yml)$/u.test(name)
+      || /^\.github\/workflows\/[^/]+\.ya?ml$/u.test(file.path)) configuration.push(file.path);
+  }
+  return {
+    languages: [...languages].sort(([a], [b]) => compareCodeUnits(a, b)),
+    configuration: configuration.sort(compareCodeUnits),
+  };
+}
+
 export function incompleteAnalyzerStatuses(bundle: ArtifactBundle): ExternalAnalyzerToolStatus[] {
   return (bundle.external_analyzer_acquisition?.tool_statuses ?? []).filter(status =>
     status.status !== "skipped" && (
-      !["success", "findings"].includes(status.status) ||
-      Boolean(status.dropped_rows || status.source_read_failures)
+      isDegradedExternalAnalyzerStatus(status) || Boolean(status.source_read_failures)
     ),
   );
 }
@@ -94,6 +117,7 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   bundle: ArtifactBundle,
   root: string | undefined,
   options: ExternalAcquisitionAdvanceOptions = {},
+  retryTools?: readonly string[],
 ): Promise<ExecutorRunResult> {
   const generated_at = new Date().toISOString();
 
@@ -115,7 +139,15 @@ export async function runExternalAnalyzerAcquisitionExecutor(
 
   const fetcher = options.fetch ?? defaultBinaryFetcher;
   const prepared = prepareAcquisition(EXTERNAL_ANALYZER_CANDIDATES, root, options);
-  const candidates = prepared.candidates;
+  // Retries use the same frozen root and original admission rules. They can
+  // select known tools, never add permissions or silently widen the run.
+  const previous = bundle.external_analyzer_acquisition?.tool_statuses ?? [];
+  const retrySet = retryTools && new Set(retryTools);
+  const candidates = prepared.candidates.filter(candidate => !retrySet || retrySet.has(candidate.id));
+  if (retrySet && (candidates.length !== retrySet.size ||
+      candidates.some(candidate => !previous.some(row => row.tool === candidate.id && row.status !== "skipped")))) {
+    throw new Error("Retry must name only previously attempted analyzers.");
+  }
   const engineOptions = prepared.options;
   const versions = new Map<string, string>();
   const versionFailures: ExternalAnalyzerToolStatus[] = [];
@@ -179,16 +211,37 @@ export async function runExternalAnalyzerAcquisitionExecutor(
 
   let mergedResults = bundle.external_analyzer_results;
   for (const toolResults of results) {
-    mergedResults = upsertExternalToolResults(mergedResults, toolResults);
+    const prior = retrySet ? mergedResults?.find(entry => entry.tool === toolResults.tool) : undefined;
+    const status = orderedStatuses.find(row => row.tool === toolResults.tool);
+    const scanned = status?.reported_coverage ? new Set(status.reported_coverage.scanned) : undefined;
+    const stillRelevant = (path: string) => !status || isDegradedExternalAnalyzerStatus(status) ||
+      (scanned !== undefined && !scanned.has(path));
+    // A retry may cover only a slice even with a successful exit. Preserve
+    // previous leads outside proven coverage while admitting new ones.
+    const retained = prior?.results.filter(row => stillRelevant(row.path)) ?? [];
+    const edges = prior?.graph_edges?.filter(edge => stillRelevant(edge.from) || stillRelevant(edge.to)) ?? [];
+    if (retained.length || edges.length) {
+      const items = new Map([...retained, ...toolResults.results].map(row => [JSON.stringify([row.path, row.id]), row]));
+      const graph = new Map([...edges, ...(toolResults.graph_edges ?? [])].map(edge => [JSON.stringify(edge), edge]));
+      mergedResults = upsertExternalToolResults(mergedResults, {
+        ...toolResults, results: [...items.values()], ...(graph.size && { graph_edges: [...graph.values()] }),
+      });
+    } else {
+      mergedResults = upsertExternalToolResults(mergedResults, toolResults);
+    }
   }
 
   const marker: ExternalAnalyzerAcquisitionMarker = {
     generated_at,
     enabled: true,
+    ...(retrySet && bundle.external_analyzer_acquisition?.calibration_retries
+      ? { calibration_retries: bundle.external_analyzer_acquisition.calibration_retries } : {}),
     // resolveBinaryCandidates records a status for every binary that didn't
     // resolve; the engine records one per candidate it ran. Union = exactly one
     // status per candidate (report-skipped-never-silently).
-    tool_statuses: orderedStatuses,
+    tool_statuses: retrySet
+      ? previous.map(status => orderedStatuses.find(next => next.tool === status.tool && next.status !== "skipped") ?? status)
+      : orderedStatuses,
   };
 
   const artifactsWritten = ["external_analyzer_acquisition.json"];

@@ -36,7 +36,7 @@ import { functionalPreflightPath } from "../../../src/audit/cli/functionalPrefli
 // the drift that produced these three copies to begin with.
 //
 // Unknown kinds — the case that actually signals a regression — still throw.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /** Fetch the next step contract, however this harness talks to the orchestrator. */
@@ -64,7 +64,7 @@ export interface StepWalkOptions {
  * intent confirmation, the design-review passes, optional edge reasoning and
  * critical-flow fallback); the cap leaves headroom above that.
  */
-export const MAX_HOST_PAUSES = 8;
+export const MAX_HOST_PAUSES = 10;
 
 const DECLINED_ANALYZERS = {
   semgrep: "declined",
@@ -141,6 +141,27 @@ export async function answerHostPause(step: any): Promise<boolean> {
       if (declaredArtifactPath(step, "functional_preflight").replaceAll("\\", "/") !== functionalPreflightPath(step.artifacts_dir).replaceAll("\\", "/")) throw new Error("Preflight destination does not match this run");
       await satisfyFunctionalPreflight(step.repo_root, step.artifacts_dir);
       return true;
+
+    case "analyzer_selection":
+    case "analyzer_calibration": {
+      const prompt = await readFile(step.prompt_path, "utf8");
+      const binding = /"input_sha256": "([a-f0-9]{64})"/u.exec(prompt)?.[1];
+      if (!binding) throw new Error("Analyzer step did not publish an input fingerprint");
+      const example = /"decisions": \[([\s\S]*?)\]/u.exec(prompt)?.[1] ?? "";
+      const offered = [...example.matchAll(/"tool": "([^"]+)"/gu)].map(match => match[1]);
+      if (step.step_kind === "analyzer_selection") {
+        await submit(step, "analyzer_selection", pretty({
+          input_sha256: binding, decisions: offered.map(tool => ({ tool, action: "run", reason: "Exercise real admission and current-run declines" })),
+          additional_checks: [], gaps: [],
+        }));
+      } else {
+        await submit(step, "analyzer_calibration", pretty({
+          input_sha256: binding, decisions: offered.map(tool => ({ tool, action: "limited", reason: "Hermetic fixture", coverage: "No independent runtime coverage claimed" })),
+          unresolved: [],
+        }));
+      }
+      return true;
+    }
 
     case "analyzer_consent":
       await submit(step, "analyzer_consent_decisions", pretty(DECLINED_ANALYZERS));

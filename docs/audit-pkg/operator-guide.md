@@ -144,6 +144,23 @@ previews the decision.
 
 ## Repository intent and analyzer policy
 
+Every ordinary `audit-code` run prepares evidence before asking whether to
+continue with an audit:
+
+1. `analyzer_selection` inventories the admitted source and its build and CI
+   configuration. Select the relevant registered candidates and identify
+   suitable repository-specific checks. This decision is not execution or
+   installation consent.
+2. The selected checks run under the current run's permissions.
+   `analyzer_calibration` asks the orchestrator to verify signal quality and
+   coverage, fix or tune what it can, and rerun only affected tools on the
+   frozen source. The step exposes the graph and an import command for
+   authorized supplementary checks. Unresolved gaps stay in the evidence.
+3. At `confirm_intent`, either stop with the analyzer results, calibration
+   record, and queryable graph, or confirm scope and lenses and continue.
+   Stopping does not write an intent checkpoint or mark an audit complete.
+   A subsequent continuation reuses the same evidence while it is current.
+
 The one repository session-intent file is:
 
 ```text

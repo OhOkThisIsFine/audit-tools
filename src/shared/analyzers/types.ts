@@ -214,6 +214,7 @@ export const ExternalAnalyzerToolStatusSchema = z
      * a tool that legitimately reports no line numbers.
      */
     source_read_failures: z.number().optional(),
+    reported_coverage: z.object({ scanned: z.array(z.string()), skipped: z.array(z.string()) }).strict().optional(),
     duration_ms: z.number().optional(),
   })
   .strict();
@@ -253,6 +254,8 @@ export interface ExternalAnalyzerParseReport {
   measurement_failed?: boolean;
   /** Rows recognised but unusable — counted, never silently dropped. */
   dropped_rows?: number;
+  /** Paths reported by the analyzer, not a claim of complete rule coverage. */
+  reported_coverage?: { scanned: string[]; skipped: string[] };
   /** Human-readable cause, carried onto the status record. */
   note?: string;
 }
@@ -284,6 +287,7 @@ export function readParseOutcome(
     ...(outcome.measurement_failed !== undefined ? { measurement_failed: outcome.measurement_failed } : {}),
     ...(outcome.parse_failed !== undefined ? { parse_failed: outcome.parse_failed } : {}),
     ...(outcome.dropped_rows !== undefined ? { dropped_rows: outcome.dropped_rows } : {}),
+    ...(outcome.reported_coverage !== undefined ? { reported_coverage: outcome.reported_coverage } : {}),
     ...(outcome.note !== undefined ? { note: outcome.note } : {}),
   };
 }
@@ -324,6 +328,14 @@ export const ExternalAnalyzerAcquisitionMarkerSchema = z
     generated_at: z.string().optional(),
     enabled: z.boolean(),
     tool_statuses: z.array(ExternalAnalyzerToolStatusSchema),
+    calibration_retries: z.array(z.object({
+      input_sha256: z.string(),
+      at: z.string(),
+      tools: z.array(z.object({
+        tool: z.string(), reason: z.string(), coverage: z.string(),
+        status: z.string().optional(), version: z.string().optional(),
+      }).strict()),
+    }).strict()).optional(),
   })
   .strict();
 export type ExternalAnalyzerAcquisitionMarker = z.infer<

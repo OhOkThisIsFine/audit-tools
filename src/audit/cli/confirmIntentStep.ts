@@ -74,6 +74,8 @@ export function renderConfirmIntentPrompt(
   opts: {
     intentCheckpointPath: string;
     continueCommand: string;
+    evidenceGraphCommand?: string | null;
+    evidenceGraphStatus?: string;
     /**
      * Blocking checkpoint questions raised by unencodable `free_form_intent`
      * clauses that the host has not yet answered. When non-empty, the audit
@@ -146,7 +148,14 @@ export function renderConfirmIntentPrompt(
   const proposedDepth = proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent, preDigest.mode);
 
   return [
-    `# Confirm Audit Scope and Intent\n\nConceptual review depth proposed for this intent: **${proposedDepth}**. Confirm or change it; this choice is fresh for each run.`,
+    "# Prepared evidence: stop or continue?",
+    "",
+    "Confirm with the operator whether to stop here and use the analyzer and graph artifacts, or continue into a full audit. Honor an explicit instruction already given; do not ask twice.",
+    "If stopping, use or present the evidence and its limitations. Do not write intent_checkpoint.json, choose lenses, or run the continuation. This is not a completed audit.",
+    ...(opts.evidenceGraphStatus ? [opts.evidenceGraphStatus] : []),
+    ...(opts.evidenceGraphCommand ? ["Query admitted files using: " + opts.evidenceGraphCommand] : []),
+    "",
+    `## If continuing: confirm audit scope and intent\n\nConceptual review depth proposed for this intent: **${proposedDepth}**. Confirm or change it; this choice is fresh for each run.`,
     "",
     ...(hasBlockingClauses
       ? [

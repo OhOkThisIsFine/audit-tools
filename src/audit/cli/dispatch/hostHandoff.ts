@@ -691,8 +691,8 @@ async function readQuestionLedger(paths: ResolvedBoundaryPaths) {
   return ledger;
 }
 
-const reviewerGraphIndex = (paths: ResolvedBoundaryPaths, digest: string) =>
-  join(paths.runDir, "review-graph-index", digest + ".json");
+const reviewerGraphIndex = (artifactsDir: string, digest: string) =>
+  join(artifactsDir, "review-graph-index", digest + ".json");
 
 const reviewerSourceIndex = (paths: ResolvedBoundaryPaths, digest: string) =>
   join(paths.runDir, "review-source-index", digest + ".json");
@@ -728,7 +728,7 @@ export async function prepareAuditQuestionReview(params: QuestionBoundary & { as
     await saveImmutableReviewText(indexPath, stableStringify(sourceIndex) + "\n");
     const { evidence } = hydrateQuestionBinding(workload, item.binding);
     const reviewGraph = workload.graph_sha256 ? {
-      graph_index: toPosixPath(reviewerGraphIndex(paths, workload.graph_sha256)),
+      graph_index: toPosixPath(reviewerGraphIndex(paths.artifactsDir, workload.graph_sha256)),
       graph_sha256: workload.graph_sha256,
     } : {};
     const readPaths = {
@@ -759,6 +759,32 @@ export async function prepareAuditQuestionReview(params: QuestionBoundary & { as
   });
 }
 
+/** Produce one snapshot-scoped graph, independently of reviewer assignment creation.
+ * Publish the result under the same content-addressed handle used by reviewers. */
+export async function publishAuditEvidenceGraph(
+  artifactsDir: string,
+  sourceRoot: string,
+  sourceFiles: readonly { path: string; fingerprint: string }[],
+  graph: ArtifactBundle["graph_bundle"],
+) {
+  const files = sourceFiles.map(({ path, fingerprint }) => ({ path, fingerprint }))
+    .sort((a, b) => compareCodeUnits(a.path, b.path));
+  let indexed;
+  let graphIndexError: string | undefined;
+  if (graph) {
+    try { indexed = await prepareReviewerCbm(artifactsDir, sourceRoot, files); }
+    catch (error) {
+      graphIndexError = errorMessage(error);
+      console.warn("[audit-code] Codebase Memory index unavailable: " + graphIndexError);
+    }
+  }
+  const graphText = graph ? buildReviewerGraph(graph, files.map(({ path }) => path), indexed) : undefined;
+  const graphSha256 = graphText === undefined ? undefined : hashContent(graphText);
+  const graphIndex = graphSha256 === undefined ? undefined : reviewerGraphIndex(artifactsDir, graphSha256);
+  if (graphIndex !== undefined && graphText !== undefined) await saveImmutableReviewText(graphIndex, graphText);
+  return { graphIndex, graphSha256, indexed, graphIndexFailed: graphIndexError !== undefined, graphIndexError };
+}
+
 export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
   sourceRoot: string; bindings: readonly AuditQuestionBinding[]; inventoryOmissionCount?: number;
   graph?: ArtifactBundle["graph_bundle"];
@@ -779,17 +805,8 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
       evidence.set(item.evidence_id, item);
     }
   }
-  let indexed;
-  let graphIndexFailed = false;
-  if (params.graph) {
-    try { indexed = await prepareReviewerCbm(paths.runDir, params.sourceRoot, sourceFiles); }
-    catch (error) {
-      graphIndexFailed = true;
-      console.warn("[audit-code] Codebase Memory index unavailable: " + errorMessage(error));
-    }
-  }
-  const graphText = params.graph ? buildReviewerGraph(params.graph, sourceFiles.map(({ path }) => path), indexed) : undefined;
-  const graphSha256 = graphText === undefined ? undefined : hashContent(graphText);
+  const { graphSha256, indexed, graphIndexFailed } =
+    await publishAuditEvidenceGraph(paths.artifactsDir, params.sourceRoot, sourceFiles, params.graph);
   const workload = QuestionWorkloadSchema.parse({
     contract_version: REVIEW_QUESTION_CONTRACT_VERSION, run_id: paths.runId, source_root: toPosixPath(params.sourceRoot),
     source_files: sourceFiles,
@@ -829,9 +846,6 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
         }
       }
     } catch (error) { if (!isFileMissingError(error)) throw error; }
-    if (graphText !== undefined && graphSha256 !== undefined) {
-      await saveImmutableReviewText(reviewerGraphIndex(paths, graphSha256), graphText);
-    }
     // Pin bytes before advancing the internal current pointer. A crash between
     // writes leaves a harmless immutable snapshot, never a partial dispatch.
     try {

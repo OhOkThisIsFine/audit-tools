@@ -252,8 +252,24 @@ function parseSemgrep(stdout: string, root?: string): ExternalAnalyzerParseRepor
     };
   });
   const dropped = payload.results.length - results.length;
+  const reportedPaths = isRecord(payload.paths) ? payload.paths : undefined;
+  const relativePaths = (values: unknown): string[] => {
+    if (!Array.isArray(values)) return [];
+    const prefix = root && normalizeRepoRelPath(root).replace(/\/+$/, "") + "/";
+    return [...new Set(values.flatMap(value => {
+      const raw = typeof value === "string" ? value : isRecord(value) ? value.path : undefined;
+      if (typeof raw !== "string") return [];
+      const normalized = normalizeRepoRelPath(raw);
+      const path = prefix && normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized;
+      return path && !path.startsWith("/") && !/[:\u0000-\u001f]/u.test(path) &&
+        !path.split("/").includes("..") ? [path] : [];
+    }))].sort();
+  };
   return {
     items: parsed,
+    ...(reportedPaths ? { reported_coverage: {
+      scanned: relativePaths(reportedPaths.scanned), skipped: relativePaths(reportedPaths.skipped),
+    } } : {}),
     ...(dropped > 0 ? { dropped_rows: dropped } : {}),
     ...(scanError === undefined ? {} : { measurement_failed: true, note: scanError }),
   };

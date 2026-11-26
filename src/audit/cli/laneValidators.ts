@@ -1,3 +1,5 @@
+import { AnalyzerCalibrationSchema } from "../orchestrator/analyzerCalibration.js";
+import { AnalyzerSelectionSchema } from "../orchestrator/analyzerSelection.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 /**
  * The ONE registry of what a lane's submission must satisfy.
@@ -212,6 +214,8 @@ function refineSpanCitationsCarryAQuote(
  * read this table; so does the recovery verb.
  */
 export const LANE_SUBMISSION_SCHEMAS: Readonly<Record<string, ZodTypeAny>> = {
+  [GATE_LANES.analyzer_selection]: AnalyzerSelectionSchema,
+  [GATE_LANES.analyzer_calibration]: AnalyzerCalibrationSchema,
   [GATE_LANES.synthesis_narrative]: SynthesisNarrativeSchema,
   [GATE_LANES.critical_flow_fallback]: CriticalFlowFallbackResultSchema,
   [GATE_LANES.charter_comparison]: CharterComparisonSubmissionSchema,
