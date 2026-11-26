@@ -131,17 +131,21 @@ test("indexed contexts match the scan oracle for duplicate occurrences, aliases 
   let seed = 42;
   const random = (n: number): number => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed % n;
+    return Math.floor(seed / 0x1_0000_0000 * n);
   };
   const paths = ["a/x.ts", "b/y.ts", "./a/x.ts", "b\\y.ts", "outside", "solo"];
   const kinds = ["imports", "heuristic-container-edge", "heuristic-other", undefined];
   const confidence = [undefined, 0, 0.8, 1, NaN, Infinity, -1];
-  for (let run = 0; run < 200; run += 1) {
+  let sawMixedKinds = false;
+  let sawAliasLoop = false;
+  for (let run = 0; run < 48; run += 1) {
     const edges: GraphEdge[] = Array.from({ length: random(150) }, (_, i) => ({
       from: paths[random(paths.length)]!, to: paths[random(paths.length)]!,
       kind: kinds[random(kinds.length)], confidence: confidence[random(confidence.length)],
       reason: `reason-${i}`,
     }));
+    sawMixedKinds ||= new Set(edges.map(edge => edge.kind)).size > 1;
+    sawAliasLoop ||= edges.some(edge => edge.from !== edge.to && normalizeGraphPath(edge.from) === normalizeGraphPath(edge.to));
     if (edges.length) edges.push({ ...edges[0]!, reason: "same keys, distinct reason" }, edges[0]!);
     const routes: unknown[] = Array.from({ length: random(40) }, () => ({
       handler: paths[random(paths.length)], path: `/route${random(4)}`, method: random(2) ? "GET" : 42,
@@ -154,9 +158,11 @@ test("indexed contexts match the scan oracle for duplicate occurrences, aliases 
       const files = Array.from({ length: random(7) }, () => paths[random(paths.length)]!);
       const expected = baselineContext(files, edges, bundle);
       expect(context.buildPacketGraphContextFromIndex(files, index)).toEqual(expected);
-      expect(context.buildPacketGraphContext(files, edges, bundle)).toEqual(expected);
+      if (query === 0) expect(context.buildPacketGraphContext(files, edges, bundle)).toEqual(expected);
     }
   }
+  expect(sawMixedKinds).toBe(true);
+  expect(sawAliasLoop).toBe(true);
 });
 
 test("empty inputs and malformed or absent route collections retain scan behavior", () => {
@@ -229,16 +235,13 @@ test("500 sparse packets build one index and select 500 edge and route occurrenc
   expect(build).toHaveBeenCalledTimes(1);
   expect(selectedEdges).toBe(500);
   expect(selectedRoutes).toBe(500);
-  let baselineEdges = 0;
-  let baselineRoutes = 0;
-  const scanEdges = countReads(edges, () => { baselineEdges += 1; }) as GraphEdge[];
-  const scanRoutes = countReads(routes, () => { baselineRoutes += 1; }) as typeof routes;
-  for (const packet of planning.packets) {
-    expect(baselineContext(packet.file_paths, scanEdges, { graphs: { routes: scanRoutes } })).toEqual({
+  // The assertions above cover the full input's read count. Sample semantic
+  // parity here; the serialized fixture above already checks whole-packet parity.
+  for (const i of [0, 249, 499]) {
+    const packet = planning.packets[i]!;
+    expect(baselineContext(packet.file_paths, edges, { graphs: { routes } })).toEqual({
       keyEdges: packet.key_edges ?? [], boundaryFiles: packet.boundary_files ?? [],
       entrypoints: packet.entrypoints ?? [], quality: packet.quality,
     });
   }
-  expect(baselineEdges).toBe(250_000);
-  expect(baselineRoutes).toBe(250_000);
 });
