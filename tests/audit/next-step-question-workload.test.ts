@@ -15,7 +15,8 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
   await withTempRepo(async (root) => {
     const neighbor = "src/neighbor/isolated.ts";
     await mkdir(dirname(join(root, neighbor)), { recursive: true });
-    await writeFile(join(root, neighbor), "export const unrelated = 1;\n");
+    await writeFile(join(root, "src/neighbor/helper.ts"), "export const value = 1;\n");
+    await writeFile(join(root, neighbor), "import { value } from './helper.js';\nexport const unrelated = value;\n");
     const step = await advancePastDesignReview(root);
     const handoff = await readFile(step.prompt_path, "utf8");
     expect(handoff).toContain("Read only the routing metadata");
@@ -57,6 +58,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       expect(handle).toEqual({ run_id: step.run_id, assignment_id, workload_sha256: routing.workload_sha256,
         prompt_path: expect.any(String), read_paths: {
           source_root: expect.any(String), source_index: expect.any(String), submission_schema: expect.any(String),
+          graph_index: expect.any(String), graph_sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
         } });
       const prompt = await readFile(handle.prompt_path, "utf8");
       expect(handoff).not.toContain(item.binding.question.question_id);
@@ -82,6 +84,14 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     const second = await loadPacket(workItems[1]!);
     expect(second.handle.prompt_path).not.toBe(selected.handle.prompt_path);
     expect(second.packet.source_index).toBe(selected.packet.source_index);
+    expect(second.packet.graph_index).toBe(selected.packet.graph_index);
+    expect(second.packet.graph_sha256).toBe(selected.packet.graph_sha256);
+    expect(selected.packet.edges).toBeUndefined();
+    const graph = await runWrapper(["review-graph", "--graph-index", selected.packet.graph_index,
+      "--graph-sha256", selected.packet.graph_sha256, "--path", neighbor], { cwd: selected.packet.source_root });
+    expect(JSON.parse(graph.stdout)).toMatchObject({ path: neighbor, edges: expect.arrayContaining([
+      expect.objectContaining({ relation: "imports", from: neighbor, to: "src/neighbor/helper.ts" }),
+    ]) });
     expect(JSON.parse(await readFile(selected.packet.source_index, "utf8")))
       .toEqual({ source_root: selected.packet.source_root, source_files: sourceFiles });
     expect(JSON.parse((await prepare(first.binding.assignment.assignment_id)).stdout)).toEqual(selected.handle);

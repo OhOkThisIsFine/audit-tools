@@ -249,6 +249,11 @@ to the reviewer harness, or send a reviewer in that workspace only the packet
 path. Do not read the full workload or packet into the dispatcher's conversation.
 A separate machine must be able to access the advertised paths; the command does
 not transfer or remap the workspace. Ordinary host command permissions apply.
+When present, the packet’s shared graph handle is for read-only navigation: call
+\`audit-code review-graph --graph-index <graph_index> --graph-sha256 <graph_sha256> --path <repo-relative path>\`.
+It returns a page of incoming and outgoing file links; narrow with \`--direction\`
+or \`--relation\`, or continue with the returned \`--offset\`. Inspect frozen source
+before treating a link as evidence. Do not load the full index into reviewer context.
 The packet contains just that question, linked evidence and submission
 instructions. Reviewers can look up related code in the admitted, frozen
 source using the shared index. The worker MCP remains submit-only.

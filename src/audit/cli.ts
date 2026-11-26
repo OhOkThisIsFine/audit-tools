@@ -26,6 +26,7 @@ import { cmdIntake } from "./cli/intakeCommand.js";
 import { cmdPlan } from "./cli/planCommand.js";
 import { cmdValidate } from "./cli/validateCommand.js";
 import { cmdConsolidateFindings, cmdMcp, cmdReopenQuestions, cmdSubmit } from "./cli/submitCommand.js";
+import { cmdReviewGraph } from "./cli/reviewGraphCommand.js";
 import { cmdPrepareReview } from "./cli/prepareReviewCommand.js";
 import { cmdSynthesize } from "./cli/synthesizeCommand.js";
 import { cmdForceSynthesis } from "./cli/forceSynthesisCommand.js";
@@ -50,7 +51,7 @@ export const cliTestUtils = {
 /**
  * Worker-safe subcommands: the only commands a dispatched worker may run from
  * inside a tool-created worktree (its own review snapshot / implement checkout)
- * — result-scoped submission and validation, whose targets are explicit
+ * — result-scoped submission, validation and read-only graph lookup, whose targets are explicit
  * (`--task` payload, `--artifacts-dir-b64`). Every OTHER command — including
  * explicit `sample-run` and any future command — is refused
  * from a node-worktree context: deny by default, never silently exposed
@@ -59,7 +60,7 @@ export const cliTestUtils = {
  * caller's true cwd arrives via AUDIT_TOOLS_CALLER_CWD (stamped by the
  * wrapper, scrubbed from provider spawns).
  */
-const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set(["submit", "mcp"]);
+const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set(["submit", "mcp", "review-graph"]);
 
 /**
  * The ONE route table for the audit CLI. Each row is [verb, handler]; the
@@ -76,6 +77,7 @@ export const COMMAND_ROUTES: ReadonlyArray<
   ["plan", cmdPlan, { values: ["--since"] }],
   ["validate", cmdValidate, {}],
   ["submit", cmdSubmit, { values: ["--work-item", "--from"] }],
+  ["review-graph", cmdReviewGraph, { values: ["--graph-index", "--graph-sha256", "--path", "--direction", "--relation", "--offset", "--limit"] }],
   ["prepare-review", cmdPrepareReview, { values: ["--work-item", "--workload-sha256"] }],
   ["consolidate-findings", cmdConsolidateFindings, { values: ["--from"] }],
   ["reopen-questions", cmdReopenQuestions, { values: ["--from"] }],

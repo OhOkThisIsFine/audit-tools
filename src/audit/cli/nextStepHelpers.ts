@@ -2972,6 +2972,7 @@ async function runHostDelegationObligation(
   const published = await publishAuditQuestionWorkload({
     root: ctx.params.root, sourceRoot, artifactsDir: ctx.params.artifactsDir, runId: cycle.runId, bindings: cycle.pending,
     inventoryOmissionCount: bundle.review_plan?.omissions.length,
+    graph: bundle.graph_bundle,
   });
   return {
     kind: "emit",
