@@ -436,6 +436,22 @@
         "src/audit/reporting/criticalFlowFallbackPrompt.ts": "bacda78481a44508d215c5d7160ea80d4d587ffc"
       }
     },
+    "49d710c1b1d20ab7": {
+      "reviewed_by": "dot",
+      "attester_class": "agent",
+      "checked": "Reviewed frozen-source admission and fingerprint validation, native-only fallback, one local cache per source binding, and reviewer projection without sharing the graph; verified real index declarations and cross-file call sites offline.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "10b084c0d3fd4f138d97dd1b9a11bdf60a934cb8",
+        "ran_at": "2026-11-26T05:16:53.888Z"
+      },
+      "attested_at": "2026-11-26T05:16:54.839Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "d7e5e0f8f7871ed07a30eb23a53db46d85be6cc7"
+      }
+    },
     "51642764524969f9": {
       "reviewed_by": "tutor_systemic_4f7",
       "attester_class": "agent",
@@ -949,7 +965,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "16b29b738c01e4fd"
+      "review": "49d710c1b1d20ab7"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"

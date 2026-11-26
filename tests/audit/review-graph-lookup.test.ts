@@ -41,6 +41,7 @@ test("stable projection omits non-admitted edges, retaining isolated paths and r
     const q = (args: unknown) => queryReviewerGraph(file, hashContent(text), args);
     const page = await q({ path: "main.ts", limit: 1 });
     expect(page).toMatchObject({ total: 4, next_offset: 1, edges: [{ relation: "calls", from: "main.ts", to: "view.ts" }] });
+    if (!("next_offset" in page)) throw new Error("Expected a paged file-graph result");
     expect(await q({ path: "main.ts", offset: page.next_offset, limit: 100 })).toMatchObject({ total: 4, edges: [
       { from: "view.ts", to: "main.ts" }, { relation: "imports" }, { relation: "references" },
     ] });

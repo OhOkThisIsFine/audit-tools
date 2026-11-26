@@ -4,15 +4,16 @@ import { z } from "zod";
 import { compareCodeUnits, hashContent, isSha256, type GraphBundle } from "audit-tools/shared";
 import { getFlag } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
+import { queryReviewerCbm, ReviewerCbmSchema, type ReviewerCbm } from "./reviewerCodebaseMemory.js";
 
 const Relation = z.enum(["imports", "calls", "references"]);
 const Direction = z.enum(["inbound", "outbound", "both"]);
 const Edge = z.tuple([Relation, z.string(), z.string(), z.string()]);
-const ReviewGraph = z.strictObject({ version: z.literal(1), paths: z.array(z.string()), edges: z.array(Edge) });
+const ReviewGraph = z.strictObject({ version: z.literal(1), paths: z.array(z.string()), edges: z.array(Edge), indexed: ReviewerCbmSchema.optional() });
 type Link = z.infer<typeof Edge>;
 
 /** Only navigation hints between files already admitted to the frozen review. */
-export function buildReviewerGraph(graph: GraphBundle, admitted: readonly string[]): string {
+export function buildReviewerGraph(graph: GraphBundle, admitted: readonly string[], indexed?: ReviewerCbm): string {
   const paths = [...new Set(admitted)].sort(compareCodeUnits);
   const allowed = new Set(paths);
   const edges = new Map<string, Link>();
@@ -26,6 +27,7 @@ export function buildReviewerGraph(graph: GraphBundle, admitted: readonly string
   return JSON.stringify({
     version: 1,
     paths,
+    ...(indexed && { indexed }),
     edges: [...edges].sort(([a], [b]) => compareCodeUnits(a, b)).map(([, edge]) => edge),
   }) + "\n";
 }
@@ -34,6 +36,9 @@ const Query = z.strictObject({
   path: z.string().min(1),
   direction: Direction.default("both"),
   relation: Relation.optional(),
+  detail: z.enum(["files", "symbols", "call-sites"]).default("files"),
+  cursor: z.string().min(1).max(1024).optional(),
+  symbol: z.string().min(1).max(512).optional(),
   offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
   limit: z.number().int().min(1).max(100).default(30),
 });
@@ -46,6 +51,12 @@ export async function queryReviewerGraph(index: string, digest: string, rawQuery
   const graph = ReviewGraph.parse(JSON.parse(text));
   const allowed = new Set(graph.paths);
   if (!allowed.has(query.path)) throw new Error("Path is not in the admitted review graph.");
+  if (query.detail !== "files") {
+    if (query.offset !== 0 || query.relation) throw new Error("Use --cursor, not --offset or --relation, for indexed details.");
+    if (!graph.indexed) return { path: query.path, detail: query.detail, status: "unavailable", reason: "This run has no qualified Codebase Memory index. Use file links and frozen source." };
+    return queryReviewerCbm(index, graph.indexed, allowed, { ...query, detail: query.detail });
+  }
+  if (query.cursor || query.symbol) throw new Error("--cursor and --symbol require indexed details.");
   const edges = [];
   let total = 0;
   for (const [relation, from, to, kind] of graph.edges) {
@@ -74,7 +85,8 @@ export async function cmdReviewGraph(argv: string[]): Promise<void> {
     return Number(s);
   };
   outputJson(await queryReviewerGraph(index, digest, {
-    path, direction: getFlag(argv, "--direction"), relation: getFlag(argv, "--relation"),
+    path, detail: getFlag(argv, "--detail"), cursor: getFlag(argv, "--cursor"), symbol: getFlag(argv, "--symbol"),
+    direction: getFlag(argv, "--direction"), relation: getFlag(argv, "--relation"),
     offset: decimal("--offset"), limit: decimal("--limit"),
   }));
 }
