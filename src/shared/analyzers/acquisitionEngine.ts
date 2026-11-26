@@ -151,8 +151,6 @@ export interface ExternalAnalyzerCandidate {
     lock: { packages: { "": { dependencies: Record<string, string> } } };
     entrypoint: string;
   };
-  /** Install the exact resolved npm spec in an owned directory without lifecycle scripts. */
-  npmEntrypoint?: string;
   /**
    * The tool's executable name. Required explicitly for pipx: a distribution
    * spec does not identify its application. For npx with {@link peers}, defaults
@@ -534,7 +532,7 @@ export async function runSafetyGate(
   }
   const error = deadlineFailure(deadline);
   if (error) return { ok: false, reason: error };
-  const probeArgv = (candidate.npmLock || candidate.npmEntrypoint) ? ["npm", "--version"] : runnerProbeArgv(candidate.runner);
+  const probeArgv = candidate.npmLock ? ["npm", "--version"] : runnerProbeArgv(candidate.runner);
   const probe = await run(
     probeArgv,
     root,
@@ -684,7 +682,7 @@ export async function runExternalAnalyzer(
         status: { tool: candidate.id, resolved: false, status: "not_resolved", error: gate.reason },
       };
     }
-    prefix = (candidate.npmLock || candidate.npmEntrypoint) ? [] : runnerPrefix(candidate);
+    prefix = candidate.npmLock ? [] : runnerPrefix(candidate);
   }
 
   const beforeScan = expiredOutcome();
@@ -718,10 +716,10 @@ export async function runExternalAnalyzer(
     }
   };
   try {
-    if (candidate.npmLock || candidate.npmEntrypoint || candidate.managedReport) {
+    if (candidate.npmLock || candidate.managedReport) {
       // mkdtemp creates an exclusive directory; never alter the process umask.
       // Windows uses the temp location's inherited ACL; POSIX mode is verified.
-      ownedDirectory = mkdtempSync(join(tmpdir(), (candidate.npmLock || candidate.npmEntrypoint) ? "audit-tools-tool-" : "audit-tools-report-"));
+      ownedDirectory = mkdtempSync(join(tmpdir(), candidate.npmLock ? "audit-tools-tool-" : "audit-tools-report-"));
       if (process.platform !== "win32") {
         chmodSync(ownedDirectory, 0o700);
         if ((statSync(ownedDirectory).mode & 0o777) !== 0o700) {
@@ -730,18 +728,14 @@ export async function runExternalAnalyzer(
       }
       if (candidate.managedReport) reportPath = join(ownedDirectory, "report.json");
     }
-    const entrypoint = candidate.npmLock?.entrypoint ?? candidate.npmEntrypoint;
-    if (entrypoint && ownedDirectory) {
-      const lock = candidate.npmLock?.lock;
-      const name = npmPackageName(candidate.spec);
-      const dependencies = lock?.packages[""].dependencies ?? {
-        [name]: candidate.spec.slice(name.length + 1),
-      };
+    if (candidate.npmLock && ownedDirectory) {
+      const { lock, entrypoint } = candidate.npmLock;
+      const dependencies = lock.packages[""].dependencies;
       writeFileSync(join(ownedDirectory, "package.json"), JSON.stringify({ private: true, dependencies }));
-      if (lock) writeFileSync(join(ownedDirectory, "package-lock.json"), JSON.stringify(lock));
+      writeFileSync(join(ownedDirectory, "package-lock.json"), JSON.stringify(lock));
       const afterSetup = expiredOutcome();
       if (afterSetup) { outcome = afterSetup; return outcome; }
-      const installArgv = ["npm", lock ? "ci" : "install", "--ignore-scripts", "--no-audit", "--no-fund",
+      const installArgv = ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund",
         "--no-global", "--package-lock", "--no-update-notifier", "--install-strategy=hoisted",
         "--cache", join(ownedDirectory, "npm-cache"),
         "--userconfig", join(ownedDirectory, "user.npmrc"),
@@ -754,7 +748,7 @@ export async function runExternalAnalyzer(
           tool: candidate.id, resolved: false, status: "not_resolved",
           command: installArgv.join(" "), exit_code: install.status, duration_ms: install.duration_ms,
           stage: "install",
-          error: `${lock ? "locked " : ""}npm acquisition failed: ${install.error?.message ?? `exit ${install.status}`}`,
+          error: `locked npm acquisition failed: ${install.error?.message ?? `exit ${install.status}`}`,
           ...(install.stderr.trim() ? { stderr_snippet: install.stderr.slice(0, 500) } : {}),
         } };
         return outcome;
@@ -973,7 +967,7 @@ export async function runExternalAnalyzer(
     } catch {
       // Do not replace the original diagnostic or expose filesystem error text.
       if (outcome) {
-        outcome.status.error = [outcome.status.error, (candidate.npmLock || candidate.npmEntrypoint) ? "analyzer tool cleanup failed" : "analyzer report cleanup failed"].filter(Boolean).join("; ");
+        outcome.status.error = [outcome.status.error, candidate.npmLock ? "analyzer tool cleanup failed" : "analyzer report cleanup failed"].filter(Boolean).join("; ");
         if (outcome.status.status === "success") outcome.status.status = "failed";
       }
     }

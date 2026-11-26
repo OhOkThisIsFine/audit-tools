@@ -81,7 +81,7 @@ test.skipIf(!toolsRoot)("pinned CLI honors observe-only flags despite project wr
     const suppressedBefore = await snapshot(root);
     const suppressed = run();
     expect(suppressed.status).toBe(0);
-    expect(JSON.parse(suppressed.stdout).succeeded).toBe(false);
+    expect(JSON.parse(suppressed.stdout)).toMatchObject({ succeeded: false, atLeast: 100 });
     const outcome = await runExternalAnalyzer(typeCoverageCandidate, project, {
       run: async (argv) => argv.includes("--version") || (argv[0] === "npm" && argv[1] === "ci")
         ? { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 }
@@ -90,7 +90,7 @@ test.skipIf(!toolsRoot)("pinned CLI honors observe-only flags despite project wr
     expect(outcome.results.results.length).toBeGreaterThan(0);
     expect(outcome.status.status).toBe("failed");
     expect(outcome.status.exit_code).toBe(0);
-    expect(outcome.status.error).toContain("lower than the target(100%)");
+    expect(outcome.status.error).toBe("type-coverage: measurement did not succeed");
     expect(outcome.status.dropped_rows ?? 0).toBe(0);
     expect(isDegradedExternalAnalyzerStatus(outcome.status)).toBe(true);
     expect(await snapshot(root)).toEqual(suppressedBefore);

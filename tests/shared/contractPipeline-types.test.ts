@@ -19,6 +19,15 @@ describe("shared executable plan contract", () => {
       { kind: "negative", description: "Duplicate retry cannot duplicate the write", scope_paths: ["src/a.ts"] },
     ] }).success).toBe(true);
   });
+  it("preserves dependency diagnostics and walks the first duplicate unit", () => {
+    const plan = executionPlanForGraph([["A", ["B", "missing"]], ["B", ["A"]]]);
+    plan.units.push({ ...plan.units[0]!, dependencies: [] });
+    expect(executionPlanReferenceIssues(plan, [])).toEqual([
+      "Execution unit IDs must be unique.",
+      "Unit A has an invalid dependency missing.",
+      "Execution dependency cycle at A.",
+    ]);
+  });
   it("rejects dangling requirement and original source references", () => {
     const plan = executionPlanForGraph([["A", []]]);
     plan.units[0]!.requirement_ids = ["missing"];

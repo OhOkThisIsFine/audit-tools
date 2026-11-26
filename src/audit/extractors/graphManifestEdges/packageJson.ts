@@ -21,6 +21,14 @@ export const WORKSPACE_PACKAGE_EDGE_CONFIDENCE = 0.86;
 export const PACKAGE_SCRIPT_REFERENCE_PATTERN =
   /(?:^|[\s"'`])((?:\.{1,2}\/)?(?:[\w.-]+\/)*[\w.-]+\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx))(?:$|[\s"'`])/gi;
 
+// The graph builder shares one parsed object among the three package readers;
+// standalone readers can still take raw text. Undefined is a failed parse.
+type PackageContent = string | Record<string, unknown> | undefined;
+
+function packageRecord(content: PackageContent): Record<string, unknown> | undefined {
+  return typeof content === "string" ? parsePackageRecord(content) : content;
+}
+
 function collectPackageEntrypointValues(
   value: unknown,
   fieldPath: string,
@@ -50,9 +58,9 @@ function collectPackageEntrypointValues(
 }
 
 export function packageEntrypointCandidates(
-  content: string,
+  content: PackageContent,
 ): Array<{ field: string; specifier: string }> {
-  const record = parsePackageRecord(content);
+  const record = packageRecord(content);
   if (!record) return [];
 
   const entries: Array<{ field: string; specifier: string }> = [];
@@ -76,7 +84,7 @@ export function resolvePackageEntrypoint(
 
 export function extractPackageEntrypointEdges(
   fromPath: string,
-  content: string,
+  content: PackageContent,
   pathLookup: Map<string, string>,
 ): GraphEdge[] {
   if (!isPackageManifestPath(fromPath)) {
@@ -103,9 +111,9 @@ export function extractPackageEntrypointEdges(
 }
 
 export function packageScriptCandidates(
-  content: string,
+  content: PackageContent,
 ): Array<{ script: string; specifier: string }> {
-  const scripts = parsePackageRecord(content)?.scripts;
+  const scripts = packageRecord(content)?.scripts;
   if (!isRecord(scripts)) return [];
 
   const entries: Array<{ script: string; specifier: string }> = [];
@@ -126,7 +134,7 @@ export function packageScriptCandidates(
 
 export function extractPackageScriptEdges(
   fromPath: string,
-  content: string,
+  content: PackageContent,
   pathLookup: Map<string, string>,
 ): GraphEdge[] {
   if (!isPackageManifestPath(fromPath)) {
@@ -152,8 +160,8 @@ export function extractPackageScriptEdges(
   return edges;
 }
 
-export function packageWorkspacePatterns(content: string): WorkspacePattern[] {
-  const record = parsePackageRecord(content);
+export function packageWorkspacePatterns(content: PackageContent): WorkspacePattern[] {
+  const record = packageRecord(content);
   if (!record) return [];
 
   const patterns: WorkspacePattern[] = [];
@@ -168,7 +176,7 @@ export function packageWorkspacePatterns(content: string): WorkspacePattern[] {
  * The package.json object, or `undefined` when the text is not JSON or not a
  * JSON object: each reader then degrades to empty and never throws.
  */
-function parsePackageRecord(content: string): Record<string, unknown> | undefined {
+export function parsePackageRecord(content: string): Record<string, unknown> | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -180,12 +188,12 @@ function parsePackageRecord(content: string): Record<string, unknown> | undefine
 
 function workspacePatternsForFile(
   path: string,
-  content: string,
+  content: PackageContent,
 ): WorkspacePattern[] {
   if (isPackageManifestPath(path)) {
     return packageWorkspacePatterns(content);
   }
-  if (isPnpmWorkspaceManifestPath(path)) {
+  if (isPnpmWorkspaceManifestPath(path) && typeof content === "string") {
     return pnpmWorkspacePatterns(content);
   }
   return [];
@@ -193,7 +201,7 @@ function workspacePatternsForFile(
 
 export function extractWorkspacePackageEdges(
   fromPath: string,
-  content: string,
+  content: PackageContent,
   pathLookup: Map<string, string>,
 ): GraphEdge[] {
   return workspaceMemberEdges({

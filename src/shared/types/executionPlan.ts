@@ -84,13 +84,16 @@ export function executionPlanReferenceIssues(
   const issues: string[] = [];
   const sources = new Set(sourceFindingIds);
   const requirements = new Set(plan.requirements.map(requirement => requirement.id));
-  const units = new Set(plan.units.map(unit => unit.id));
+  // First occurrence wins, as in the previous linear lookup. Duplicate
+  // units are still rejected below and their other references still checked.
+  const units = new Map<string, ExecutionUnit>();
+  for (const unit of plan.units) if (!units.has(unit.id)) units.set(unit.id, unit);
   const unique = (values: readonly string[], label: string): void => {
     if (new Set(values).size !== values.length) issues.push(`${label} must be unique.`);
   };
   unique(sourceFindingIds, "Source finding IDs");
   unique(plan.requirements.map(requirement => requirement.id), "Requirement IDs");
-  unique(plan.units.map(unit => unit.id), "Execution unit IDs");
+  if (units.size !== plan.units.length) issues.push("Execution unit IDs must be unique.");
   for (const requirement of plan.requirements) {
     unique(requirement.source_finding_ids, `Requirement ${requirement.id} source references`);
     for (const id of requirement.source_finding_ids) if (!sources.has(id)) issues.push(`Requirement ${requirement.id} references unknown source finding ${id}.`);
@@ -117,9 +120,9 @@ export function executionPlanReferenceIssues(
     if (visiting.has(id)) { issues.push(`Execution dependency cycle at ${id}.`); return; }
     if (visited.has(id)) return;
     visiting.add(id);
-    for (const dependency of plan.units.find(unit => unit.id === id)?.dependencies ?? []) visit(dependency);
+    for (const dependency of units.get(id)?.dependencies ?? []) visit(dependency);
     visiting.delete(id); visited.add(id);
   };
-  for (const id of units) visit(id);
+  for (const id of units.keys()) visit(id);
   return issues;
 }

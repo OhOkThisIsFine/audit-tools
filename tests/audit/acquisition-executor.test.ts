@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import * as acquisitionEngine from "../../src/shared/analyzers/acquisitionEngine.js";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -70,8 +70,7 @@ test("enabled ⇒ gitleaks (PATH-resolved) findings upserted + marker records st
     // gitleaks writes a JSON report file, not stdout. The engine reads
     // candidate.reportFile() — so the fake runner must create that file. We
     // intercept the report path from the spawn argv (`--report-path <path>`).
-    const { writeFileSync } = await import("node:fs");
-    const gitleaksReport = JSON.stringify([
+      const gitleaksReport = JSON.stringify([
       {
         RuleID: "generic-api-key",
         File: "src/a.ts",
@@ -303,7 +302,6 @@ test("resolution and execution share the identical absolute deadline", async () 
 test("fresh release is resolved once, failed scan stays visible, and resume reuses the recorded release", async () => {
   const { EXTERNAL_ANALYZER_CANDIDATES } = await import("audit-tools/shared");
   const root = mkdtempSync(join(tmpdir(), "executor-latest-"));
-  const { writeFileSync } = await import("node:fs");
   writeFileSync(join(root, "package.json"), "{}");
   try {
     const lookups: string[] = [];
@@ -332,6 +330,47 @@ test("fresh release is resolved once, failed scan stays visible, and resume reus
     await runExternalAnalyzerAcquisitionExecutor(first.updated, root, options);
     expect(lookups).toEqual(["https://pypi.org/pypi/semgrep/json"]);
     expect(attempts.filter(argv => argv.includes("semgrep==1.999.0"))).toHaveLength(2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("latest-release acquisition uses the qualified type-coverage graph even with an older floating receipt", async () => {
+  const { EXTERNAL_ANALYZER_CANDIDATES } = await import("audit-tools/shared");
+  const root = mkdtempSync(join(tmpdir(), "executor-type-coverage-"));
+  writeFileSync(join(root, "package.json"), "{}");
+  const bundle = bundleAfterIntake();
+  bundle.external_analyzer_acquisition = {
+    generated_at: "2026-01-01T00:00:00.000Z", enabled: true,
+    tool_statuses: [{ tool: "type-coverage", status: "failed", resolved: true, version: "2.31.2" }],
+  };
+  const commands: string[][] = [];
+  const run: BinaryCommandRunner = async (argv, cwd) => {
+    commands.push([...argv]);
+    let stdout = '{"succeeded":true,"details":[]}';
+    if (argv[0] === "npm" && argv[1] === "--version") stdout = "10.9.0";
+    if (argv[0] === "npm" && argv[1] === "ci") {
+      expect(cwd).not.toBe(root);
+      expect(argv).toContain("--ignore-scripts");
+      const lock = JSON.parse(readFileSync(join(cwd!, "package-lock.json"), "utf8"));
+      expect(lock.packages["node_modules/type-coverage"].version).toBe("2.29.7");
+      expect(lock.packages["node_modules/typescript"].version).toBe("5.9.3");
+    }
+    return { argv, stdout, stderr: "", status: 0, duration_ms: 1 };
+  };
+  try {
+    const result = await runExternalAnalyzerAcquisitionExecutor(bundle, root, {
+      enabled: true, latestReleases: true, run,
+      fetch: async () => { throw new Error("the qualified analyzer must work without a metadata lookup"); },
+      analyzers: Object.fromEntries(EXTERNAL_ANALYZER_CANDIDATES.map(candidate =>
+        [candidate.id, candidate.id === "type-coverage" ? "auto" : "skip"] as const,
+      )),
+    });
+    expect(commands.map(argv => argv.slice(0, 2))).toEqual([
+      ["npm", "--version"], ["npm", "ci"], [process.execPath, expect.stringMatching(/type-coverage[\\/]bin[\\/]type-coverage$/)],
+    ]);
+    expect(result.updated.external_analyzer_acquisition?.tool_statuses.find(tool => tool.tool === "type-coverage"))
+      .toMatchObject({ status: "success", version: "2.29.7" });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

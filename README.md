@@ -305,6 +305,6 @@ ISC
 
 ### Analyzer versions and incomplete runs
 
-A new audit resolves current upstream releases for admitted managed analyzers and records the exact versions and outcomes in the acquisition artifact. Resuming a completed acquisition does not upgrade those tools. Cargo and Bundler analyzers still use the project's toolchain. Existing consent, approved origins, binary checksum verification, and repository scope remain in force.
+A new audit resolves current upstream releases for admitted managed analyzers, except when a bundled dependency lock qualifies the analyzer and its compiler together (currently type-coverage and TypeScript). It records the exact versions and outcomes in the acquisition artifact. Resuming a completed acquisition does not upgrade those tools. Cargo and Bundler analyzers still use the project's toolchain. Existing consent, approved origins, binary checksum verification, and repository scope remain in force.
 
 If an analyzer fails, the next step identifies the analyzer, attempted version, and stage. Read its status record, diagnose the failure, and retry only that analyzer on the same frozen source. Record any version override and import the normalized output with `audit-code import-external-analyzer` and the retry's tool status. If it cannot be recovered, carry the coverage gap into the report. A failed run is not a clean result, and no older release is silently substituted.

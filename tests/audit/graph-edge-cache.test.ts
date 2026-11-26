@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
@@ -449,8 +449,8 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("2437c57f77886fdbe5c162f839a05b1334195b3ce39a961acc34f56f19c619bc");
-  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v20");
+  ).toBe("ea2c81ffea4214a99bd399fc0afb72165dd444a62030927e8d61326ff212f9ea");
+  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v21");
 });
 
 test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () => {
@@ -490,4 +490,34 @@ test("sibling router identity changes invalidate unchanged handler contributions
   const second = incrementalBuild(secondManifest, changed, first.cache);
   expect(second.bundle).toEqual(fullBuild(secondManifest, changed));
   expect(second.bundle.graphs.routes?.some((r) => r.path === "/orders")).toBe(false);
+});
+
+test.each([
+  ['{"main":"./src/a.ts","scripts":{"check":"node ./src/b.ts"},"workspaces":["pkgs/*"]}', [
+    { to: A, kind: "relative-string-reference", confidence: 0.82, reason: "Resolved relative string literal './src/a.ts'." },
+    { to: A, kind: "package-entrypoint-link", confidence: 0.9, reason: "Package manifest field 'main' points to './src/a.ts'." },
+    { to: B, kind: "package-script-link", confidence: 0.88, reason: "Package script 'check' references './src/b.ts'." },
+    { to: "pkgs/child/package.json", kind: "workspace-package-link", confidence: 0.86, reason: "Workspace pattern 'pkgs/*' includes package manifest 'pkgs/child/package.json'." },
+  ]],
+  ['{"main":', []],
+  ['["not-an-object"]', []],
+])("graph parses each package manifest once and retains the content edges: %s", (content, expected) => {
+  const from = "package.json";
+  const member = "pkgs/child/package.json";
+  const m = manifest([file(from, { hash: "manifest" }), file(A), file(B), file(member)]);
+  const originalParse = JSON.parse;
+  let parseCount = 0;
+  const parse = vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+    if (text === content) parseCount++;
+    return originalParse(text, reviver);
+  });
+  try {
+    const { cache } = incrementalBuild(m, { [from]: content }, undefined);
+    expect(parseCount).toBe(1);
+    expect(cache.entries[from].contribution.references).toEqual(expected.map(edge => ({
+      from, direction: "directed", ...edge,
+    })));
+  } finally {
+    parse.mockRestore();
+  }
 });

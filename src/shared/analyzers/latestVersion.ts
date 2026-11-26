@@ -37,6 +37,15 @@ export async function resolveAnalyzerRelease(
   const { runner, spec, binary } = candidate;
   const npmName = runner === "npx" ? /^(.*)@[^@]+$/.exec(spec)?.[1] : undefined;
   const pythonName = runner === "pipx" ? /^([\w.-]+)==.+$/.exec(spec)?.[1] : undefined;
+  // A bundled lock qualifies the analyzer and every dependency together.
+  // Ignore older floating-version receipts rather than recreate an unqualified graph.
+  if (candidate.npmLock) {
+    const version = npmName && candidate.npmLock.lock.packages[""].dependencies[npmName];
+    if (!version || !stableVersion.test(version) || spec !== `${npmName}@${version}`) {
+      throw new Error("locked npm analyzer spec does not match its bundled dependency graph");
+    }
+    return { candidate, version };
+  }
   if (!npmName && !pythonName && !binary) return undefined;
 
   let version: unknown = recordedVersion;
@@ -63,7 +72,6 @@ export async function resolveAnalyzerRelease(
       ...candidate,
       spec: npmName ? `${npmName}@${version}` : pythonName ? `${pythonName}==${version}` : version,
       ...(binary ? { binary: bindBinary(binary, version) } : {}),
-      ...(candidate.npmLock ? { npmLock: undefined, npmEntrypoint: candidate.npmLock.entrypoint } : {}),
     },
   };
 }

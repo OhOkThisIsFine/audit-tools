@@ -40,11 +40,13 @@ import {
   isMavenPomPath,
   isPyprojectPath,
 } from "./graphManifestEdges/index.js";
+import { parsePackageRecord } from "./graphManifestEdges/packageJson.js";
 import {
   compareGraphEdges,
   edgeSignature,
   graphEdge,
   graphLookupKey,
+  isPackageManifestPath,
   isPytestConftestPath,
   normalizeGraphPath,
   resolveCandidate,
@@ -689,6 +691,7 @@ function extractContentEdgesForFile(
   routers: ReadonlySet<string> | undefined,
   pathIndex: GraphPathIndex,
 ): void {
+  const packageContent = isPackageManifestPath(filePath) ? parsePackageRecord(content) : content;
   acc.imports.push(...extractImportEdges(filePath, content, pathLookup));
   acc.imports.push(...extractPythonImportEdges(filePath, content, pathLookup, pathIndex));
   acc.references.push(...extractReferenceEdges(filePath, content, pathLookup));
@@ -696,7 +699,7 @@ function extractContentEdgesForFile(
     ...extractJsonSchemaReferenceEdges(filePath, content, pathLookup),
   );
   acc.references.push(
-    ...extractPackageEntrypointEdges(filePath, content, pathLookup),
+    ...extractPackageEntrypointEdges(filePath, packageContent, pathLookup),
   );
   acc.references.push(
     ...extractChromeExtensionManifestEdges(filePath, content, pathLookup),
@@ -705,10 +708,10 @@ function extractContentEdgesForFile(
     ...extractHtmlResourceEdges(filePath, content, pathLookup),
   );
   acc.references.push(
-    ...extractPackageScriptEdges(filePath, content, pathLookup),
+    ...extractPackageScriptEdges(filePath, packageContent, pathLookup),
   );
   acc.references.push(
-    ...extractWorkspacePackageEdges(filePath, content, pathLookup),
+    ...extractWorkspacePackageEdges(filePath, packageContent, pathLookup),
   );
   acc.references.push(
     ...extractTypescriptProjectReferenceEdges(filePath, content, pathLookup),
@@ -804,7 +807,7 @@ function extractPerFileContribution(
  * (fail-safe) instead of replaying contributions built under different rules.
  */
 // sites-pinned: tests/audit/graph-edge-cache.test.ts
-export const GRAPH_EDGE_CACHE_KEY_VERSION = "v20";
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v21";
 
 /**
  * The ONE definition of "this file's content was available to the extractors".
