@@ -121,6 +121,20 @@ dry-run use those same tarball bytes without rebuilding or repacking. A live
 run reports success only once npm returns the qualified tarball integrity and
 the requested dist-tag points to that version.
 
+## Refreshing release shard timings
+
+The sequencer uses measured test-file times wherever it has them and estimates
+only unmeasured files from the median of the measured files in the selection.
+The log distinguishes measured and estimated specs and reports predicted shard
+workloads; these are sums of per-file work, not elapsed CI time.
+
+Refresh the baseline with `npm run generate:shard-baseline` after a green
+unsharded full suite, or download all timing ledgers from one green release run
+and run `npm run generate:shard-baseline -- --shards <ledger1> <ledger2> ...`.
+The generator rejects red or incomplete evidence and verifies that every test
+from the measured commit occurs exactly once across the shard ledgers. A new
+test need not wait for a refresh to be included in weighted sharding.
+
 ## Trusted publisher setup
 
 npm Trusted Publishing is configured for this repository. If repository,

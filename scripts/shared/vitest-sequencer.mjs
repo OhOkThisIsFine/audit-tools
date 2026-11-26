@@ -2,7 +2,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { BaseSequencer } from "vitest/node";
-import { resolveWithinRoot } from './primitives.mjs';
+import { compareCodeUnits, resolveWithinRoot } from './primitives.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const defaultBaselinePath = resolve(here, "vitest-shard-duration-baseline.json");
@@ -30,14 +30,14 @@ function readDurationMap(path) {
     const raw = readFileSync(path, "utf8");
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.files || typeof parsed.files !== "object") return null;
+    if (!parsed.files || typeof parsed.files !== "object" || Array.isArray(parsed.files)) return null;
     const durations = new Map();
     for (const [file, ms] of Object.entries(parsed.files)) {
-      if (Number.isFinite(ms)) {
+      if (Number.isFinite(ms) && ms >= 0) {
         durations.set(normalizePathToRepoSlashStyle(file), Number(ms));
       }
     }
-    return durations;
+    return durations.size > 0 ? durations : null;
   } catch {
     return null;
   }
@@ -72,8 +72,15 @@ function toShardTarget(ctx) {
   return { index, count };
 }
 
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 function compareLongestFirst(a, b) {
-  return b.duration - a.duration;
+  const byDuration = b.duration - a.duration;
+  return byDuration || compareCodeUnits(a.key, b.key);
 }
 
 export default class VitestDurationSequencer extends BaseSequencer {
@@ -99,48 +106,48 @@ export default class VitestDurationSequencer extends BaseSequencer {
     }
 
     const repoRoot = resolve(this.ctx?.config?.root ?? process.cwd());
-    const weightedSpecs = [];
-    const unmeasuredSpecs = [];
-
-    for (const spec of specs) {
-      const filePath = toRepoRelativeTestPath(spec, repoRoot);
-      const duration = durations.get(filePath);
-      if (Number.isFinite(duration) && duration >= 0) {
-        weightedSpecs.push({ spec, duration });
-      } else {
-        unmeasuredSpecs.push(spec);
-      }
-    }
-
-    if (unmeasuredSpecs.length > 0) {
-      // All-or-nothing by design (the brief's T3: unmeasured files degrade to the
-      // inherited behavior) — but never silently, or the balance win evaporates
-      // unnoticed the first time a test file lands without a baseline refresh.
-      const names = unmeasuredSpecs
-        .slice(0, 3)
-        .map((spec) => toRepoRelativeTestPath(spec, repoRoot) || "<unresolved>");
-      console.log(
-        `[vitest-sequencer] ${unmeasuredSpecs.length} test file(s) missing from the duration baseline ` +
-          `(${names.join(", ")}${unmeasuredSpecs.length > 3 ? ", …" : ""}); falling back to hash sharding. ` +
-          `Refresh with: npm run generate:shard-baseline (after a green full run).`,
-      );
+    const weightedSpecs = specs.map((spec) => {
+      const file = toRepoRelativeTestPath(spec, repoRoot);
+      return {
+        spec,
+        key: JSON.stringify([file || String(spec?.moduleId ?? spec?.name ?? ""), spec?.project?.name ?? "", spec?.pool ?? ""]),
+        duration: durations.get(file),
+      };
+    });
+    const measured = weightedSpecs.flatMap(({ duration }) => duration === undefined ? [] : [duration]);
+    if (measured.length === 0) {
+      console.log("[vitest-sequencer] 0 measured specs in this selection; using default sharding.");
       return super.shard(specs);
     }
 
-    const sorted = weightedSpecs.sort(compareLongestFirst);
+    // Estimate only missing specs using the current selection's median, so a few
+    // heavyweight specs do not dominate the estimate and deleted files do not count.
+    const estimate = Math.max(1, median(measured));
+    const sorted = weightedSpecs
+      .map((item) => ({ ...item, duration: item.duration ?? estimate }))
+      .sort(compareLongestFirst);
+    /** @type {typeof specs[]} */
     const buckets = Array.from({ length: count }, () => []);
     const bucketTotals = Array.from({ length: count }, () => 0);
 
     for (const item of sorted) {
       let targetBucket = 0;
       for (let i = 1; i < count; i += 1) {
-        if (bucketTotals[i] < bucketTotals[targetBucket]) {
+        if (bucketTotals[i] < bucketTotals[targetBucket] ||
+            (bucketTotals[i] === bucketTotals[targetBucket] && buckets[i].length < buckets[targetBucket].length)) {
           targetBucket = i;
         }
       }
-    (/** @type {string[]} */ (buckets[targetBucket])).push(item.spec);
+      buckets[targetBucket].push(item.spec);
       bucketTotals[targetBucket] += item.duration;
     }
+
+    const estimated = specs.length - measured.length;
+    console.log(
+      `[vitest-sequencer] ${measured.length} measured, ${estimated} estimated` +
+        (estimated > 0 ? ` (${estimate} ms/spec)` : "") +
+        `; predicted shard workloads: ${bucketTotals.map((ms) => `${Math.round(ms)} ms`).join(", ")}.`,
+    );
 
     const shardIndex = Math.max(1, Math.min(index, count));
     return buckets[shardIndex - 1];
