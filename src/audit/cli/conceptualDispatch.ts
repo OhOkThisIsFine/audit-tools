@@ -336,6 +336,7 @@ export async function prepareConceptualDispatch(opts: {
   // audit uses; this pass used to mint its own filenames, which is precisely how
   // a second naming convention (and a second way for a host to mistype one)
   // came to exist.
+  const deepContext = [...fileMapContext, recon.deepEvidence];
   const perspectives = selectPerspectives(settings.perspectives);
   const total = perspectives.length;
   const perspectiveTexts = perspectives.map((p, i) =>
@@ -348,7 +349,7 @@ export async function prepareConceptualDispatch(opts: {
   // an unchanged one re-declares the identical bound paths.
   const roundToken = conceptualRoundToken([
     ...perspectiveTexts,
-    ...fileMapContext.flatMap(file => [file.filename, file.text]),
+    ...deepContext.flatMap(file => [file.filename, file.text]),
     opts.reReviewSection ?? "",
   ]);
   const perspectiveFiles: Array<{
@@ -401,7 +402,7 @@ export async function prepareConceptualDispatch(opts: {
         ...SEMANTIC_REVIEW_DEMAND,
         label: `Conceptual perspective — ${f.name}`,
         promptFilename: f.promptFilename,
-        generatedContext: fileMapContext,
+        generatedContext: deepContext,
         promptText: f.promptText + (refusal
           ? `\n\n## Previous submission rejected\n\n${refusal.message}`
           : ""),
@@ -420,7 +421,7 @@ export async function prepareConceptualDispatch(opts: {
       ...SEMANTIC_REVIEW_DEMAND,
       label: "Conceptual review judge (independent merge)",
       promptFilename: "design-review-conceptual-judge-prompt.md",
-      generatedContext: fileMapContext,
+      generatedContext: deepContext,
       promptText: judgePromptText,
     },
   ];
@@ -537,7 +538,7 @@ export async function prepareConceptualDispatch(opts: {
         independenceRequired: true,
         unavailableReview: "declare",
       }),
-      "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the executor as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
+      "Each prompt file above defines the reviewer's persona, scope, evidence paths, and output schema. Before dispatch, ensure the executor can open the frozen source and the bound read-only context files named in its prompt. If the worker runs elsewhere, stage those exact files at the paths visible to that worker; a path on the dispatcher's computer alone is not access. Do not treat an executor without those reads as a full reviewer. Pass the `prompt_path` to the executor as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
     ],
     artifactPaths,
     // Perspective result files must be in readPaths: the judge lane reads

@@ -14,6 +14,7 @@ import type { CharterLaneGraph, CharterConfidence } from "audit-tools/shared";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 
 const {
+  prepareDesignReviewRecon,
   renderCharterContext,
   renderConceptualReviewPrompt,
   renderConceptualPerspectivePrompt,
@@ -144,17 +145,21 @@ test("shallow conceptual prompt carries the charter block when the register is p
   expect(prompt).toMatch(/\[stated\] quota exists/);
 });
 
-test("deep perspective prompt carries the charter block when the register is populated", () => {
+test("deep perspective points to the charter without embedding it", () => {
   const [p] = selectPerspectives(5);
+  const bundle = baseBundle(populatedRegister());
+  const recon = prepareDesignReviewRecon(bundle, { max_units: 5 });
   const prompt = renderConceptualPerspectivePrompt(
-    baseBundle(populatedRegister()),
+    bundle,
     p,
     0,
     5,
     { max_units: 5 },
+    recon,
   );
-  expect(prompt).toMatch(/Subsystem charters/);
-  expect(prompt).toMatch(/\[revealed\] quota actually optimizes/);
+  expect(prompt).toMatch(/Read \*\*Subsystem charters/);
+  expect(prompt).not.toMatch(/\[revealed\] quota actually optimizes/);
+  expect(recon.deepEvidence.text).toMatch(/\[revealed\] quota actually optimizes/);
 });
 
 // ── byte-identical charter-unaware fallback ───────────────────────────────────
@@ -211,8 +216,10 @@ test("the default deep fan-out dispatches the whole roster", () => {
 test("deep judge receives the same linked charter block and uncertainty as the perspectives", () => {
   const bundle = baseBundle(populatedRegister());
   const sources = [{ name: "independent perspective", path: "result.json", contributor_id: "p1" }];
-  const prompt = renderConceptualJudgePrompt(bundle, sources, "round");
-  expect(prompt).toContain(renderCharterContext(bundle));
-  expect(prompt).toMatch(/LOW-CONFIDENCE account: FLAG for human/);
+  const recon = prepareDesignReviewRecon(bundle);
+  const prompt = renderConceptualJudgePrompt(bundle, sources, "round", {}, recon);
+  expect(prompt).toMatch(/Read \*\*Subsystem charters/);
+  expect(recon.deepEvidence.text).toContain(renderCharterContext(bundle));
+  expect(recon.deepEvidence.text).toMatch(/LOW-CONFIDENCE account: FLAG for human/);
   expect(renderConceptualJudgePrompt(baseBundle(undefined), sources, "round")).not.toContain("Subsystem charters");
 });

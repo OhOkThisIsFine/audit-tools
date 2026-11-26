@@ -152,6 +152,23 @@ describe("design-review call-site map: an index plus one slice per unit", () => 
     expect(recon.fileMap.contextFiles.map(file => file.filename)).not.toContain("review-call-site-map.unit-b.md");
   });
 
+  test("deep supplemental evidence retains unit scope beyond the inline display limit", () => {
+    const base = bundle();
+    const examples = base.unit_manifest!.units;
+    const units = Array.from({ length: 45 }, (_, index) => ({
+      ...examples[0]!, unit_id: `scope-unit-${index + 1}`,
+      files: index === 44 ? ["src/b/three.ts"] : examples[0]!.files,
+    }));
+    const recon = prepareDesignReviewRecon({
+      ...base,
+      unit_manifest: { ...base.unit_manifest!, units },
+      intent_checkpoint: { ...excludesPerformance, excluded_scope: [{ path: "src/b/three.ts", reason: "third party" }] },
+    }, { max_units: 1 });
+    expect(recon.structuralContext).not.toContain("scope-unit-45 [excluded:");
+    expect(recon.deepEvidence.text).toContain("scope-unit-44 [in scope]");
+    expect(recon.deepEvidence.text).toContain("scope-unit-45 [excluded:");
+  });
+
   test("a mixed unit anchors only primary files; excluded paths remain dependency context", () => {
     const base = bundle();
     const context = prepareDesignReviewRecon({

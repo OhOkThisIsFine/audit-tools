@@ -50,7 +50,7 @@ const JUDGE_RESULT_PLACEMENTS = JUDGE_RESULT_KEYS
  * permitted list without these categories made that instruction unobeyable.
  */
 const LEAD_CATEGORY_RULE =
-  "A finding that confirms a structural lead listed above keeps that lead's category instead, one of: " +
+  "A finding that confirms a structural lead in your review evidence keeps that lead's category instead, one of: " +
   `${DesignLeadCategorySchema.options.join(", ")}.`;
 
 /** Render the `[in scope]` / `[excluded: reason]` tag for a unit disposition. */
@@ -60,14 +60,14 @@ function scopeTag(disposition: UnitScopeDisposition): string {
     : "[in scope]";
 }
 
-function summarizeUnits(bundle: ArtifactBundle): string {
+function summarizeUnits(bundle: ArtifactBundle, limit = 40): string {
   const units = bundle.unit_manifest?.units ?? [];
   if (units.length === 0) return "No units identified.";
 
   const checkpoint = bundle.intent_checkpoint;
   return formatTopNList(
     units,
-    40,
+    limit,
     (total) => `${total} units:`,
     (unit) => {
       const lenses = unit.required_lenses.join(", ") || "none";
@@ -464,7 +464,7 @@ function conceptualCritiqueInstructions(): string[] {
   return [
     "## Orient, then roam",
     "",
-    "The structural context above is a map to orient you — it is NOT your reading list, and it is not where the deep problems will be obvious. Before forming conclusions:",
+    "The structural context is a map to orient you — it is NOT your reading list, and it is not where the deep problems will be obvious. Before forming conclusions:",
     "",
     "- **Read the project's own documentation first** — its README, anything under `docs/`, design notes, and any `CLAUDE.md`/agent-instruction files — to learn what this project is *trying* to be and why. Understand the intent before you judge the execution.",
     "- **Then roam the actual code freely.** Read whole files, follow imports and call paths wherever they lead, and build your own mental model the way a new senior engineer would. Do NOT confine yourself to the highest-risk units — emergent, whole-system problems live in the connections between ordinary-looking parts, which no per-unit risk score surfaces.",
@@ -474,7 +474,7 @@ function conceptualCritiqueInstructions(): string[] {
     // them is what let the doc and this prompt disagree: the doc described a
     // graph-constrained reading grant, the prompt granted free roaming, and
     // neither stated the finding-target scope the annotations already imply.
-    "**Roaming is a reading grant, not a reporting grant.** Read anything you need in order to understand the system. But produce findings only about units marked `[in scope]` above — a unit marked `[excluded: <reason>]` may inform your reasoning and may be cited as evidence, and must never itself be the target of a finding.",
+    "**Roaming is a reading grant, not a reporting grant.** Read anything you need in order to understand the system. But produce findings only about units marked `[in scope]` in Unit structure — a unit marked `[excluded: <reason>]` may inform your reasoning and may be cited as evidence, and must never itself be the target of a finding.",
     "",
     "## How to think — first principles, not a checklist",
     "",
@@ -541,7 +541,7 @@ function findingsEnvelopeExample(
     "",
     `Write the literal value, never the list of permitted ones. \`category\` is one of: ${categories.join(", ")}. ${LEAD_CATEGORY_RULE} ` +
       "`severity` is one of: critical, high, medium, low, info. `confidence` is one of: high, medium, low. " +
-      "`affected_files` cites a real path from the file inventory above. Every finding is parsed against " +
+      "`affected_files` cites a real path from the file inventory. Every finding is parsed against " +
       "this contract at ingestion, and a submission carrying one that fails is refused whole — not " +
       "partly accepted — so a placeholder value costs you the round.",
     "",
@@ -643,7 +643,7 @@ function judgeEnvelopeExample(
       "`severity` is one of: critical, high, medium, low, info. `confidence` is one of: high, medium, low. " +
       "`disposition` is one of: retained, merged, rejected. `verification_status` is one of: " +
       "judge_confirmed, asserted, refuted_at_head. `affected_files` cites a real path from the file " +
-      "inventory above.",
+      "inventory.",
     "",
     `This object is the value of \`${ENVELOPE_RESULT_KEY}\` in the ${ENVELOPE_CONTRACT_VERSION} envelope ` +
       `stated at the end of this prompt — never a sibling of \`${ENVELOPE_RESULT_KEY}\`. Its ` +
@@ -759,7 +759,7 @@ function renderGraphProvenance(bundle: ArtifactBundle): string[] {
     "### Graph provenance — READ THIS BEFORE TRUSTING THE GRAPH",
     "",
     `Parser-grade extraction was requested and could NOT run for ${degraded.length} language analyzer(s); ` +
-      "the weaker deterministic regex floor was used for those files instead. The dependency graph above " +
+      "the weaker deterministic regex floor was used for those files instead. The dependency graph " +
       "is therefore INCOMPLETE for them — treat a missing edge in these languages as unknown, not as absent, " +
       "and do not raise a finding whose only evidence is that the graph shows no connection:",
     "",
@@ -775,6 +775,8 @@ function renderGraphProvenance(bundle: ArtifactBundle): string[] {
 export interface DesignReviewRecon {
   structuralContext: string;
   charterContext: string;
+  deepBrief: string;
+  deepEvidence: { filename: string; label: string; text: string };
   fileMap: ReviewFileMapContext;
 }
 
@@ -803,9 +805,27 @@ export function prepareDesignReviewRecon(
       }, null, 2) + "\n",
     });
   }
+  const { header, details, orientation } = renderStructuralContext(
+    bundle, startingPoints, fileMap, options.lenses ?? resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection),
+  );
+  const charterContext = renderCharterContext(bundle);
   return {
-    structuralContext: renderStructuralContext(bundle, startingPoints, fileMap, options.lenses ?? resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection)),
-    charterContext: renderCharterContext(bundle),
+    structuralContext: [header, details(), orientation].join("\n"),
+    charterContext,
+    deepBrief: [
+      header,
+      "Read **Unit structure** in the shared deep-review evidence to check the reporting scope of candidate units. Look up relevant units in the separate inventory and call-site maps where available.",
+      "Use **Critical flows**, **Externally reachable surfaces**, and **Dependency graph** to trace behavior. Consult **Deterministic structural findings** and **Risk profile** for leads, not verdicts.",
+      ...(charterContext ? ["Read **Subsystem charters** for the units you investigate; the charter's confidence and competing accounts matter."] : []),
+      "Verify conclusions in frozen source. Read the relevant sections, not the entire evidence file by default.",
+      "",
+      orientation,
+    ].join("\n"),
+    deepEvidence: {
+      filename: "design-review-shared-evidence.md",
+      label: "Shared deep-review evidence (start with Unit structure; consult the sections named in the prompt)",
+      text: ["# Shared deep-review evidence", "", details(Infinity), charterContext].join("\n"),
+    },
     fileMap,
   };
 }
@@ -814,7 +834,7 @@ export function renderSharedStructuralContext(bundle: ArtifactBundle, maxUnits: 
   return prepareDesignReviewRecon(bundle, { max_units: maxUnits }).structuralContext;
 }
 
-function renderStructuralContext(bundle: ArtifactBundle, startingPoints: StartingPoints, fileMap: ReviewFileMapContext, lenses: readonly string[] | undefined): string {
+function renderStructuralContext(bundle: ArtifactBundle, startingPoints: StartingPoints, fileMap: ReviewFileMapContext, lenses: readonly string[] | undefined) {
   const deterministicFindings = bundle.design_assessment?.findings ?? [];
   const prioritizedReadingList = buildPrioritizedReadingList(startingPoints);
 
@@ -823,13 +843,15 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
   // timestamps and provenance stay outside identity under that existing policy.
   const inputRevision = designReviewInputRevision(bundle);
 
-  return [
+  const header = [
     "## Project context",
     `Structural input revision: ${inputRevision}`,
     "",
     `Repository: ${bundle.repo_manifest?.repository?.name ?? "unknown"}`,
     "",
     ...renderGraphProvenance(bundle),
+  ].join("\n");
+  const inventory = [
     // The summary only: the complete map reaches the lane as a read-only context
     // files its emission site binds.
     ...fileMap.summaryLines,
@@ -840,10 +862,8 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
       "The complete file inventory is a read-only context file. Look up the specific unit or path you need; do not reload or re-list the whole repository. Use the shared call-site map where it covers your target; otherwise trace the relevant dependencies in frozen source. These inputs do not substitute for your own source checks or judgment.",
     ] : []),
     "",
-    "### Unit structure",
-    "",
-    summarizeUnits(bundle),
-    "",
+  ];
+  const graphDetails = [
     "### Dependency graph",
     "",
     summarizeGraph(bundle),
@@ -864,6 +884,8 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
     "",
     formatDeterministicFindings(deterministicFindings, bundle.graph_bundle?.node_metrics, lenses),
     "",
+  ];
+  const orientation = [
     "### Starting points (orient, then roam)",
     "",
     `This short list and its map do not limit the review. Any unit marked [in scope] in Unit structure is reviewable, including units absent from the starting points and map. Excluded units are dependency context only, not primary review targets. Follow the relevant source paths; you need not read every file.`,
@@ -871,6 +893,15 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
     prioritizedReadingList,
     "",
   ].join("\n");
+  const details = (unitLimit?: number) => [
+    ...inventory,
+    "### Unit structure",
+    "",
+    summarizeUnits(bundle, unitLimit),
+    "",
+    ...graphDetails,
+  ].join("\n");
+  return { header, details, orientation };
 }
 
 /**
@@ -976,22 +1007,19 @@ export function renderConceptualPerspectivePrompt(
   options: DesignReviewOptions = {},
   recon = prepareDesignReviewRecon(bundle, options),
 ): string {
-  const { charterContext } = recon;
-
   return [
-    `# Conceptual design review — perspective ${index + 1} of ${total}: ${perspective.name}`,
+    "# Conceptual design review",
     "",
-    `You are **one of ${total} independent reviewers**, each assigned a deliberately different value system. You will NOT see the other reviewers' output, and a separate judge agent will merge everyone's findings. Do **not** try to be balanced or cover the other angles — your value is the one perspective no one else takes. Review the whole codebase, but judge it only through your assigned lens.`,
+    `You are **one of ${total} independent reviewers**, each assigned a different value system. You will NOT see the other reviewers' output; a separate judge will merge the findings. Review the whole in-scope codebase only through the perspective assigned below. Do not try to cover the other angles.`,
     "",
-    `## Your perspective: ${perspective.name}`,
+    recon.deepBrief,
+    ...renderLensScope(options),
+    `## Your perspective: ${perspective.name} (perspective ${index + 1} of ${total})`,
     "",
     perspective.lens,
     "",
     "You may sharpen or extend this lens to fit this codebase's character and domain, but stay in character.",
     "",
-    recon.structuralContext,
-    ...renderLensScope(options),
-    ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
       "Report findings *from your perspective only*. Use finding IDs starting with DR-001.",
@@ -1022,7 +1050,6 @@ export function renderConceptualJudgePrompt(
   options: DesignReviewOptions = {},
   recon = prepareDesignReviewRecon(bundle, options),
 ): string {
-  const { charterContext } = recon;
   const sources = perspectiveResults.map(
     (p, i) =>
       `${i + 1}. **${p.name}** — contributor \`${p.contributor_id}\` — \`${p.path}\``,
@@ -1033,14 +1060,9 @@ export function renderConceptualJudgePrompt(
     "",
     `You are an **independent judge and final reviewer**. Several reviewers each examined this project through a different value system and wrote their findings to separate files. You did **not** author any of them — your job is to evaluate them on merit, merge them into one ranked, deduplicated result, AND add anything significant they collectively missed.`,
     "",
-    // The judge is a lens-open, graph-reading lane like every other conceptual
-    // one — it is asked to ADD what the perspectives missed, and it PRODUCES the
-    // submission the tool ingests. Rendering the shared structural context here
-    // was the omission that left the deep pass's only ingested lane without the
-    // graph's provenance (and, below, without the operator's lens selection).
-    recon.structuralContext,
+    // The judge can add missed issues, so it needs the same scope and evidence.
+    recon.deepBrief,
     ...renderLensScope(options),
-    ...(charterContext ? [charterContext] : []),
     "## Perspective result files",
     "",
     "Read each of these review-submission/v1 JSON envelopes. The domain findings are in `result.findings`; `review` declares the reviewer context. If a perspective declares degraded or unavailable, stop and request an independent replacement instead of treating it as completed review:",

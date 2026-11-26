@@ -1,3 +1,4 @@
+import { readAuditReviewBinding } from "../../src/audit/cli/auditReviewBindings.js";
 import { StepArtifactSchema } from "../../src/audit/cli/steps.js";
 import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
 import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
@@ -28,8 +29,9 @@ import { prepareFixtureRun } from "../helpers/functionalPreflightFixture.js";
  * ingest.
  */
 import { describe, expect, it, afterEach } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
 import { fileURLToPath } from "node:url";
@@ -255,17 +257,43 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     return { dir, root, firstStep, firstPerspectivePaths, firstManifest };
   }
 
-  it("binds one shared file inventory without embedding it in independent prompts", async () => {
-    const { firstStep, firstManifest } = await prepareRetryFixture(true);
-    const paths = firstStep.access.read_paths.filter((path: string) => basename(path) === "design-review-file-inventory.json");
-    expect(paths).toHaveLength(1);
-    expect(firstStep.access.write_paths).not.toContain(paths[0]);
-    expect(JSON.parse(await readFile(paths[0], "utf8"))).toHaveProperty("units");
-    for (const perspective of firstManifest.perspectives) {
-      const prompt = await readFile(perspective.prompt_path, "utf8");
-      expect(prompt).toContain(toPromptPathToken(paths[0]));
+  it("stages and fingerprints one shared evidence file, not a copy in every prompt", async () => {
+    const { dir, firstStep, firstManifest } = await prepareRetryFixture(true);
+    const [inventory, evidence] = ["design-review-file-inventory.json", "design-review-shared-evidence.md"].map(name => {
+      const paths = firstStep.access.read_paths.filter((path: string) => basename(path) === name);
+      expect(paths).toHaveLength(1);
+      expect(firstStep.access.write_paths).not.toContain(paths[0]);
+      return paths[0] as string;
+    });
+    expect(JSON.parse(await readFile(inventory!, "utf8"))).toHaveProperty("units");
+    const artifact = await readFile(evidence!, "utf8");
+    expect(artifact).toContain("### Unit structure");
+    expect(artifact).toContain("### Deterministic structural findings");
+    const digest = createHash("sha256").update(artifact).digest("hex");
+    const prompts = await Promise.all(firstManifest.perspectives.map(async (lane: { prompt_path: string }) => (
+      readFile(lane.prompt_path, "utf8")
+    ))) as string[];
+    const judge = await readFile(firstManifest.judge.prompt_path, "utf8");
+    for (const prompt of [...prompts, judge]) {
+      expect(prompt).toContain(toPromptPathToken(inventory!));
+      expect(prompt).toContain(`${toPromptPathToken(evidence!)}: ${digest}`);
+      expect(prompt).toContain("Read **Unit structure**");
+      expect(prompt).toContain("### Starting points");
+      expect(prompt).not.toContain("### Deterministic structural findings");
+    }
+    const shared = prompts[0]!.split("## Your perspective:")[0];
+    for (const prompt of prompts) {
+      expect(prompt.split("## Your perspective:")[0]).toBe(shared);
       expect(prompt).toContain("You will NOT see the other reviewers' output");
     }
+    expect(new Set(prompts).size).toBe(prompts.length);
+    expect(judge).toContain("## Perspective result files");
+    const lane = firstManifest.perspectives[0].lane_id;
+    expect((await readAuditReviewBinding(dir, lane))?.inputs).toContainEqual({ path: evidence, sha256: digest });
+    await chmod(evidence!, 0o644);
+    await writeFile(evidence!, artifact + "changed evidence\n");
+    expect(await readAuditReviewBinding(dir, lane)).toBeUndefined();
+    expect(await readAuditReviewBinding(dir, firstManifest.judge.lane_id)).toBeUndefined();
   });
 
   it("reissues unavailable and invalid perspective results before the judge has submitted", async () => {
