@@ -11,6 +11,7 @@ import { getExternalSignalPaths } from "./requeueUtils.js";
 import { fingerprintDiscoveredSet } from "./questionEvidence.js";
 import { REVIEW_LENS_PLAYBOOKS } from "./reviewLensPlaybooks.js";
 import { resolveIntentLensSelection } from "./lensSelection.js";
+import { discoverTestSuites } from "./testSuiteSubjects.js";
 // Change when the membership discovery or interpretation changes, not when a
 // different revision merely adds/removes a member.
 const QUESTION_DISCOVERY_RULE = "review-question-discovery/v1";
@@ -375,6 +376,26 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
   routePriorReviewSignals(bundle, (options.scope ?? bundle.scope)?.mode === "full",
     operationRows, resolveRef, sourceStatus, add, disposition);
 
+  for (const suite of discoverTestSuites(sourceScope.allowedSourcePaths, path => files.get(path)!.hash!, bundle.graph_bundle)) {
+    const title = `Test suite: ${suite.root || "repository root"}`;
+    const expectation = "Review this suite as a whole, separately from whether a single operation is tested. " +
+      (suite.hasRunnerCandidate ? "Verify the candidate runner and CI wiring against frozen source. "
+        : "The runner is unverified; establish how these tests are selected if possible. ") +
+      "The suggested files are starting points; state which jobs, suites or test cases you actually examined and what was not verified. " +
+      "Use any applicable timing or coverage evidence already available; historical baselines are leads, not current measurements. " +
+      "Without measurements, make a source-backed hypothesis or propose a check; do not invent timings, coverage or savings. " +
+      "No test execution is required by this question. Gate and release-candidate qualification belong to configuration and deployment.";
+    add("tests", `test-suite:${suite.root}`, "workload", title, suite.refs.map(source), [], expectation, {
+      context: { start: source(suite.start) },
+      membership: suite.memberFingerprints,
+      parts: [
+        { part_id: "assertions-coverage", expectation: "Trace representative assertions to actual contracts and regressions, including false greens, meaningful gaps and what replacement tests must preserve." },
+        { part_id: "harness-fixtures", expectation: "Follow runner selection, setup, fixtures and teardown. Identify reusable setup, duplicate or brittle cases, and independent integration behavior that must remain." },
+        { part_id: "speed-sharding", expectation: "Check collection, setup and execution costs where evidence permits. Compare targeted tests, sharding or safe parallelism, and account for wall time, the slowest shard and flakiness." },
+        { part_id: "framework-fit", expectation: "Compare keeping the runner, adapting it or replacing it where the evidence warrants. Account for isolation, diagnostics, coverage, portability and migration cost." },
+      ],
+    });
+  }
   const transitionPaths = [...files.keys()].filter((path) => sourceStatus(path) === undefined && classifyConfiguration(path) !== undefined);
   const runtimeConfiguration = sourceRefs(transitionPaths.filter((path) => classifyConfiguration(path) === "runtime"));
   if (runtimeConfiguration.length) add("config_deployment", "runtime", "release_transition", "Runtime configuration", runtimeConfiguration, [],
