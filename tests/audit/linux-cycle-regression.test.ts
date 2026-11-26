@@ -1,3 +1,4 @@
+import { answerHostPause, MAX_HOST_PAUSES } from "./helpers/step-driver.js";
 import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 /**
  * Regression guard for A3 step 4 slice 2b — the Linux-only false-cycle.
@@ -79,7 +80,7 @@ const TERMINAL_KINDS = new Set([
   "present_report",
 ]);
 
-const MAX_PAUSES = 8;
+const MAX_PAUSES = MAX_HOST_PAUSES;
 test("regression: floor-only first next-step never false-cycles to blocked (Linux CI repro)", async () => {
   await withFloorOnlyRepo(async (root, env) => {
     const artifactsDir = join(root, ".audit-tools/audit");
@@ -98,6 +99,10 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
           `false-cycle regression. Cycle detection must exempt the 'no-metadata' bootstrap ` +
           `state and tolerate content-signature revisits (see HANDOFF ⚠️ block).`).not.toBe("blocked");
 
+      if (step.step_kind === "analyzer_selection" || step.step_kind === "analyzer_calibration") {
+        expect(await answerHostPause(step)).toBe(true);
+        continue;
+      }
       if (step.step_kind === "critical_flow_fallback") {
         await mkdir(submissionsDir(artifactsDir), { recursive: true });
         await writeFile(

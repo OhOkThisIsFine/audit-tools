@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { answerHostPause } from "./helpers/step-driver.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 const { GATE_LANES, laneSubmissionPath } = await import(
   "../../src/audit/cli/laneSubmissions.js"
@@ -85,10 +86,14 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
       JSON.stringify({ flows: [] }, null, 2) + "\n",
     );
 
-    // Item B: on an applicable repo the FIRST pause is now the batched
-    // analyzer-consent offer (external analyzers precede graph enrichment).
-    // Answer it (decline everything) and the pipeline proceeds to the
-    // analyzer-install pause under test.
+    const selection = JSON.parse(
+      (await runWrapper(["next-step"], { cwd: root, env })).stdout,
+    );
+    expect(selection.step_kind).toBe("analyzer_selection");
+    expect(await answerHostPause(selection)).toBe(true);
+
+    // Confirm that selection does not grant permission. The next step is
+    // still the batched consent offer before any graph-tool installation.
     const consent = JSON.parse(
       (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );
