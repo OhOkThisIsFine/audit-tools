@@ -295,3 +295,26 @@ test.each(["--help", "-h", "--unknown", "unexpected"])("CLI %s exits before sour
   expect(`${result.stdout}${result.stderr}`).not.toContain("full object ID");
   expect(existsSync(output)).toBe(false);
 });
+
+test("registry confirmation is required after a live upload (including a version conflict)", () => {
+  const steps = workflow().jobs.publish.steps;
+  const upload = steps.find((step: { name: string }) => step.name.startsWith("Publish to npm"));
+  const confirm = steps.find((step: { name: string }) => step.name === "Confirm qualified registry integrity and dist-tag");
+  expect(steps.indexOf(confirm)).toBeGreaterThan(steps.indexOf(upload));
+  expect(confirm.if).toBe(upload.if);
+  expect(confirm.env.PUBLISH_TAG).toBe("${{ steps.publish_meta.outputs.publish_tag }}");
+  expect(confirm.run).toContain("node scripts/shared/verify-release-registry.mjs");
+  expect(confirm.run).toContain("confirmed) exit 0");
+  expect(confirm.run.trimEnd()).toMatch(/exit 1$/);
+});
+
+test("registry status needs both exact tarball integrity and the requested tag", async () => {
+  const { registryReleaseStatus } = await import("../../scripts/shared/verify-release-registry.mjs");
+  const sri = "sha512-qualified";
+  const status = (integrity: unknown, tags: unknown) => registryReleaseStatus(sri, "next", "1.2.3", integrity, tags);
+  expect(status(undefined, { next: "1.2.3" })).toBe("pending");
+  expect(status("sha512-other", { next: "1.2.3" })).toBe("integrity-mismatch");
+  expect(status(sri, { latest: "1.2.3" })).toBe("pending");
+  expect(status(sri, { latest: "1.2.3", next: "1.2.2" })).toBe("tag-mismatch");
+  expect(status(sri, { latest: "1.2.2", next: "1.2.3" })).toBe("confirmed");
+});

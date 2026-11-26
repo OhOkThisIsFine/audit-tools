@@ -529,7 +529,7 @@ test("watchdog: no publish run detected within the window aborts with a trigger-
       headSha: "e".repeat(40),
       detectionTimeoutMs: 60_000,
     });
-    const assertion = expect(promise).rejects.toThrow(/did not trigger/i);
+    const assertion = expect(promise).rejects.toThrow(/no matching publish-package workflow run/i);
     await vi.advanceTimersByTimeAsync(65_000);
     await assertion;
     expect(spawnCalls.some((c) => c.args.includes("workflow_dispatch"))).toBe(false);
@@ -619,7 +619,7 @@ test("watchdog: the default detection window outlasts a GitHub release-event del
           settled = true;
         },
       );
-      const assertion = expect(promise).rejects.toThrow(/did not trigger/i);
+      const assertion = expect(promise).rejects.toThrow(/no matching publish-package workflow run/i);
 
       // 15 minutes in — past the ~13-minute v0.49.0 delay — the watchdog must
       // still be WAITING, not already refused.
@@ -718,12 +718,23 @@ test.each([false, true])("discovery: later-page exact SHA beats page-one %s exac
   expect(pages.every((call) => call.args[1].includes("event=release&per_page=100&page="))).toBe(true);
 });
 
-test("discovery: full traversal permits timestamp fallback only after checking all pages", async () => {
-  serveDiscoveryPages((page) => ({
-    total_count: 101,
-    workflow_runs: page === 1 ? firstDiscoveryPage() : [discoveryRow(101, "other", 2_000)],
-  }));
-  expect((await discover()).id).toBe(101);
+test("discovery: a fresh same-tag run on another SHA does not stop the watcher", async () => {
+  vi.useFakeTimers();
+  try {
+    let lists = 0;
+    serveDiscoveryPages((page) => ({
+      total_count: 101,
+      workflow_runs: page === 1 ? firstDiscoveryPage() : [
+        ++lists === 1 ? discoveryRow(101, "other", 2_000) : discoveryRow(102, discoverySha, 3_000),
+      ],
+    }));
+    const result = expect(discover()).resolves.toMatchObject({ id: 102 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await result;
+    expect(lists).toBe(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test.each([
@@ -808,7 +819,7 @@ test.each([false, true])("discovery: clips %s failure backoff or normal sleep to
       if (failure) throw new Error("network timeout");
       return { total_count: 0, workflow_runs: [] };
     });
-    const assertion = expect(discover(37)).rejects.toThrow(failure ? /complete listing/ : /did not trigger/);
+    const assertion = expect(discover(37)).rejects.toThrow(failure ? /complete listing/ : /No matching publish-package workflow run/);
     await vi.advanceTimersByTimeAsync(37);
     await assertion;
     expect(Date.now() - startedAt).toBe(37);

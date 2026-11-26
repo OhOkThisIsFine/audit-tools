@@ -74,9 +74,17 @@ test("(c) no qualifying run -> null (waiter times out, no stale-name fallback)",
   const selected = selectReleaseRun([stale], {
     tag: TAG,
     tagPushedAtMs: pushedAt,
-    headSha: "newsha111", // no run matches this SHA; stale is too old for timestamp fallback
+    headSha: "newsha111",
   });
   expect(selected).toBe(null);
+});
+
+test("a fresh same-tag run with a different or missing SHA is not the expected release", () => {
+  const pushedAt = Date.parse("2026-06-19T12:00:00.000Z");
+  const entry = { head_branch: TAG, created_at: iso(pushedAt + 30_000) };
+  expect(selectReleaseRun([{ ...entry, head_sha: "other" }, entry], {
+    tag: TAG, tagPushedAtMs: pushedAt, headSha: "expected",
+  })).toBeNull();
 });
 
 test("(d) headSha absent: selects newest run with created_at > tagPushedAtMs, no throw", () => {

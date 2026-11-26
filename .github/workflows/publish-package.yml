@@ -124,6 +124,7 @@ jobs:
           digest=$(sha256sum "$tarball")
           echo "path=$tarball" >> "$GITHUB_OUTPUT"
           echo "sha256=${digest%% *}" >> "$GITHUB_OUTPUT"
+          printf '### Qualified npm tarball\n- SHA-256: %s\n' "${digest%% *}" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload the smoke-qualified tarball
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -306,30 +307,13 @@ jobs:
           for attempt in 1 2 3; do
             if output=$(npm publish "$RELEASE_TARBALL" --ignore-scripts --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
               echo "$output"
-              echo "Publish succeeded on attempt ${attempt}."
-              {
-                echo "### Publish outcome"
-                echo "- status: published"
-                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-              } >> "$GITHUB_STEP_SUMMARY"
+              echo "Upload acknowledged on attempt ${attempt}; registry confirmation pending."
               exit 0
             fi
             echo "$output"
-            # Idempotency: a transient failure AFTER the registry accepted the tarball
-            # leaves the version published; a retry then fails with "cannot publish
-            # over". On attempt > 1 that means our earlier attempt landed — treat as
-            # success. On the FIRST attempt the same message is a genuine conflict and
-            # falls through to the permanent-error path below.
-            if [[ "$attempt" -gt 1 ]] && echo "$output" | grep -qiE '(cannot publish over|previously published|EPUBLISHCONFLICT|cannot modify pre-existing version)'; then
-              echo "Version already on the registry after attempt ${attempt} — an earlier attempt's upload landed. Treating as published (idempotent)."
-              {
-                echo "### Publish outcome"
-                echo "- status: published (idempotent — earlier attempt's upload landed)"
-                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-                echo "- attempts: ${attempt}"
-              } >> "$GITHUB_STEP_SUMMARY"
+            # A version conflict alone proves neither the bytes nor the tag.
+            if echo "$output" | grep -qiE '(cannot publish over|previously published|EPUBLISHCONFLICT|cannot modify pre-existing version)'; then
+              echo "Version conflict on attempt ${attempt}; checking registry integrity and dist-tag."
               exit 0
             fi
             if echo "$output" | grep -qiE '(forbidden|cannot publish over|E403|you do not have permission)'; then
@@ -373,46 +357,41 @@ jobs:
             echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
             echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify published package is installable
+      - name: Confirm qualified registry integrity and dist-tag
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
         timeout-minutes: 8
         shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.publish_meta.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.publish_meta.outputs.package_version }}
+          PUBLISH_TAG: ${{ steps.publish_meta.outputs.publish_tag }}
         run: |
           set -euo pipefail
-          PACKAGE_NAME="${{ steps.publish_meta.outputs.package_name }}"
-          PACKAGE_VERSION="${{ steps.publish_meta.outputs.package_version }}"
-          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION}..."
-          START_TIME=$(date +%s)
+          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} on dist-tag ${PUBLISH_TAG}..."
           for attempt in {1..24}; do
-            if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
-              ELAPSED=$(( $(date +%s) - START_TIME ))
-              echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
-              {
-                echo "### Registry propagation"
-                echo "- status: verified"
-                echo "- attempts: ${attempt}"
-                echo "- elapsed: ${ELAPSED}s"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            ELAPSED=$(( $(date +%s) - START_TIME ))
-            if [[ "$attempt" -lt 24 ]]; then
-              echo "Pending after attempt ${attempt} (${ELAPSED}s); retrying in 10s..."
-              sleep 10
-            fi
+            status=$(node scripts/shared/verify-release-registry.mjs)
+            case "$status" in
+              confirmed|integrity-mismatch) break ;;
+              pending|tag-mismatch)
+                echo "Registry verification: $status (attempt $attempt)."
+                if [[ "$attempt" -lt 24 ]]; then sleep 10; fi ;;
+              *) echo "::error::Unknown registry verification status: $status"; exit 1 ;;
+            esac
           done
-          ELAPSED=$(( $(date +%s) - START_TIME ))
-          # The publish step already succeeded; npm has no rollback, so the package
-          # IS live even if not yet visible on the replica we poll. Warn rather than
-          # fail so slow propagation never turns a live publish red.
-          echo "::warning::${PACKAGE_NAME}@${PACKAGE_VERSION} published successfully but was not yet visible via 'npm view' after ${attempt} attempt(s) (${ELAPSED}s). This is registry-propagation lag, not a publish failure."
           {
-            echo "### Registry propagation"
-            echo "- status: published, propagation-verify timed out (treated as success — npm has no rollback)"
-            echo "- attempts: ${attempt}"
-            echo "- elapsed: ${ELAPSED}s"
+            echo "### Registry confirmation"
+            echo "- status: $status"
+            echo "- package: ${PACKAGE_NAME}@${PACKAGE_VERSION}"
+            echo "- dist-tag: $PUBLISH_TAG"
+            echo "- attempts: $attempt"
           } >> "$GITHUB_STEP_SUMMARY"
-          exit 0
+          case "$status" in
+            confirmed) exit 0 ;;
+            integrity-mismatch) echo "::error::Registry integrity conflicts with the qualified tarball." ;;
+            tag-mismatch) echo "::error::Requested dist-tag still points to a different version." ;;
+            pending) echo "::error::Registry confirmation remains pending; upload is not verified." ;;
+          esac
+          exit 1
       - name: Upload npm debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

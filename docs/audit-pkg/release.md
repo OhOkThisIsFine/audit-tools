@@ -38,25 +38,33 @@ of execution backends.
 
 For each GUI host below:
 
-1. **Install** — from a clean repo, run `npm install -g audit-tools` (or the
-   local equivalent) so postinstall deploys the host surface, then open the
-   repository in the host.
-2. **Command appears** — confirm the host registers/offers `/audit-code` (slash
-   command, skill, or agent, per the host's setup kind).
-3. **One live handoff** — invoke `/audit-code` and let it run one bounded audit
-   step (a single `audit-code next-step` round-trip). If semantic work is
-   reached, complete one emitted host work item.
-4. **Result lands** — confirm the step's result artifact is written under
-   `.audit-tools/audit/` (e.g. `steps/current-step.json` advances and the
-   expected artifact for that step appears).
+1. **Install the candidate** — download `qualified-npm-tarball-<attempt>` from
+   the candidate's `publish-package.yml` run (a manual dry run can provide it).
+   Compute the extracted `.tgz` file's SHA-256 and match it against the gate
+   summary. Run `npm install -g /absolute/path/to/the-qualified.tgz` with
+   postinstall enabled so it deploys the host surface, then open a clean,
+   disposable fixture in the host. Do not use a registry install or repack.
+2. **Command appears** — confirm the host offers `/audit-code` (or
+   `/remediate-code` for its rows) and uses the candidate installation.
+3. **One live handoff** — invoke the command in the GUI in a small fixture
+   that reaches host work. Continue past bootstrap until the installed CLI
+   emits a workload. Complete one item using its current prompt and write the
+   answer to its declared result path with the emitted run ID, work-item ID
+   and prompt digest.
+4. **Bound result accepted** — call the installed CLI's next step through the
+   GUI and verify CLI acceptance for that exact item in its accepted-results
+   record or applied outcome state. A result file or advancing
+   `current-step.json` alone does not show ingestion. If an item was not
+   accepted or this host path could not be exercised, mark the handoff failed
+   or unverified even if the command was visible.
 
-Mark each cell pass / fail; record the release version and date **in the release's own
-notes or a `docs/reviews/` record — never by committing a filled copy of the grids below.**
-They are a timeless template, like `docs/end-of-sprint-report-template.md`.
+Record the version, date, GitHub run and attempt, tarball SHA-256 and accepted
+item evidence in the release's own notes or a `docs/reviews/` record. Never
+commit a filled copy of the grids below.
 
 ### Checklist (one row per GUI host)
 
-| Host | Surface deployed | 1. Install + open | 2. `/audit-code` visible | 3. One live handoff | 4. Result lands under `.audit-tools/audit/` |
+| Host | Surface deployed | 1. Install + open | 2. `/audit-code` visible | 3. One live handoff | 4. Bound result accepted |
 |---|---|---|---|---|---|
 | Antigravity | `.agent/skills/audit-code/SKILL.md` skill, `.gemini/commands/audit-code.toml` slash command, planning guide, AGENTS instructions | ☐ | ☐ | ☐ | ☐ |
 | OpenCode | global `/audit-code` command (npm-installed) + generated `opencode.json` project permissions | ☐ | ☐ | ☐ | ☐ |
@@ -77,7 +85,7 @@ postinstall writes outside it. As with audit, that gate catches *our* drift but
 cannot invoke `/remediate-code` inside a live GUI host — a human runs the rows
 below at release, using the same GUI-host set.
 
-| Host | Surface deployed | 1. Install + open | 2. `/remediate-code` visible | 3. One live handoff | 4. Result lands under `.audit-tools/remediation/` |
+| Host | Surface deployed | 1. Install + open | 2. `/remediate-code` visible | 3. One live handoff | 4. Bound result accepted |
 |---|---|---|---|---|---|
 | Antigravity | `.agent/skills/remediate-code/SKILL.md` skill, `.gemini/commands/remediate-code.toml` slash command, planning guide, AGENTS instructions | ☐ | ☐ | ☐ | ☐ |
 | OpenCode | global `/remediate-code` command (npm-installed) + generated `opencode.json` project permissions | ☐ | ☐ | ☐ | ☐ |
@@ -109,7 +117,9 @@ Publishing a GitHub Release triggers the same workflow.
 The non-test gate packs once and both packaged smokes install that tarball. The
 publish job downloads the gate's artifact and checks its SHA-256 and packed
 package name and version against the verified checkout. Both live publish and
-dry-run use those same tarball bytes without rebuilding or repacking.
+dry-run use those same tarball bytes without rebuilding or repacking. A live
+run reports success only once npm returns the qualified tarball integrity and
+the requested dist-tag points to that version.
 
 ## Trusted publisher setup
 
@@ -141,10 +151,10 @@ The packaged smoke path strips inherited `npm_config_*`, `NODE_AUTH_TOKEN`, and
 `NPM_TOKEN` values before nested npm operations so dry runs and smoke installs
 do not accidentally inherit publish credentials or suppress tarball generation.
 
-Post-publish checks:
+Post-publish checks (substitute the release version for `x.y.z`):
 
 ```bash
-npm view audit-tools version
+npm view audit-tools@x.y.z dist.integrity --json
 npm view audit-tools dist-tags --json
 npm audit signatures
 ```

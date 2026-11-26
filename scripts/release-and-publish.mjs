@@ -570,9 +570,9 @@ const RELEASE_RUN_SKEW_MS = 5_000;
 //
 // Selection rules:
 //   1. Identity gate — only runs whose head_branch===tag OR display_title===tag.
-//   2. Prefer head_sha===headSha (the tag commit). Among those, newest by
+//   2. If headSha is known, require head_sha===headSha. Among those, newest by
 //      created_at, tiebreak greatest run_number then id.
-//   3. If headSha is absent or nothing matches by SHA, fall back to runs whose
+//   3. Only if headSha is absent, fall back to runs whose
 //      created_at is strictly after (tagPushedAtMs - skew), newest first.
 //   4. Never return a run by array position / name alone — return null if
 //      nothing qualifies the identity + freshness gate.
@@ -601,9 +601,7 @@ export function selectReleaseRun(runs, { tag, tagPushedAtMs, headSha } = {}) {
 
   if (headSha != null) {
     const bySha = sameTag.filter((runEntry) => runEntry.head_sha === headSha);
-    if (bySha.length > 0) {
-      return [...bySha].sort(newerFirst)[0];
-    }
+    return bySha.sort(newerFirst)[0] ?? null;
   }
 
   const threshold =
@@ -761,10 +759,9 @@ export async function waitForReleaseRun(
       ? new Date(tagPushedAtMs).toISOString()
       : "unknown";
   throw new Error(
-    `The publish-package workflow did not trigger for ${tag} within ` +
+    `No matching publish-package workflow run was found for ${tag}${headSha ? ` at ${headSha}` : ""} within ` +
       `${Math.round(detectionTimeoutMs / 1000)}s of pushing the tag (pushed at ${pushedAtIso}). ` +
-      `The tag and GitHub Release already exist — this means the trigger itself did not fire, not ` +
-      `that it is slow. Not dispatching it manually (a workflow_dispatch run would not carry this ` +
+      `The tag and GitHub Release already exist. Not dispatching it manually (a workflow_dispatch run would not carry this ` +
       `release's tag/SHA provenance) and not extending the wait. Inspect ` +
       `.github/workflows/publish-package.yml's trigger config and ` +
       `https://github.com/${repoSlug}/actions, then retry once the run appears.`,
@@ -1561,7 +1558,7 @@ async function runRelease() {
     console.log(
       `[release] --no-wait: GitHub Release ${tag} created; publish-package CI will publish ` +
         `${packageAfter.name}@${packageAfter.version} asynchronously. ` +
-        `Confirm with: npm view ${packageAfter.name} version`,
+        `Check the matching publish-package run for registry integrity and dist-tag confirmation.`,
     );
     writeProfileLedger("release", phases, { ...releaseMeta, mode: "no-wait" });
     return;

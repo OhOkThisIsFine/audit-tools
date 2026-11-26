@@ -42,7 +42,7 @@ test("publish contract uses public access and GitHub OIDC trusted publishing", a
   expect(workflow).toMatch(/id-token: write/);
   expect(workflow).toMatch(/npm install -g npm@11\.5\.1 --ignore-scripts/);
   expect(workflow).toContain('tar -tzf "$RELEASE_TARBALL"');
-  expect(workflow).toMatch(/Registry propagation succeeded after/);
+  expect(workflow).toContain("Confirm qualified registry integrity and dist-tag");
   expect(workflow).toMatch(/for attempt in \{1\.\.24\}/);
   expect(workflow).toMatch(/publish_tag/);
   expect(workflow).toMatch(/publish-npm-logs/);
