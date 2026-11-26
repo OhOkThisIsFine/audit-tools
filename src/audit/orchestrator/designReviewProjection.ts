@@ -28,6 +28,7 @@ import {
   compareCodeUnits,
 } from "audit-tools/shared";
 import { projectDesignReviewTask, type DesignReviewTaskBundle } from "./designReviewTask.js";
+import { isBinaryArtifact, normalizeExtractorPath } from "../extractors/pathPatterns.js";
 import type { RepoManifest, UnitManifest } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import { designReviewPrimaryFiles, deriveUnitScopeDisposition } from "./intentScopeDisposition.js";
@@ -65,6 +66,8 @@ export const DESIGN_REVIEW_INPUTS = [
 ] as const;
 
 export type DesignReviewInput = (typeof DESIGN_REVIEW_INPUTS)[number];
+export const DESIGN_REVIEW_PASSES = ["contract", "conceptual"] as const;
+export type DesignReviewPass = (typeof DESIGN_REVIEW_PASSES)[number];
 
 /**
  * Stable sort of a collection by its projection string (order-independent
@@ -82,20 +85,29 @@ function sortStrings(values: readonly string[] | undefined): string[] {
 }
 
 /**
- * Project in-scope source paths, languages and their intake code identities.
- * The optional normalized digest is present only where CRLF was converted;
- * other files use the original hash. The raw byte count is not evidence.
+ * Track primary targets and, for the conceptual roaming grant, the excluded
+ * text evidence available in the frozen intake inventory. An independent
+ * reviewer need not cite every file it relied on, so a cited-only fingerprint
+ * cannot soundly reuse a completed verdict or a partly delivered round.
  */
-function projectRepoManifest(bundle: DesignReviewBundle): unknown {
+function projectRepoManifest(bundle: DesignReviewBundle, pass: DesignReviewPass): unknown {
   const manifest = bundle.repo_manifest;
   if (!manifest) return null;
   const inScope = new Set(designReviewPrimaryFiles(manifest.files.filter(file => !file.excluded).map(file => file.path), bundle.intent_checkpoint));
-  const files = manifest.files
-    .filter(file => inScope.has(file.path))
-    .map((file) => ({ path: file.path, language: file.language, code_identity: file.normalized_hash ?? file.hash ?? null }));
+  const projectIdentity = (file: RepoManifest["files"][number]) => ({
+    path: file.path,
+    language: file.language,
+    // Raw byte count and CRLF conversion are not evidence.
+    code_identity: file.normalized_hash ?? file.hash ?? null,
+  });
+  const files = manifest.files.filter(file => inScope.has(file.path)).map(projectIdentity);
+  const evidenceOnly = pass === "conceptual" ? manifest.files
+    .filter(file => !inScope.has(file.path) && !isBinaryArtifact(normalizeExtractorPath(file.path)))
+    .map(projectIdentity) : [];
   return {
     name: manifest.repository?.name ?? null,
     files: sortByProjection(files),
+    ...(evidenceOnly.length > 0 ? { evidence_only_files: sortByProjection(evidenceOnly) } : {}),
   };
 }
 
@@ -250,7 +262,7 @@ function projectDesignAssessmentFindings(bundle: DesignReviewBundle): unknown {
   return sortByProjection(projected);
 }
 
-const PROJECTORS: Record<DesignReviewInput, (bundle: DesignReviewBundle) => unknown> = {
+const PROJECTORS: Record<DesignReviewInput, (bundle: DesignReviewBundle, pass: DesignReviewPass) => unknown> = {
   repo_manifest: projectRepoManifest,
   unit_manifest: projectUnitManifest,
   graph_bundle: projectGraphBundle,
@@ -267,8 +279,9 @@ const PROJECTORS: Record<DesignReviewInput, (bundle: DesignReviewBundle) => unkn
 export function projectDesignReviewInput(
   input: DesignReviewInput,
   bundle: DesignReviewBundle,
+  pass: DesignReviewPass = "contract",
 ): unknown {
-  return PROJECTORS[input](bundle);
+  return PROJECTORS[input](bundle, pass);
 }
 
 /**
@@ -278,15 +291,16 @@ export function projectDesignReviewInput(
  */
 export function projectDesignReviewInputs(
   bundle: DesignReviewBundle,
+  pass: DesignReviewPass = "contract",
 ): Record<DesignReviewInput, unknown> {
   const out = {} as Record<DesignReviewInput, unknown>;
   for (const input of DESIGN_REVIEW_INPUTS) {
-    out[input] = PROJECTORS[input](bundle);
+    out[input] = projectDesignReviewInput(input, bundle, pass);
   }
   return out;
 }
 
 /** The complete structural input identity shared by issuance and acceptance. */
-export function designReviewInputRevision(bundle: DesignReviewBundle, pass: "contract" | "conceptual" = "contract"): string {
-  return hashContent(stableStringifyProjection({ inputs: projectDesignReviewInputs(bundle), task: projectDesignReviewTask(bundle, pass) }));
+export function designReviewInputRevision(bundle: DesignReviewBundle, pass: DesignReviewPass = "contract"): string {
+  return hashContent(stableStringifyProjection({ inputs: projectDesignReviewInputs(bundle, pass), task: projectDesignReviewTask(bundle, pass) }));
 }

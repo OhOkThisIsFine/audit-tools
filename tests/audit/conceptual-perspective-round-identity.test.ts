@@ -1,3 +1,4 @@
+import { StepArtifactSchema } from "../../src/audit/cli/steps.js";
 import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
 import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
@@ -285,6 +286,32 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     expect(instructions).toContain("- **Perspective 2 (");
     expect(instructions).toContain("- **Perspective 3 (");
     expect(await readFile(firstPerspectivePaths[0]!, "utf8")).toBe(independent);
+    const binding = ({ lane_id, prompt_path, result_path }: {
+      lane_id: string; prompt_path: string; result_path: string;
+    }) => ({
+      lane_id,
+      prompt_path: toPromptPathToken(prompt_path),
+      result_path: toPromptPathToken(result_path),
+    });
+    expect(firstStep.conceptual_workload).toEqual({
+      pending_perspectives: firstManifest.perspectives.map(binding),
+      judge: { ...binding(firstManifest.judge), ready: false },
+    });
+    expect(StepArtifactSchema.parse(retry).conceptual_workload).toEqual({
+      pending_perspectives: firstManifest.perspectives.slice(1).map(binding),
+      judge: { ...binding(firstManifest.judge), ready: false },
+    });
+    for (const perspective of firstManifest.perspectives.slice(1)) {
+      await writeBoundReviewFixture(dir, perspective.lane_id, []);
+    }
+    await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+    const judgeOnly = JSON.parse(await readFile(join(dir, "steps", "current-step.json"), "utf8"));
+    expect(judgeOnly.conceptual_workload).toEqual({
+      pending_perspectives: [],
+      judge: { ...binding(firstManifest.judge), ready: true },
+    });
+    expect(await readFile(firstPerspectivePaths[0]!, "utf8")).toBe(independent);
+
   });
 
   it("unavailable deep review pauses and retains completed independent perspectives on unchanged resume", async () => {

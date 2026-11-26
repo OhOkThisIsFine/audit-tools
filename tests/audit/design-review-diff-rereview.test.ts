@@ -24,6 +24,7 @@ import type {
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
 const {
   projectDesignReviewInputs,
+  designReviewInputRevision,
   DESIGN_REVIEW_INPUTS,
 } = await import("../../src/audit/orchestrator/designReviewProjection.js");
 const {
@@ -164,6 +165,42 @@ test("a normalized code change or distinct declaration stales the review, not mo
   const leadSnapshot = buildDesignReviewSnapshot("contract", [], withLead(location), "2026-01-01T00:00:00Z");
   expect(isDesignReviewStale(leadSnapshot, withLead({ ...location, line_start: 9 }))).toBe(false);
   expect(isDesignReviewStale(leadSnapshot, withLead({ ...location, symbol: "anotherDeclaration" }))).toBe(true);
+});
+
+test.each(["inventory", "intent"] as const)("changing text evidence excluded by %s stales conceptual review only, not on CRLF conversion", (excludedBy) => {
+  const original = bundle();
+  const manifest = original.repo_manifest!;
+  const source = manifest.files[0]!;
+  const evidence = { ...manifest.files[1]!, excluded: excludedBy === "inventory" };
+  const image = { path: "assets/icon.png", language: "unknown", size_bytes: 100, hash: "png", excluded: true };
+  const withManifest = (file = evidence, asset = image) => bundle({
+    repo_manifest: { ...manifest, files: [source, file, asset] },
+    graph_bundle: original.graph_bundle,
+    ...(excludedBy === "intent" ? {
+      intent_checkpoint: {
+        schema_version: "intent-checkpoint/v1",
+        confirmed_at: "2026-01-01T00:00:00Z",
+        confirmed_by: "host",
+        scope_summary: "core",
+        intent_summary: "Review core using dependency evidence.",
+        excluded_scope: [{ path: evidence.path, reason: "dependency for evidence only" }],
+      },
+    } : {}),
+  });
+  const base = withManifest();
+  const conceptual = snapshotFrom(base, "conceptual");
+  const contract = snapshotFrom(base, "contract");
+  const revised = withManifest({ ...evidence, hash: "rewritten" });
+  const converted = withManifest({ ...evidence, hash: "raw-crlf", normalized_hash: evidence.hash });
+  const binaryEdit = withManifest(evidence, { ...image, hash: "png2" });
+
+  expect(isDesignReviewStale(conceptual, revised)).toBe(true);
+  expect(computeDesignReReviewDelta(conceptual, revised).changedInputs.map(change => change.label)).toEqual(["repo_manifest"]);
+  expect(designReviewInputRevision(revised, "conceptual")).not.toBe(designReviewInputRevision(base, "conceptual"));
+  expect(isDesignReviewStale(contract, revised)).toBe(false);
+  expect(isDesignReviewStale(conceptual, converted)).toBe(false);
+  expect(designReviewInputRevision(converted, "conceptual")).toBe(designReviewInputRevision(base, "conceptual"));
+  expect(isDesignReviewStale(conceptual, binaryEdit)).toBe(false);
 });
 
 test("isDesignReviewStale: false on cosmetic edit, true on structural change", () => {

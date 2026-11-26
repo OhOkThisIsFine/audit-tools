@@ -39,13 +39,15 @@ import {
   DESIGN_REVIEW_INPUTS,
   projectDesignReviewInput,
   projectDesignReviewInputs,
+  type DesignReviewPass,
+  DESIGN_REVIEW_PASSES,
   type DesignReviewBundle,
   type DesignReviewInput,
 } from "./designReviewProjection.js";
 
 /** The two verdict-bearing design-review passes (each snapshots independently). */
-export const DESIGN_REVIEW_PASSES = ["contract", "conceptual"] as const;
-export type DesignReviewPass = (typeof DESIGN_REVIEW_PASSES)[number];
+export { DESIGN_REVIEW_PASSES } from "./designReviewProjection.js";
+export type { DesignReviewPass } from "./designReviewProjection.js";
 
 const SNAPSHOT_SCHEMA_VERSION = "audit-code/design-review-snapshot/v2alpha1" as const;
 
@@ -156,7 +158,7 @@ export function buildDesignReviewSnapshot(
     pass,
     reviewed_at: reviewedAt,
     prior_findings: priorFindings,
-    reviewed_inputs: projectDesignReviewInputs(bundle),
+    reviewed_inputs: projectDesignReviewInputs(bundle, pass),
     reviewed_task: projectDesignReviewTask(bundle, pass),
   };
 }
@@ -191,7 +193,7 @@ export function computeDesignReReviewDelta(
 ): DesignReReviewDelta {
   const changedInputs: ProjectionDiffEntry[] = [];
   for (const input of DESIGN_REVIEW_INPUTS) {
-    const current = projectDesignReviewInput(input, bundle);
+    const current = projectDesignReviewInput(input, bundle, snapshot.pass);
     const prior = snapshot.reviewed_inputs[input];
     const lines = diffProjections(prior, current);
     if (lines.length > 0) changedInputs.push({ label: input, lines });
@@ -213,7 +215,7 @@ export function isDesignReviewStale(
   for (const input of DESIGN_REVIEW_INPUTS) {
     const prior = stableStringifyProjection(snapshot.reviewed_inputs[input]);
     const current = stableStringifyProjection(
-      projectDesignReviewInput(input, bundle),
+      projectDesignReviewInput(input, bundle, snapshot.pass),
     );
     if (prior !== current) return true;
   }

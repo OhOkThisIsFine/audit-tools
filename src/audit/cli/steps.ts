@@ -7,6 +7,7 @@ import {
   StepStatusSchema,
   AccessDeclarationSchema,
   AGENT_FEEDBACK_FILENAME,
+  toPromptPathToken,
 } from "audit-tools/shared";
 import type { AccessDeclaration, StepStatus } from "audit-tools/shared";
 import {
@@ -72,6 +73,27 @@ export const StepProgressSchema = z
   .strict();
 export type StepProgress = z.infer<typeof StepProgressSchema>;
 
+const ConceptualLaneSchema = z.object({
+  lane_id: z.string(),
+  prompt_path: z.string(),
+  result_path: z.string(),
+}).strict();
+
+const ConceptualWorkloadSchema = z.object({
+  pending_perspectives: z.array(ConceptualLaneSchema),
+  judge: ConceptualLaneSchema.extend({ ready: z.boolean() }),
+}).strict();
+
+export type ConceptualWorkload = z.infer<typeof ConceptualWorkloadSchema>;
+
+function normalizeConceptualLane<T extends z.infer<typeof ConceptualLaneSchema>>(lane: T): T {
+  return {
+    ...lane,
+    prompt_path: toPromptPathToken(lane.prompt_path),
+    result_path: toPromptPathToken(lane.result_path),
+  };
+}
+
 export const StepArtifactSchema = z
   .object({
     contract_version: z.literal(STEP_CONTRACT_VERSION),
@@ -102,6 +124,8 @@ export const StepArtifactSchema = z
     artifacts_dir: z.string(),
     artifact_paths: z.record(z.string(), z.string().nullable()),
     access: AccessDeclarationSchema.optional(),
+    /** Current work, distinct from the round’s stable access grants. */
+    conceptual_workload: ConceptualWorkloadSchema.optional(),
     /**
      * What a PREVIOUS emission of this step's lanes is still owed, by lane and
      * issue code. Present only when something is actually outstanding, so an
@@ -183,6 +207,7 @@ export async function writeCurrentStep(params: {
   prompt: string;
   access?: AccessDeclaration;
   submissionShortfall?: LaneSubmissionShortfall;
+  conceptualWorkload?: ConceptualWorkload;
 }): Promise<StepArtifact> {
   const echo = scopeEchoLine(params.artifactsDir);
   return writeStepContract<StepArtifact, StepKind, string | null>({
@@ -211,6 +236,12 @@ export async function writeCurrentStep(params: {
       // ride before the canonical path fields so they can never clobber them.
       ...(params.progress ? { progress: params.progress } : {}),
       ...(params.access ? { access: params.access } : {}),
+      ...(params.conceptualWorkload ? {
+        conceptual_workload: {
+          pending_perspectives: params.conceptualWorkload.pending_perspectives.map(normalizeConceptualLane),
+          judge: normalizeConceptualLane(params.conceptualWorkload.judge),
+        },
+      } : {}),
       // Omitted when nothing is outstanding: a field that is always present
       // reads as noise, while its presence IS the statement.
       ...(params.submissionShortfall &&

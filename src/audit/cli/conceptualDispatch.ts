@@ -13,6 +13,7 @@ import {
   resolveDesignReviewBinding,
 } from "audit-tools/shared";
 import { z } from "zod";
+import type { ConceptualWorkload } from "./steps.js";
 import { readAuditReviewSubmission, ReviewUnavailableError } from "./reviewSubmission.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
@@ -191,8 +192,11 @@ export function resolveConceptualReviewSettings(
   };
 }
 
-export interface ConceptualDispatch {
-  deep: boolean;
+export type ConceptualDispatch = (
+  | { deep: false; workload?: never }
+  /** Deep-review work selected by validating bound submissions, not by access grants. */
+  | { deep: true; workload: ConceptualWorkload }
+) & {
   /**
    * The single conceptual-review result file the orchestrator ingests — the
    * judge's merged output when deep, the lone reviewer's output when shallow.
@@ -208,7 +212,7 @@ export interface ConceptualDispatch {
   writePaths: string[];
   /** What a previous emission of this pass's lanes is still owed. */
   shortfall: LaneSubmissionShortfall;
-}
+};
 
 /**
  * Write the conceptual-review prompt artifacts and return the host workload.
@@ -455,15 +459,9 @@ export async function prepareConceptualDispatch(opts: {
     },
   });
 
-  // Resume (COR-4c8bd93a) narrows the INSTRUCTION surface only. writePaths/
-  // readPaths/artifactPaths below stay the full, stable perspective set —
-  // round identity (conceptual-perspective-round-identity.test.ts) pins a
-  // re-emission of the SAME round to re-declare identical bound paths
-  // regardless of partial delivery, so they are a stable per-round access
-  // declaration, not a must-write list. What resume changes is which lanes
-  // the narrative tells the host to actually run: a delivered lane is never
-  // re-instructed and its landed submission is never clobbered, because the
-  // host is simply never told to write there again.
+  // Work (both structured and rendered) narrows on resume; access and the
+  // manifest retain the full, stable bindings for this round, including the
+  // landed perspective submissions the judge still needs to read.
   const pendingPerspectives: Array<{ ordinal: number; f: (typeof perspectivePrompts)[number] }> = [];
   for (const [i, f] of perspectivePrompts.entries()) {
     try {
@@ -491,6 +489,19 @@ export async function prepareConceptualDispatch(opts: {
 
   return {
     deep: true,
+    workload: {
+      pending_perspectives: pendingPerspectives.map(({ f }) => ({
+        lane_id: f.lane,
+        prompt_path: f.promptPath,
+        result_path: f.resultsPath,
+      })),
+      judge: {
+        lane_id: GATE_LANES.design_review_conceptual,
+        prompt_path: judgePromptPath,
+        result_path: conceptualResultsPath,
+        ready: pendingCount === 0,
+      },
+    },
     conceptualResultsPath,
     instructionLines: [
       ...(settings.ignored_review_notice ? [settings.ignored_review_notice] : []),
@@ -498,8 +509,8 @@ export async function prepareConceptualDispatch(opts: {
       `**Conceptual review** (generative, deep — ${total}-perspective fan-out):`,
       // A resumed round with some (but not all) perspectives already delivered
       // renders this notice so the host sees, in prose, exactly which lanes are
-      // being skipped and why — the mechanical guarantee is the narrowed
-      // perspectiveLines/step-1 list below; this line is purely informational,
+      // being skipped and why — the workload and the step-1 list below
+      // both use the validated pending set; this line is purely informational,
       // the same "state what changed, never rely on the host noticing" pattern
       // `reuse_notice` above uses for checkpoint reuse.
       ...(deliveredCount > 0

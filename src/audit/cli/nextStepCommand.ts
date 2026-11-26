@@ -801,6 +801,7 @@ const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
         write_paths: [...contract.writePaths, ...conceptual.writePaths],
       },
       submissionShortfall: shortfall,
+      conceptualWorkload: conceptual.workload,
     });
   },
 );
@@ -886,8 +887,10 @@ const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
       status: "ready",
       runId: null,
       allowedCommands: [continueCommand],
-      stopCondition: conceptual.deep
-        ? "Run the conceptual perspective lanes in parallel, then the independent judge, then run next-step once the merged conceptual results are written."
+      stopCondition: conceptual.workload
+        ? conceptual.workload.judge.ready
+          ? "Run the independent judge, then run next-step once the merged conceptual results are written."
+          : "Run only the pending conceptual perspectives in independent contexts, then the independent judge, then run next-step once the merged conceptual results are written."
         : "Write conceptual review findings to the results path, then run next-step.",
       repoRoot: root,
       artifactPaths: {
@@ -900,6 +903,7 @@ const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
         write_paths: conceptual.writePaths,
       },
       submissionShortfall: conceptual.shortfall,
+      conceptualWorkload: conceptual.workload,
     });
   },
 );
