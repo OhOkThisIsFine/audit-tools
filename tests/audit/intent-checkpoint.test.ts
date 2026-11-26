@@ -364,7 +364,7 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
       continueCommand: "audit-code next-step",
     },
   );
-  expect(prompt).toMatch(/Confirm Audit Scope and Intent/);
+  expect(prompt).toMatch(/If continuing: confirm audit scope and intent/u);
   expect(prompt).toMatch(/\*\*Files in scope:\*\* 3/);
   expect(prompt).toMatch(/`src` — 2 file/);
   expect(prompt).toMatch(/dist\/out\.js/);
@@ -430,7 +430,7 @@ await test("renderConfirmIntentPrompt proposes deep for a bare full audit and of
   expect(prompt).toMatch(/- \*\*shallow\*\* — a single conceptual reviewer/);
   expect(prompt).toMatch(/\bdeep\b/);
   // The depth choice is part of the single confirmation round, and offered in the JSON shape.
-  expect(prompt).toMatch(/Ask the conceptual design-review depth/);
+  expect(prompt).toMatch(/Include it with the scope and lens proposal; do not ask for it separately/u);
   // The promised shape carries the per-run BINDING alongside the depth: the
   // tool honors the dials only for the confirmation that supplied them, so a
   // shape that omitted `answered_at` would produce a checkpoint whose own

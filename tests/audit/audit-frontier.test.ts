@@ -346,7 +346,9 @@ test("one shared checkpoint offers using evidence without accepting audit intent
     const first = await current();
     expect(first.step_kind).toBe("confirm_intent");
     expect(first.stop_condition).toMatch(/stop with the prepared evidence/);
-    expect(await readFile(first.prompt_path, "utf8")).toMatch(/whether to stop here/);
+    const checkpointPrompt = await readFile(first.prompt_path, "utf8");
+    expect(checkpointPrompt).toMatch(/In one message, ask whether to stop here.*continue with the proposed scope, lenses, and design-review depth/u);
+    expect(checkpointPrompt).toContain("A reply choosing to continue with no changes confirms the proposal");
     expect(first.artifact_paths.graph_index).toEqual(expect.any(String));
     const graphIndex = first.artifact_paths.graph_index;
     const graph = await readFile(graphIndex, "utf8");

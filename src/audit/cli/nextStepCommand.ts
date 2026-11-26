@@ -1371,7 +1371,7 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
       runId: null,
       allowedCommands: [continueCommand, ...(query ? [query] : [])],
       stopCondition:
-        "Confirm whether to stop with the prepared evidence or continue. If stopping, do not write intent or resume. If continuing, confirm scope and lenses, write intent_checkpoint.json and run next-step.",
+        "Ask once: stop with the prepared evidence, or continue with the proposed scope, lenses, and depth. If stopping, do not write intent or resume. If continuing, write intent_checkpoint.json and run next-step.",
       repoRoot: root,
       artifactPaths: {
         ...artifactPaths,
