@@ -77,6 +77,45 @@ test("does not promote a supported clean part into clean coverage of an unanswer
   expect(renderAuditReportMarkdown(report)).not.toContain("completed audit");
 });
 
+test("renders question history in input order and inventory only when no question refers to it", () => {
+  const first = accepted[0]!;
+  const report = buildQuestionAuditFindingsReport({ plan, accepted, evidence: [], auditRead: null, dependenciesByQuestion });
+  const review = report.question_review;
+  const resume = review.questions[0]!;
+  const other = { ...resume, question_id: "other", inventory_item_ids: ["shared"], accepted_answer_ids: ["other-answer"] };
+  const rename = (question_id: string, submission_id: string) =>
+    ({ ...first, submission: { ...first.submission, question_id, submission_id } });
+  const decision = {
+    ...binding, schema_version, reviewer: "reviewer", decision: "resolved" as const,
+    submission_ids: [first.submission.submission_id], selected_submission_ids: [first.submission.submission_id],
+    rationale: "Recorded history.",
+  };
+  // Render the supplied report, not a new projection that could dedupe or sort the history.
+  const markdown = renderAuditReportMarkdown({ ...report, question_review: {
+    ...review, questions: [{ ...resume, inventory_item_ids: [...resume.inventory_item_ids, "shared"] }, other],
+    inventory: [...review.inventory,
+      { ...review.inventory[0]!, inventory_item_id: "shared", title: "Shared" },
+      { ...review.inventory[0]!, inventory_item_id: "unassigned", title: "Unassigned" }],
+    accepted: [rename("resume", "z-history"), rename("other", "other-answer"), first, first],
+    adjudications: [
+      { ...decision, adjudication_id: "z-decision" },
+      { ...decision, question_id: "other", adjudication_id: "other-decision" },
+      { ...decision, adjudication_id: "a-decision" },
+    ],
+  } });
+  expect(markdown.split("\n").filter(line => /^- (Accepted answer|Historical answer|Recorded decision|Unassigned|Shared)/u.test(line)))
+    .toEqual([
+      "- Historical answer z-history",
+      "- Accepted answer answer-1 (recorded, not a resolution)",
+      "- Accepted answer answer-1 (recorded, not a resolution)",
+      "- Recorded decision z-decision (resolved, reviewer): Recorded history.",
+      "- Recorded decision a-decision (resolved, reviewer): Recorded history.",
+      "- Accepted answer other-answer (recorded, not a resolution)",
+      "- Recorded decision other-decision (resolved, reviewer): Recorded history.",
+      "- Unassigned: in scope, no question planned.",
+    ]);
+});
+
 function finding(id: string, kind: ReviewFindingClaim["kind"] = "confirmed_defect"): ReviewFindingClaim {
   return {
     schema_version, finding_id: id, question_id: binding.question_id, revision_id: binding.revision_id,

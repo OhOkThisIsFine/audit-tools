@@ -1664,6 +1664,18 @@ function isCapabilityLimitationReflection(reflection: AgentReflection): boolean 
     (reflection.severity === "high" || reflection.severity === "critical");
 }
 
+/** Keep history in input order, including multiple records for one question. */
+function indexQuestionHistory<T>(rows: readonly T[], questionIdOf: (row: T) => string): Map<string, T[]> {
+  const index = new Map<string, T[]>();
+  for (const row of rows) {
+    const questionId = questionIdOf(row);
+    const history = index.get(questionId);
+    if (history) history.push(row);
+    else index.set(questionId, [row]);
+  }
+  return index;
+}
+
 function renderQuestionReport(report: RenderableAuditReport, review: QuestionReviewReport, options: RenderAuditReportOptions): string {
   const reflections = options.reflections ?? [];
   const lines = [
@@ -1731,11 +1743,14 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
       if (signal.source_refs?.length) lines.push(`  - Sources: ${signal.source_refs.map(ref => ref.start_line === undefined ? ref.path : `${ref.path}:${ref.start_line}`).join(", ")}`);
     }
   }
+  const answersByQuestion = indexQuestionHistory(review.accepted, ({ submission }) => submission.question_id);
+  const decisionsByQuestion = indexQuestionHistory(review.adjudications, decision => decision.question_id);
+  const assignedInventory = new Set(review.questions.flatMap(q => q.inventory_item_ids));
   lines.push("", "## Questions and review limits", "");
   for (const row of review.questions) {
     lines.push(`### ${row.question_id} (${row.lens}): ${row.state}`, "", row.expected_outcome);
     if (row.plan_reason) lines.push(`- Planning: ${row.plan_status}: ${row.plan_reason}`);
-    const answers = review.accepted.filter(record => record.submission.question_id === row.question_id);
+    const answers = answersByQuestion.get(row.question_id) ?? [];
     for (const part of row.parts) {
       lines.push(`- ${part.part_id}: **${part.state}**. ${part.expectation}`);
       for (const reason of part.reasons) lines.push(`  - ${reason}`);
@@ -1777,7 +1792,7 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
         lines.push(`  - ${observation.kind} (${observation.part_id}): ${observation.statement}${refs.length ? ` [evidence: ${refs.join(", ")}]` : ""}`);
       }
     }
-    for (const decision of review.adjudications.filter(decision => decision.question_id === row.question_id)) {
+    for (const decision of decisionsByQuestion.get(row.question_id) ?? []) {
       lines.push(`- Recorded decision ${decision.adjudication_id} (${decision.decision}, ${decision.reviewer}): ${decision.rationale}`);
     }
     lines.push("");
@@ -1785,7 +1800,7 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
   lines.push("## Scope and omissions", "");
   for (const item of review.inventory) {
     if (item.scope !== "in_scope") lines.push(`- ${item.title}: ${item.scope}. ${item.scope_reason ?? ""}`);
-    else if (!review.questions.some(q => q.inventory_item_ids.includes(item.inventory_item_id))) {
+    else if (!assignedInventory.has(item.inventory_item_id)) {
       lines.push(`- ${item.title}: in scope, no question planned.`);
     }
   }
