@@ -70,7 +70,10 @@ test("does not promote a supported clean part into clean coverage of an unanswer
     },
   });
   expect(normalizeExistingFindingsReport(report)).toEqual(report);
-  expect(renderAuditReportMarkdown(report)).toContain("scheduled: **unreviewed**");
+  const markdown = renderAuditReportMarkdown(report);
+  expect(markdown).toContain("scheduled: **unreviewed**");
+  expect(markdown).toContain("Evidence needed for scheduled: Collect evidence for the expectation: Scheduled resume restores state.");
+  expect(markdown).toContain("Accepted answer answer-1 (recorded, not a resolution)");
   expect(renderAuditReportMarkdown(report)).not.toContain("completed audit");
 });
 
@@ -226,7 +229,9 @@ test("unobserved runtime context gives no affirmative scope credit", () => {
     }],
   });
   expect(report.question_review.questions[0]?.parts[0]?.state).toBe("inconclusive");
-  expect(renderAuditReportMarkdown(report)).toContain("suite: not_run");
+  const markdown = renderAuditReportMarkdown(report);
+  expect(markdown).toContain("suite: not_run");
+  expect(markdown).toContain("Evidence needed for manual: suite/manual-case was not run. Capture the named observation");
 });
 
 test("question executors regenerate both outputs and keep deterministic ownership across narrative reload", () => {

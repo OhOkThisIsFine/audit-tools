@@ -79,24 +79,9 @@ export interface SystemicChallengeRegister {
    * distinct rounds; older recorded digests remain unchanged as provenance.
    */
   folded_submission_hashes?: string[];
-  /**
-   * True once the loop has ENDED — whatever ended it. The register's own
-   * satisfaction signal (`state.ts`, `obligationPolicy.ts`): a register that has
-   * not ended keeps the obligation unmet and the next round is dispatched.
-   *
-   * ⚠ It does NOT mean "converged on a dry signal", and it never did — an
-   * omitted register (shallow ceiling) has been `converged: true` since the loop
-   * landed. `stop_reason` states WHICH ending this was; a reader that needs to
-   * know whether the adversary actually ran dry must read that, not this.
-   */
+  /** A recorded stop on consecutive quiet rounds, not omission or exhaustion of the budget. */
   converged: boolean;
-  /**
-   * WHY the loop ended. `converged` says it ended; this says how, so a ceiling
-   * stop or a host-forced stop can never be read as an exhaustion the loop did
-   * not demonstrate (the no-ceiling entry: the loop's only exit was a dry signal
-   * the host may have had to fabricate). Optional — registers written before
-   * this existed carry only `converged`.
-   */
+  /** Why an executed loop ended. Absent on open/omitted or older registers. */
   stop_reason?: "converged" | "round_ceiling" | "host_forced";
   /**
    * What the banked improvements already cover, summarized — the variation bar's
@@ -130,4 +115,10 @@ export interface SystemicChallengeRegister {
   findings: Finding[];
   /** Gate/assembly notes (e.g. a round dropped an ungrounded finding) — surfaced. */
   validation_issues: string[];
+}
+
+/** Older registers used the convergence flag to record termination. */
+export function systemicChallengeEnded(register: SystemicChallengeRegister | undefined): boolean {
+  return register !== undefined &&
+    (register.status === "omitted" || register.stop_reason !== undefined || register.converged);
 }

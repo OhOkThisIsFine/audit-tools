@@ -138,8 +138,7 @@ function omittedRegister(ceiling: Ceiling, generated_at: string): SystemicChalle
     ceiling,
     status: "omitted",
     rounds: [],
-    converged: true,
-    stop_reason: "converged",
+    converged: false,
     convergence_rule: appliedConvergenceRule(),
     findings: [],
     validation_issues: [],
@@ -231,12 +230,11 @@ export function runSystemicChallengeExecutor(
   const priorFindings = prior?.findings ?? [];
   const priorRounds = prior?.rounds ?? [];
 
-  // A reload is not a round. Preserve the stop on the same bound premise,
-  // while leaving the previous migration behavior for tokenless registers.
+  // A reload is not a round. Preserve the stop on the same premise, including
+  // the one-time carry of older, tokenless registers.
   if (!submission) {
-    const stopReason = prior?.round_token === round_token && prior.converged
-      ? prior.stop_reason
-      : undefined;
+    const stopReason = prior?.stop_reason;
+    const legacyEnd = prior?.status !== "omitted" && prior?.converged === true && stopReason === undefined;
     const register: SystemicChallengeRegister = {
       generated_at,
       target: "systemic_challenge",
@@ -248,7 +246,7 @@ export function runSystemicChallengeExecutor(
       ...(prior?.folded_submission_hashes
         ? { folded_submission_hashes: prior.folded_submission_hashes }
         : {}),
-      converged: stopReason !== undefined,
+      converged: stopReason === "converged" || legacyEnd,
       ...(stopReason === undefined ? {} : { stop_reason: stopReason }),
       convergence_rule: appliedConvergenceRule(),
       findings: priorFindings,
@@ -257,10 +255,10 @@ export function runSystemicChallengeExecutor(
     return {
       updated: { ...bundle, systemic_challenge: register },
       artifacts_written: ["systemic_challenge.json"],
-      progress_summary: stopReason === undefined
+      progress_summary: stopReason === undefined && !legacyEnd
         ? `Systemic challenge loop open: ${priorFindings.length} improvement(s) so far, ` +
           `${priorRounds.length} round(s) run - awaiting the next adversary round.`
-        : `Systemic challenge stays ended (${stopReason}): ${priorFindings.length} improvement(s), ${priorRounds.length} round(s).`,
+        : `Systemic challenge stays ended (${stopReason ?? "legacy register"}): ${priorFindings.length} improvement(s), ${priorRounds.length} round(s).`,
     };
   }
 
@@ -306,8 +304,7 @@ export function runSystemicChallengeExecutor(
   const effectiveStop: SystemicChallengeStop | undefined = hostForced
     ? submission.stop
     : undefined;
-  const priorStopReason =
-    prior?.converged === true ? prior.stop_reason : undefined;
+  const priorStopReason = prior?.stop_reason;
   const stop_reason: SystemicChallengeRegister["stop_reason"] =
     priorStopReason ??
     (hostForced
@@ -317,7 +314,7 @@ export function runSystemicChallengeExecutor(
         : ceilingReached
           ? "round_ceiling"
           : undefined);
-  const converged = stop_reason !== undefined;
+  const converged = stop_reason === "converged";
   // Which round the reason came from — THIS one, or an earlier one the register
   // already recorded. Read off the branch that produced it, never re-derived
   // from the ending's shape.
@@ -343,7 +340,7 @@ export function runSystemicChallengeExecutor(
         : " — host-forced stop recorded in an earlier round; the loop stays ended."
       : stop_reason === "round_ceiling" && ceilingReached && !convergedOnQuiet
         ? ` — round ceiling reached (${SYSTEMIC_ROUND_CEILING}); the loop ends here, not on a demonstrated dry signal.`
-        : convergedOnQuiet
+        : stop_reason === "converged" && convergedOnQuiet
           ? ` — nothing new for ${QUIET_ROUNDS_TO_CONVERGE} consecutive rounds, loop converged.`
           : stop_reason === "round_ceiling"
             ? " — the loop stays ended on the round ceiling recorded in an earlier round."

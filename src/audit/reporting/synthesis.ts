@@ -1735,17 +1735,41 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
   for (const row of review.questions) {
     lines.push(`### ${row.question_id} (${row.lens}): ${row.state}`, "", row.expected_outcome);
     if (row.plan_reason) lines.push(`- Planning: ${row.plan_status}: ${row.plan_reason}`);
+    const answers = review.accepted.filter(record => record.submission.question_id === row.question_id);
     for (const part of row.parts) {
       lines.push(`- ${part.part_id}: **${part.state}**. ${part.expectation}`);
       for (const reason of part.reasons) lines.push(`  - ${reason}`);
+      if (row.plan_status !== "blocked" && row.plan_status !== "deferred" &&
+          (part.state === "inconclusive" || part.state === "unreviewed")) {
+        const needed = uniqueSorted(answers.flatMap(({ submission }) =>
+          !part.accepted_answer_ids.includes(submission.submission_id) ? [] :
+            submission.answer.observations.flatMap(observation =>
+              observation.part_id !== part.part_id || !part.observation_ids.includes(observation.observation_id)
+                ? [] : observation.evidence_refs.flatMap(ref => {
+                  const record = evidence.get(ref.evidence_id);
+                  const label = ref.observation_id ? `${ref.evidence_id}/${ref.observation_id}` : ref.evidence_id;
+                  const gap = !record ? "is missing"
+                    : record.status === "not_run" ? "was not run"
+                    : record.status === "unavailable" ? "is unavailable"
+                    : observation.kind === "runtime_observed" && record.execution?.executed !== true ? "has no observed execution"
+                    : ref.observation_id && !record.observations?.some(item => item.observation_id === ref.observation_id)
+                      ? "has no matching observation" : undefined;
+                  return gap ? [`${label} ${gap}. Capture the ${ref.observation_id ? "named observation" : "referenced evidence"} or leave this part open.`] : [];
+                }),
+            ),
+        ));
+        for (const gap of needed.length ? needed : [`Collect evidence for the expectation: ${part.expectation}`]) {
+          lines.push(`  - Evidence needed for ${part.part_id}: ${gap}`);
+        }
+      }
     }
     for (const conflict of row.conflicts) {
       lines.push(`- Unresolved disagreement on ${conflict.part_id}: ${conflict.answer_ids.join(", ")}.`);
     }
-    for (const answer of review.accepted.filter(record => record.submission.question_id === row.question_id)) {
+    for (const answer of answers) {
       const submission = answer.submission;
       const current = row.accepted_answer_ids.includes(submission.submission_id);
-      lines.push(`- ${current ? "Accepted" : "Historical"} answer ${submission.submission_id}`);
+      lines.push(`- ${current ? "Accepted" : "Historical"} answer ${submission.submission_id}${current ? " (recorded, not a resolution)" : ""}`);
       for (const limit of submission.limitations) lines.push(`  - Limitation: ${limit}`);
       for (const observation of submission.answer.observations) {
         const refs = observation.evidence_refs.map(ref => ref.observation_id

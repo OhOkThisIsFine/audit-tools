@@ -28,6 +28,8 @@ import {
 } from "audit-tools/shared";
 import { runSystemicChallengeExecutor } from "../../src/audit/orchestrator/systemicChallengeExecutor.js";
 import { mergeFindings } from "../../src/audit/reporting/mergeFindings.js";
+import { systemicChallengeOmits } from "../../src/audit/orchestrator/obligationPolicy.js";
+import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { PRIORITY } from "../../src/audit/orchestrator/nextStep.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { ExecutorRunResult } from "../../src/audit/orchestrator/executorResult.js";
@@ -485,12 +487,12 @@ function checkpoint(rung?: Ceiling["rung"]): IntentCheckpoint {
 }
 
 describe("runSystemicChallengeExecutor", () => {
-  test("a shallow ceiling writes an omitted, converged register with no host turn", () => {
+  test("a shallow ceiling writes an omitted, non-converged register with no host turn", () => {
     const run = runSystemicChallengeExecutor({ intent_checkpoint: checkpoint("shallow") });
     const reg = run.updated.systemic_challenge;
     if (!reg) throw new Error("systemic challenge register was not written");
     expect(reg.status).toBe("omitted");
-    expect(reg.converged).toBe(true);
+    expect(reg.converged).toBe(false);
     expect(reg.findings).toHaveLength(0);
     expect(run.artifacts_written).toEqual(["systemic_challenge.json"]);
   });
@@ -654,8 +656,10 @@ describe("runSystemicChallengeExecutor", () => {
     // stop may report it as one. That fabrication is exactly what the ceiling
     // exists to remove.
     expect(reg.rounds.at(-1)?.dry).toBe(false);
-    expect(reg.converged).toBe(true);
+    expect(reg.converged).toBe(false);
     expect(reg.stop_reason).toBe("round_ceiling");
+    expect(systemicChallengeOmits(bundle)).toBe(true);
+    expect(deriveAuditState(bundle).obligations.find(row => row.id === "systemic_challenge_current")?.state).toBe("satisfied");
     expect(reg.convergence_rule).toEqual({
       quiet_rounds_required: 2,
       round_ceiling: SYSTEMIC_ROUND_CEILING,
@@ -745,7 +749,7 @@ describe("runSystemicChallengeExecutor", () => {
     ).updated.systemic_challenge;
     if (!reg) throw new Error("round was not written");
 
-    expect(reg.converged).toBe(true);
+    expect(reg.converged).toBe(false);
     expect(reg.stop_reason).toBe("host_forced");
     expect(reg.rounds.at(-1)?.dry).toBe(false);
     // The work delivered WITH the stop is banked, never discarded.
@@ -766,7 +770,7 @@ describe("runSystemicChallengeExecutor", () => {
       { findings: [] },
     ).updated.systemic_challenge;
     if (!after) throw new Error("round was not written");
-    expect(after.converged).toBe(true);
+    expect(after.converged).toBe(false);
     expect(after.stop_reason).toBe("host_forced");
     expect(after.stop_reason).not.toBe("converged");
   });
@@ -893,7 +897,7 @@ describe("runSystemicChallengeExecutor", () => {
     }).updated.systemic_challenge!;
     expect(reloaded.round_token).toBe(prior.round_token);
     expect(reloaded.stop_reason).toBe("round_ceiling");
-    expect(reloaded.converged).toBe(true);
+    expect(reloaded.converged).toBe(false);
     expect(reloaded.rounds).toEqual(prior.rounds);
     expect(reloaded.findings).toEqual(prior.findings);
     expect(reloaded.folded_submission_hashes).toEqual(prior.folded_submission_hashes);
@@ -1020,7 +1024,7 @@ describe("runSystemicChallengeExecutor", () => {
       { findings: [] },
     ).updated.systemic_challenge;
     if (!after) throw new Error("the loop was never opened");
-    expect(after.converged).toBe(true);
+    expect(after.converged).toBe(false);
     expect(after.stop_reason).toBe("round_ceiling");
   });
 

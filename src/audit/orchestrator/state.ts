@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/audit-frontier.test.ts, tests/audit/priority-chain-invariants.test.ts
+import { systemicChallengeEnded } from "../types/systemicChallenge.js";
 import { resolveDesignReviewBinding } from "../../shared/types/intentCheckpoint.js";
 import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -431,7 +432,7 @@ export function deriveAuditState(
     has(bundle.systemic_challenge),
   );
   const systemicOpen =
-    systemicBase === "satisfied" && bundle.systemic_challenge?.converged !== true;
+    systemicBase === "satisfied" && !systemicChallengeEnded(bundle.systemic_challenge);
   const systemicCeiling = bundle.systemic_challenge?.convergence_rule?.round_ceiling;
   obligations.push(
     obligation(

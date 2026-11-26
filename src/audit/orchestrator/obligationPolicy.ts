@@ -30,6 +30,7 @@
  * every id, its derive closure, and its priority position.
  */
 
+import { systemicChallengeEnded } from "../types/systemicChallenge.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
   ceilingRequestsCharters,
@@ -130,16 +131,14 @@ export function charterClarificationOmits(bundle: ArtifactBundle): boolean {
 }
 
 /**
- * Shallow ceiling / loop not yet opened / converged register → the systemic
+ * Shallow ceiling / loop not yet opened / ended register → the systemic
  * challenge executor runs autonomously this turn.
  */
 export function systemicChallengeOmits(bundle: ArtifactBundle): boolean {
   if (!ceilingRequestsCharters(resolveCharterCeiling(bundle.intent_checkpoint))) {
     return true;
   }
-  if (!bundle.systemic_challenge) return true;
-  if (bundle.systemic_challenge.converged) return true;
-  return false;
+  return !bundle.systemic_challenge || systemicChallengeEnded(bundle.systemic_challenge);
 }
 
 /** A deterministic arm (baseline / gate-version / structured delta) owns it. */
