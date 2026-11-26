@@ -19,6 +19,7 @@ type BuiltInLens = keyof typeof REVIEW_LENS_PLAYBOOKS;
 type Lens = ReviewQuestion["lens"];
 type InventoryKind = ReviewInventoryItem["kind"];
 type Part = ReviewQuestion["requested_parts"][number];
+type QuestionContext = { start: ReviewSourceRef; behavior?: string };
 type SignalDisposition = {
   signal_id: string;
   outcome: "promoted" | "grouped" | "not_promoted";
@@ -52,11 +53,12 @@ interface Subject {
   /** Membership is independently recomputable from the structural artifacts. */
   membership?: readonly string[];
   evidence?: readonly (readonly [string, string])[];
+  context?: QuestionContext;
 }
 
 type AddSubject = (lens: Lens, key: string, kind: InventoryKind, title: string,
   refs: ReviewSourceRef[], contract: ReviewSourceRef[], expectation: string,
-  linked?: Pick<Subject, "membership" | "evidence"> & { parts?: Part[] }) => string;
+  linked?: Pick<Subject, "membership" | "evidence" | "context"> & { parts?: Part[] }) => string;
 type RecordSignalDisposition = (signalId: string, outcome: SignalDisposition["outcome"],
   reason: string, refs: ReviewSourceRef[], questionId?: string) => void;
 
@@ -75,6 +77,9 @@ interface Operation {
 const ordered = (items: Iterable<string>) => [...new Set(items)].sort(compareCodeUnits);
 const digest = (value: unknown) => hashContent(stableStringify(value));
 const source = (path: string): ReviewSourceRef => ({ path });
+const locator = (ref: ReviewSourceRef) => ref.start_line !== undefined
+  ? `${ref.path}:${ref.start_line}${ref.end_line === undefined ? "" : `-${ref.end_line}`}`
+  : ref.symbol ? `${ref.path}#${ref.symbol}` : ref.path;
 const sourceRefs = (paths: Iterable<string>) => ordered(paths).map(source);
 const ids = (namespace: string, value: string) => `${namespace}:${hashContent(value, { length: 24 })}`;
 const isBuiltIn = (value: string): value is BuiltInLens => Object.hasOwn(REVIEW_LENS_PLAYBOOKS, value);
@@ -223,7 +228,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     if (!inventory.some(({ inventory_item_id }) => inventory_item_id === item.inventory_item_id)) inventory.push(item);
     subjects.push({ lens, inventory: item, expectation,
       parts: linked?.parts ?? [{ part_id: "supported-outcome", expectation }],
-      membership: linked?.membership, evidence: linked?.evidence });
+      membership: linked?.membership, evidence: linked?.evidence, context: linked?.context });
     return ids(lens, item.inventory_item_id);
   };
   const disposition: RecordSignalDisposition = (signal_id, outcome, reason, refs, question_id) => {
@@ -235,7 +240,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     const ref = resolveRef(surface.entrypoint);
     const reason = ref ? sourceStatus(ref.path) : "The discovered surface has no unique source binding in the frozen snapshot.";
     const related = ref ? (byEntry.get(ref.path) ?? []) : [];
-    const title = related[0]?.name ?? surface.id;
+    const title = surface.registered ? surface.id : related[0]?.name ?? surface.id;
     if (reason !== undefined || !ref) {
       const declared = !!ref && (files.has(ref.path) && dispositions.has(ref.path) || !!intent?.excluded_scope?.some((row) => pathMatchesPrefix(ref.path, row.path)));
       const state = declared && ref && files.get(ref.path)?.hash ? "excluded" : "deferred";
@@ -264,7 +269,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       : [];
     const relatedPaths = [...related.flatMap((flow) => flow.paths), ...otherHandlers, ...registrationPaths, ...surface.registrationSources];
     const refs = sourceRefs([ref.path, ...relatedPaths.filter((path) => sourceStatus(path) === undefined)]);
-    if (ref.symbol) refs[refs.findIndex(({ path }) => path === ref.path)] = ref;
+    refs[refs.findIndex(({ path }) => path === ref.path)] = ref;
     const goals = statements.filter((statement) => statement.files?.includes(ref.path) ||
       statement.provenance.some((provenance) => resolveRef(provenance.ref)?.path === ref.path));
     const contract = sourceRefs(goals.flatMap((goal) => goal.provenance.flatMap((provenance) => {
@@ -281,24 +286,26 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     const op = { id: surface.id, title, entry: ref.path, refs, contract, expectation, exposure: surface.exposure,
       background: surface.kind === "background", declaredBoundary: surface.exposure === "network" };
     operationRows.push(op);
-    add("behavior", op.id, "operation", op.title, refs, contract, expectation, surface.registered
-      ? { membership: [surface.entrypoint, ...surface.alternatives] } : undefined);
+    const context = { start: ref, behavior: expectation };
+    add("behavior", op.id, "operation", op.title, refs, contract, expectation, {
+      context, ...(surface.registered ? { membership: [surface.entrypoint, ...surface.alternatives] } : {}),
+    });
     if (op.declaredBoundary || externalPaths.has(ref.path) || related.some((flow) => flow.concerns.includes("security"))) {
       add("security", op.id, "trust_boundary", `Authority for ${title}`, refs, contract,
-        "Identify the external or differently authorized caller, the enforced authority decision, and the protected effect.");
+        "Identify the external or differently authorized caller, the enforced authority decision, and the protected effect.", { context });
     }
     if (ownership(refs).length > 1) add("architecture", op.id, "operation", title, refs, contract,
       "Explain which components own the contract and decisions. Compare the present delegation with a concrete alternative and its trade-offs.",
-      { membership: ownership(refs) });
+      { membership: ownership(refs), context });
     if (op.background || related.some((flow) => flow.concerns.includes("performance"))) {
       add("performance", op.id, "workload", `Representative workload: ${title}`, refs, contract,
-        "Quantify or bound ordinary and relevant unchanged, cold, or retry workload time, memory, I/O, or spend where runnable; report hypotheses as hypotheses.");
+        "Quantify or bound ordinary and relevant unchanged, cold, or retry workload time, memory, I/O, or spend where runnable; report hypotheses as hypotheses.", { context });
     }
     if (surface.kind === "interface" || op.background) add("operability", op.id, "operator_transition", `Interpreting ${title}`, refs, contract,
-      "Determine how a caller or operator distinguishes outcomes and chooses the next action from available output and state.");
+      "Determine how a caller or operator distinguishes outcomes and chooses the next action from available output and state.", { context });
     add("tests", op.id, "operation", title, refs, contract, refs.some(({ path }) => isTestPath(path))
       ? "Name the support contract each reachable fixture asserts, what regression it would catch, and material gaps or execution cost."
-      : "Trace this operation's supported outcome to any available tests. Identify a material regression that could escape detection if the evidence supports a gap.");
+      : "Trace this operation's supported outcome to any available tests. Identify a material regression that could escape detection if the evidence supports a gap.", { context });
   }
 
   // Existing source discovery supplies the shared state surface; do not infer
@@ -311,7 +318,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     const contract = sourceRefs(members.flatMap((op) => op.contract.map(({ path }) => path)));
     const expectation = "Establish the shared state-preservation rule and trace each registered operation that can affect it without assuming an unwritten policy.";
     add("behavior", `shared-state:${entry}`, "invariant", `Shared invariant at ${entry}`, refs, contract, expectation,
-      { membership: members.map(({ id }) => id), parts: members.map((op) => ({
+      { context: { start: source(entry) }, membership: members.map(({ id }) => id), parts: members.map((op) => ({
         part_id: op.id, expectation: `Establish how ${op.title} preserves the shared rule.`,
       })) });
   }
@@ -368,7 +375,15 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       fingerprintDiscoveredSet(item.inventory_item_id, QUESTION_DISCOVERY_RULE, subject.membership),
     );
     const evidenceDependencies: ReviewQuestion["evidence_dependencies"] = (subject.evidence ?? []).map(([key, fingerprint]) => ({ kind: "evidence", key, fingerprint }));
-    const expectedOutcome = isBuiltIn(lens) ? `${subject.expectation} Optional review guidance: ${REVIEW_LENS_PLAYBOOKS[lens]}` : subject.expectation;
+    const start = subject.context?.start ?? item.source_refs[0] ?? item.contract_refs[0];
+    const behavior = subject.context?.behavior;
+    const expectedOutcome = [
+      `Review ${item.title}.`,
+      ...(start ? [`Start at ${locator(start)}.`] : []),
+      ...(behavior && behavior !== subject.expectation ? [`Supported behavior to verify: ${behavior}`] : []),
+      subject.expectation,
+      ...(isBuiltIn(lens) ? [`Optional review guidance: ${REVIEW_LENS_PLAYBOOKS[lens]}`] : []),
+    ].join(" ");
     const revision = digest({ lens, expectedOutcome, parts: subject.parts, sourceDependencies, evidenceDependencies });
     questions.set(questionId, { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, question_id: questionId, revision_id: revision, lens,
       inventory_item_ids: [item.inventory_item_id], expected_outcome: expectedOutcome, snapshot_id: options.snapshotId,
@@ -459,13 +474,34 @@ function routePriorReviewSignals(
   // Prefer actual relationship endpoints, exact in-file sites, or a unique
   // workflow. Full scope can also verify a file-wide complexity cue without
   // mistaking the metric for a particular mechanism or a verdict.
-  const groups = new Map<string, { operation?: Operation; fileWide?: boolean; items: Array<{ lead: Finding; refs: ReviewSourceRef[] }> }>();
+  const groups = new Map<string, { operation?: Operation; fileWide?: boolean; routine?: ReviewSourceRef; items: Array<{ lead: Finding; refs: ReviewSourceRef[] }> }>();
   const namedRelationship = new Set(["architectural_seam", "dependency_cycle", "hidden_coupling"]);
   const metricFamily = new Set(["complexity_hotspot", "code_duplication"]);
   const pathMetrics = new Map<string, number>();
-  const structural = bundle.design_assessment?.findings ?? [];
-  for (const lead of structural) {
-    const paths = ordered(anchors(lead).map(ref => ref.path));
+  const structural = (bundle.design_assessment?.findings ?? []).map(lead => {
+    const refs = anchors(lead);
+    const paths = ordered(refs.map(ref => ref.path));
+    const allPathsBound = new Set(lead.affected_files.map(item => typeof item === "string" ? item : item.path)).size === paths.length;
+    return { lead, refs, paths, allPathsBound };
+  });
+  const routineAnchors = new Map<string, ReviewSourceRef[]>();
+  for (const { lead, refs, allPathsBound } of structural) {
+    const ref = refs[0];
+    if (lead.lens !== "architecture" || lead.category !== "complexity_hotspot" || !allPathsBound ||
+        refs.length !== 1 || !ref || (!ref.symbol && (ref.start_line === undefined || ref.end_line === undefined))) continue;
+    const sameFile = routineAnchors.get(ref.path) ?? [];
+    if (!sameFile.some(candidate => stableStringify(candidate) === stableStringify(ref))) sameFile.push(ref);
+    routineAnchors.set(ref.path, sameFile);
+  }
+  const sameRoutine = (anchor: ReviewSourceRef, site: ReviewSourceRef) => {
+    if (anchor.path !== site.path || (anchor.symbol && site.symbol && anchor.symbol !== site.symbol)) return false;
+    if (anchor.start_line !== undefined && anchor.end_line !== undefined &&
+        site.start_line !== undefined && site.end_line !== undefined) {
+      return anchor.start_line <= site.start_line && site.end_line <= anchor.end_line;
+    }
+    return anchor.symbol !== undefined && anchor.symbol === site.symbol;
+  };
+  for (const { lead, paths } of structural) {
     if (paths.length === 1) {
       const key = stableStringify([lead.category, paths[0]]);
       pathMetrics.set(key, (pathMetrics.get(key) ?? 0) + 1);
@@ -489,56 +525,67 @@ function routePriorReviewSignals(
     const candidates = direct.length > 0 ? direct : operations;
     return candidates.length === 1 ? candidates[0] : undefined;
   };
-  for (const lead of structural) {
-    const key = `design-lead:${lead.id}`, refs = anchors(lead);
-    const paths = ordered(refs.map(ref => ref.path));
-    const allPathsBound = new Set(lead.affected_files.map(item => typeof item === "string" ? item : item.path)).size === paths.length;
+  for (const { lead, refs, paths, allPathsBound } of structural) {
+    const key = `design-lead:${lead.id}`;
     const relationship = namedRelationship.has(lead.category) && paths.length > 1 && allPathsBound;
     const exactSites = refs.length > 0 && refs.every(ref => ref.start_line !== undefined || ref.symbol !== undefined);
     const oneMetricPerFile = paths.length === 1 && metricFamily.has(lead.category) &&
       pathMetrics.get(stableStringify([lead.category, paths[0]])) === 1;
-    const operation = refs.length && allPathsBound && !relationship && (!exactSites || oneMetricPerFile)
+    const workflow = refs.length && allPathsBound && !relationship && (!exactSites || oneMetricPerFile)
       ? workflowFor(paths) : undefined;
     const fileWide = fullScope && lead.category === "complexity_hotspot" && allPathsBound &&
-      paths.length === 1 && !isTestPath(paths[0]!) && !exactSites && !operation;
-    if (lead.lens !== "architecture" || (!relationship && !exactSites && !operation && !fileWide)) {
+      paths.length === 1 && !isTestPath(paths[0]!) && !exactSites && !workflow;
+    if (lead.lens !== "architecture" || (!relationship && !exactSites && !workflow && !fileWide)) {
       disposition(key, "not_promoted", !refs.length ? "No resolved in-scope source anchor."
         : lead.lens !== "architecture" ? "Signal is not an architecture verification question."
           : lead.category === "orphan_units" ? "No bound unit-wide locator: a representative file does not establish reachability of the unit."
           : "Needs a locator: no concrete site, fully bound relationship, or unique discovered workflow. Record a named caller or source span to verify it.", refs);
       continue;
     }
-    // Separate unrelated families in a multipurpose entrypoint; a direct
-    // call establishes ownership, not an equivalence across subcomponents.
-    const component = ordered(paths.map(path => path.slice(0, path.lastIndexOf("/"))));
-    const mechanism = stableStringify(operation ? [lead.category, operation.id, component]
-      : fileWide ? [lead.category, "file-wide", paths] : exactSites ? [lead.category, refs] : [lead.category, paths]);
-    const group = groups.get(mechanism) ?? { operation, fileWide, items: [] };
+    // Group only identical concrete sites/relationships, or two metric
+    // families whose entire footprint fits inside one unambiguous routine.
+    // An operation gives context, not permission to group its unrelated files.
+    const routines = paths.length === 1 && allPathsBound && metricFamily.has(lead.category) && exactSites
+      ? (routineAnchors.get(paths[0]!) ?? []).filter(anchor =>
+        lead.category === "complexity_hotspot" ? refs.length === 1 && stableStringify(anchor) === stableStringify(refs[0])
+          : refs.length > 1 && refs.every(ref => sameRoutine(anchor, ref)))
+      : [];
+    const routine = routines.length === 1 ? routines[0] : undefined;
+    const operation = routine ? workflowFor(paths) : workflow;
+    const mechanism = stableStringify(routine ? ["complexity_hotspot", [routine]]
+      : exactSites ? [lead.category, refs] : relationship ? [lead.category, paths]
+        : fileWide ? [lead.category, "file-wide", paths, lead.summary] : [lead.category, operation?.id, paths, lead.summary]);
+    const group = groups.get(mechanism) ?? { operation, fileWide, routine, items: [] };
     group.items.push({ lead, refs });
     groups.set(mechanism, group);
   }
-  for (const [mechanism, { operation, fileWide, items: group }] of groups) {
+  for (const [mechanism, { operation, fileWide, routine, items: group }] of groups) {
     group.sort((a, b) => compareCodeUnits(a.lead.id, b.lead.id));
     const first = group[0]!.lead;
     const entry = operation?.refs.find(ref => ref.path === operation.entry);
     const refs = distinctRefs([...(entry ? [entry] : []), ...group.flatMap(item => item.refs)]);
     const evidence = group.map(({ lead }) => [`design-lead:${lead.id}`, digest(lead)] as const);
     const topic = first.category.replaceAll("_", " ");
-    const decision = "Decide whether the actual caller makes this an avoidable cost, demonstrates a necessary boundary, or leaves specific evidence missing. A justified or disproven signal is an answered question.";
-    const expectation = operation ? `Review ${topic} within ${operation.title}, entered at ${operation.entry}. Answer each source cue separately; do not count a suggested mechanism as a verdict. ${decision}`
-      : fileWide ? `Use the named file to locate the relevant routine and its caller. A file-wide complexity metric is a cue, not a finding. Answer each source cue separately. ${decision}`
-      : `Trace the actual callers and contract at this ${topic}. ${decision}`;
+    const joint = routine && group.some(({ lead }) => lead.category !== first.category);
+    const decision = joint
+      ? "Decide whether one simplification preserves the caller contract while addressing both the complexity and duplicated responsibility, or whether the cues justify separate changes, no change, or further evidence."
+      : "Decide whether the actual caller makes this an avoidable cost, demonstrates a necessary boundary, or leaves specific evidence missing. A justified or disproven signal is an answered question.";
+    const expectation = joint
+      ? `Trace the routine at ${locator(routine)} and its live caller. Establish the behavior and contract any refactor must preserve.`
+      : fileWide ? "Locate the relevant routine and its caller. A file-wide complexity metric is a cue, not a finding."
+      : `Trace the actual caller or relationship for this ${topic} and establish the supported behavior any change must preserve.`;
     const parts = group.map(({ lead, refs }) => ({ part_id: `design-lead:${lead.id}`,
-      expectation: `${lead.summary} Inspect ${refs.map(ref => ref.start_line !== undefined
-        ? `${ref.path}:${ref.start_line}${ref.end_line === undefined ? "" : `-${ref.end_line}`}`
-        : ref.symbol ? `${ref.path}#${ref.symbol}` : ref.path).join(", ")}. ${decision}` }));
+      expectation: `${lead.summary} Inspect ${refs.map(locator).join(", ")}.` }));
+    const title = joint ? `Simplifying the routine at ${locator(routine)}` : first.title;
     const target = add("architecture", `design-mechanism:${mechanism}`, "invariant",
-      operation ? `${operation.title}: ${topic}` : first.title, refs, operation?.contract ?? [], expectation, { evidence, parts });
+      operation ? `${operation.title}: ${title}` : title, refs, operation?.contract ?? [],
+      `${expectation} Answer each source cue separately; do not treat a cue as a verdict. ${decision}`,
+      { evidence, parts, context: { start: routine ?? entry ?? group[0]!.refs[0]!, behavior: operation?.expectation } });
     for (const [index, { lead, refs }] of group.entries()) {
       disposition(`design-lead:${lead.id}`, index ? "grouped" : "promoted",
-        operation ? `Same signal family in the discovered ${operation.title} workflow; independent requested part.`
-          : fileWide ? "Fully bound file-wide complexity cue in full scope; verify the actual routine and caller as a distinct requested part."
-          : index ? "Same source relationship or exact site and mechanism." : "Concrete structural mechanism for review.", refs, target);
+        joint ? "Same concrete routine and simplification decision; independent requested part."
+          : fileWide ? "Fully bound file-wide complexity cue in full scope; identify its actual routine and caller."
+          : index ? "Same source relationship or exact site and mechanism; independent requested part." : "Concrete structural mechanism for review.", refs, target);
     }
   }
 }

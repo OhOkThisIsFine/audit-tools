@@ -57,7 +57,15 @@ describe("question-led audit planning", () => {
         claim("seam-b", "architectural_seam", [...seam].reverse()),
         claim("other-seam", "architectural_seam", [{ path: "src/scheduled.ts" }, seam[1]!]),
         claim("site-a", "complexity_hotspot", site),
-        claim("site-b", "complexity_hotspot", [{ ...site[0]!, line_start: 4 }]),
+        claim("site-b", "complexity_hotspot", [{ ...site[0]!, line_start: 12, line_end: 20 }]),
+        claim("same-routine-dup", "code_duplication", [
+          { path: site[0]!.path, line_start: 13, line_end: 14 },
+          { path: site[0]!.path, line_start: 17, line_end: 18 },
+        ]),
+        claim("cross-routine-dup", "code_duplication", [
+          { path: site[0]!.path, line_start: 4, line_end: 5 },
+          { path: site[0]!.path, line_start: 17, line_end: 18 },
+        ]),
         claim("file-count", "complexity_hotspot", [{ path: site[0]!.path }]),
         claim("workflow-fixture-count", "complexity_hotspot", [{ path: related.path }]),
         claim("transitive-only", "complexity_hotspot", [{ path: transitive.path }]),
@@ -90,7 +98,7 @@ describe("question-led audit planning", () => {
     const plan = buildReviewQuestionPlan(bundle, { snapshotId: "snapshot-a" });
     expect(ReviewPlanSchema.safeParse(plan).success).toBe(true);
     const bySignal = new Map(plan.signal_dispositions!.map(row => [row.signal_id, row]));
-    expect(bySignal.size).toBe(18);
+    expect(bySignal.size).toBe(20);
     function target(key: string) {
       return plan.questions.find(q => q.question_id === bySignal.get(key)?.question_id)!;
     }
@@ -106,12 +114,15 @@ describe("question-led audit planning", () => {
     expect(target("design-lead:other-seam")).not.toBe(group);
     expect(group.evidence_dependencies.map(d => d.key)).toEqual(["design-lead:seam-a", "design-lead:seam-b"]);
     expect(target("design-lead:site-a")).not.toBe(target("design-lead:site-b"));
-    const groupedWorkflow = target("design-lead:file-count");
-    expect(target("design-lead:workflow-fixture-count")).toBe(groupedWorkflow);
-    expect(groupedWorkflow.requested_parts).toEqual([
-      expect.objectContaining({ part_id: "design-lead:file-count", expectation: expect.stringContaining("src/manual.ts") }),
-      expect.objectContaining({ part_id: "design-lead:workflow-fixture-count", expectation: expect.stringContaining(related.path) }),
-    ]);
+    expect(target("design-lead:same-routine-dup")).toBe(target("design-lead:site-b"));
+    expect(target("design-lead:cross-routine-dup")).not.toBe(target("design-lead:site-b"));
+    expect(target("design-lead:file-count")).not.toBe(target("design-lead:workflow-fixture-count"));
+    expect(target("design-lead:site-b").requested_parts.map(part => part.part_id))
+      .toEqual(["design-lead:same-routine-dup", "design-lead:site-b"]);
+    expect(target("design-lead:site-b").expected_outcome).toContain("src/manual.ts:12-20");
+    const behavior = plan.questions.find(q => q.lens === "behavior" &&
+      q.source_dependencies.some(dep => dep.key === "src/manual.ts") && q.expected_outcome.includes("Manual resume"));
+    expect(behavior?.expected_outcome).toContain("Start at src/manual.ts");
     const accepted = ["design-contract:DR-001", "design-conceptual:DR-001", "design-systemic:DR-001"].map(target);
     expect(new Set(accepted.map(q => q.question_id)).size).toBe(3);
     for (const q of accepted) expect(plan.inventory.find(i => i.inventory_item_id === q.inventory_item_ids[0])?.source_refs)
@@ -141,7 +152,7 @@ describe("question-led audit planning", () => {
     bundle.file_disposition!.files.push({ path: fallback, status: "included" });
     bundle.design_assessment = {
       generated_at: "x", contract_reviewed: false, conceptual_reviewed: false,
-      findings: [claim("config-a", [config]), claim("config-b", [config]), claim("other-file", [fallback]),
+      findings: [claim("config-a", [config]), { ...claim("config-a", [config]), id: "config-b" }, claim("other-file", [fallback]),
         claim("missing", ["src/not-in-snapshot.ts"]), claim("partially-bound", [config, "src/not-in-snapshot.ts"]),
         claim("test", ["test/resume.test.ts"]), claim("docs", ["docs/resume.md"]),
         claim("representative", [config], "orphan_units"), claim("unbound-seam", [config, "src"], "architectural_seam")],
