@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { runBounded } from "../helpers/spawn.mjs";
@@ -388,5 +388,91 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     expect(typeof source?.path).toBe("string");
     const intakeReport = QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(source.path, "utf8")));
     expect(intakeReport.question_review.accepted.map(({ submission }) => submission.submission_id)).toContain(firstAnswer.submission_id);
+  });
+});
+
+test("interrupted workload and step publication resume the same frozen snapshot", async () => {
+  await withTempRepo(async (root) => {
+    const initial = await advancePastDesignReview(root);
+    expect(initial.step_kind).toBe("dispatch_review");
+    const readJson = async (path: string) => JSON.parse(await readFile(path, "utf8"));
+    const artifacts = initial.artifacts_dir;
+    const snapshot = join(artifacts, "run-snapshot.json");
+    const frozenBytes = await readFile(snapshot, "utf8");
+    const workload = await readJson(initial.artifact_paths.host_workload) as {
+      source_root: string; source_files: unknown[]; work_items: WorkItem[];
+    };
+    const [answered, pending] = workload.work_items;
+    expect(answered).toBeDefined();
+    expect(pending).toBeDefined();
+    const routing = await readJson(initial.artifact_paths.review_routing);
+    const oldSha: string = routing.workload_sha256;
+    const currentPointer = join(artifacts, "runs", initial.run_id, "question-workload-current.json");
+    const prepareOld = () => runWrapper(
+      [...routing.prepare_review_argv_prefix, "--work-item", pending!.binding.assignment.assignment_id], { cwd: root });
+    const oldPacket = JSON.parse((await prepareOld()).stdout);
+    const { assignment, question } = answered!.binding;
+    const answer: ReviewSubmission = {
+      schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
+      submission_id: "fixture-interrupted-pointer",
+      assignment_id: assignment.assignment_id,
+      question_id: question.question_id,
+      revision_id: question.revision_id,
+      snapshot_id: question.snapshot_id,
+      inspected_sources: assignment.suggested_sources.slice(0, 1),
+      evidence_ids: [],
+      limitations: ["Synthetic interruption fixture."],
+      answer: { outcome: "inconclusive", findings: [], observations: [], parts: question.requested_parts.map(({ part_id }) => ({
+        part_id, outcome: "inconclusive", observation_ids: [], reason: "No observation in this fixture.",
+      })) },
+    };
+    const answerPath = resolve(root, answered!.result_path);
+    await mkdir(dirname(answerPath), { recursive: true });
+    await writeFile(answerPath, JSON.stringify(answer));
+    const preload = join(artifacts, "fault-before-publish.mjs");
+    await writeFile(preload, [
+      'import fs from "node:fs/promises";',
+      'import { syncBuiltinESMExports } from "node:module";',
+      'import { basename, relative, sep } from "node:path";',
+      'const rename = fs.rename;',
+      'fs.rename = async (from, to) => {',
+      '  const path = relative(process.env.DOT_FAULT_ARTIFACTS, String(to));',
+      '  const target = basename(path);',
+      '  if (!path.startsWith("..") && target === process.env.DOT_FAULT_TARGET &&',
+      '      (target !== "current-step.json" || path.split(sep)[0] === "steps")) {',
+      '    throw Object.assign(new Error("synthetic publication interruption: " + target), { code: "EIO" });',
+      '  }',
+      '  return rename(from, to);',
+      '};',
+      'syncBuiltinESMExports();',
+    ].join("\n"));
+    const interrupt = (target: string) => runWrapper(["next-step"], { cwd: root, env: {
+      NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+      DOT_FAULT_ARTIFACTS: artifacts,
+      DOT_FAULT_TARGET: target,
+    } });
+    await expect(interrupt("question-workload-current.json")).rejects.toThrow(/synthetic publication interruption: question-workload-current.json/);
+    expect(await readJson(currentPointer)).toEqual({ sha256: oldSha });
+    expect(JSON.parse((await prepareOld()).stdout)).toEqual(oldPacket);
+
+    await expect(interrupt("current-step.json")).rejects.toThrow(/synthetic publication interruption: current-step.json/);
+    const advanced = await readJson(currentPointer);
+    expect(advanced.sha256).not.toBe(oldSha);
+    await expect(prepareOld()).rejects.toThrow(/fingerprint is not current/);
+
+    const resumed = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
+    expect(resumed.step_kind).toBe("dispatch_review");
+    expect(resumed.run_id).toBe(initial.run_id);
+    const resumedRouting = await readJson(resumed.artifact_paths.review_routing);
+    expect(resumedRouting.workload_sha256).toBe(advanced.sha256);
+    expect(resumedRouting.assignments.map(({ assignment_id }: { assignment_id: string }) => assignment_id))
+      .toEqual(routing.assignments.slice(1).map(({ assignment_id }: { assignment_id: string }) => assignment_id));
+    const resumedWorkload = await readJson(resumed.artifact_paths.host_workload);
+    expect(resumedWorkload.source_root).toBe(workload.source_root);
+    expect(resumedWorkload.source_files).toEqual(workload.source_files);
+    expect(await readFile(snapshot, "utf8")).toBe(frozenBytes);
+    const currentPacket = JSON.parse((await runWrapper(
+      [...resumedRouting.prepare_review_argv_prefix, "--work-item", pending!.binding.assignment.assignment_id], { cwd: root })).stdout);
+    expect(await readFile(currentPacket.prompt_path, "utf8")).toBe(await readFile(oldPacket.prompt_path, "utf8"));
   });
 });
