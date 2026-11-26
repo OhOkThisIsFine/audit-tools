@@ -482,6 +482,22 @@
         "src/audit/cli/semanticReviewStep.ts": "28122f453d1c22e0a162b7e3e0035712c0444b50"
       }
     },
+    "6460287616c57f3a": {
+      "reviewed_by": "dot-root",
+      "attester_class": "agent",
+      "checked": "Parent independently reviewed the exact staged prompt diff: withheld implementation orientation until after outside comparison, retained bound graph provenance, preserved other lanes, general categories and non-defect option judgment. Full npm test on the exact staged source; new CLI receipt check proves shared implementation evidence is available without seeding the outside-in lane.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "ef2c29fc76c968e21d14e204dca23587fb61ca62",
+        "ran_at": "2026-11-26T05:47:22.612Z"
+      },
+      "attested_at": "2026-11-26T05:47:42.779Z",
+      "vouches": {
+        "src/audit/orchestrator/designReviewPrompt.ts": "afc5ff719470b4e94b99e6220aef7b2f0f136e82"
+      }
+    },
     "677face55f9a5a77": {
       "reviewed_by": "independent-sonnet-reviewer-subagent",
       "attester_class": "agent",
@@ -1055,7 +1071,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "6460287616c57f3a"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "3e7d0736a83209a4"

@@ -19,7 +19,7 @@ import {
   type UnitScopeDisposition,
 } from "./intentScopeDisposition.js";
 import { ReviewSubmissionEnvelopeSchema } from "audit-tools/shared";
-import type { ConceptualPerspective } from "../../shared/types/conceptualPerspective.js";
+import { OUTSIDE_IN_PERSPECTIVE_NAME, type ConceptualPerspective } from "../../shared/types/conceptualPerspective.js";
 import { ConceptualJudgeSubmissionSchema } from "../types/conceptualAdjudication.js";
 import { DesignLeadCategorySchema } from "../types/designAssessment.js";
 import { BUILT_IN_REVIEW_LENSES, BuiltInReviewLensSchema } from "../../shared/types/reviewQuestion.js";
@@ -805,7 +805,7 @@ export function prepareDesignReviewRecon(
       }, null, 2) + "\n",
     });
   }
-  const { header, details, orientation } = renderStructuralContext(
+  const { header, details, orientation, graphProvenance } = renderStructuralContext(
     bundle, startingPoints, fileMap, options.lenses ?? resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection),
   );
   const charterContext = renderCharterContext(bundle);
@@ -823,8 +823,8 @@ export function prepareDesignReviewRecon(
     ].join("\n"),
     deepEvidence: {
       filename: "design-review-shared-evidence.md",
-      label: "Shared deep-review evidence (start with Unit structure; consult the sections named in the prompt)",
-      text: ["# Shared deep-review evidence", "", details(Infinity), charterContext].join("\n"),
+      label: "Shared deep-review evidence (consult the sections in the order named in the prompt)",
+      text: ["# Shared deep-review evidence", "", ...graphProvenance, details(Infinity), charterContext].join("\n"),
     },
     fileMap,
   };
@@ -843,13 +843,14 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
   // timestamps and provenance stay outside identity under that existing policy.
   const inputRevision = designReviewInputRevision(bundle);
 
+  const graphProvenance = renderGraphProvenance(bundle);
   const header = [
     "## Project context",
     `Structural input revision: ${inputRevision}`,
     "",
     `Repository: ${bundle.repo_manifest?.repository?.name ?? "unknown"}`,
     "",
-    ...renderGraphProvenance(bundle),
+    ...graphProvenance,
   ].join("\n");
   const inventory = [
     // The summary only: the complete map reaches the lane as a read-only context
@@ -901,7 +902,7 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
     "",
     ...graphDetails,
   ].join("\n");
-  return { header, details, orientation };
+  return { header, details, orientation, graphProvenance };
 }
 
 /**
@@ -992,6 +993,16 @@ export function renderConceptualReviewPrompt(
   ].join("\n");
 }
 
+const OUTSIDE_IN_REVIEW = [
+  "## Start outside-in: purpose, alternatives, then implementation",
+  "",
+  "1. **State the problem without inheriting the solution.** Read only enough project documentation and stated intent to identify one or two consequential user outcomes and their actual constraints. Separate requirements from assumptions and implementation choices. Flag uncertain intent rather than inventing constraints.",
+  "2. **Look outside before reading implementation details or audit findings.** When public lookup is available and authorized, use generic problem and constraint terms to find how comparable projects, established standards, or existing tools solve it. Read primary sources and cite what they actually support. Do not expose private identifiers, source, or project data in external queries. If you already know the implementation, write down independent alternatives before comparing. If lookup is unavailable or not authorized, label alternatives as unverified hypotheses and do not claim external validation.",
+  "3. **Then verify fit in frozen source.** After the alternatives are written down, read Unit structure and the pertinent Subsystem charters in the shared evidence; consult the inventory, call sites, flows, graph and its provenance, or analyzer evidence as needed. Use the local reading, scope and grounding rules below. Compare keeping, deleting, simplifying, or replacing the current approach; assess fit to the stated constraints, what is gained or lost, and the smallest reversible check that would resolve the main uncertainty. A newer tool is not a reason to replace working code.",
+  "4. **Report only consequential options.** Use the existing conceptual categories (for example, fundamental_approach, design_simplification, or tool_opportunity). For an alternative to an otherwise working design, label the summary as a design option, not a defect. Cite both the local design it would change and any external evidence; state the main trade-off and a deciding check. Do not invent a failure to justify the option. No recommendation is better than a forced one.",
+  "",
+] as const;
+
 /**
  * One perspective's conceptual-review prompt (deep fan-out). Each perspective
  * runs in an independent context that reviews *only* through its
@@ -1007,19 +1018,20 @@ export function renderConceptualPerspectivePrompt(
   options: DesignReviewOptions = {},
   recon = prepareDesignReviewRecon(bundle, options),
 ): string {
+  const outsideIn = perspective.name === OUTSIDE_IN_PERSPECTIVE_NAME;
   return [
     "# Conceptual design review",
     "",
     `You are **one of ${total} independent reviewers**, each assigned a different value system. You will NOT see the other reviewers' output; a separate judge will merge the findings. Review the whole in-scope codebase only through the perspective assigned below. Do not try to cover the other angles.`,
     "",
-    recon.deepBrief,
-    ...renderLensScope(options),
+    ...(outsideIn ? [] : [recon.deepBrief, ...renderLensScope(options)]),
     `## Your perspective: ${perspective.name} (perspective ${index + 1} of ${total})`,
     "",
     perspective.lens,
     "",
     "You may sharpen or extend this lens to fit this codebase's character and domain, but stay in character.",
     "",
+    ...(outsideIn ? [...OUTSIDE_IN_REVIEW, ...renderLensScope(options)] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
       "Report findings *from your perspective only*. Use finding IDs starting with DR-001.",
@@ -1076,6 +1088,9 @@ export function renderConceptualJudgePrompt(
     "- **Resolve contradictions**: when two perspectives disagree, keep the better-evidenced position; if genuinely unresolved, keep it and say so.",
     "- **Rank** by impact and actionability.",
     "- **Judge on merit, not consensus.** Evaluate each finding on its own evidence, impact, and actionability. Do NOT drop a finding solely because only one perspective raised it — a lone but well-reasoned or high-impact observation must survive. Cross-perspective corroboration only RAISES confidence; it is never a survival requirement.",
+    ...(perspectiveResults.some(p => p.name === OUTSIDE_IN_PERSPECTIVE_NAME) ? [
+      "- **Distinguish design options from defects.** A well-grounded alternative to working code can survive on its merits. Keep its design-option label, relevant local and external evidence, main trade-off and deciding check. Do not claim the current code is defective simply because another approach exists. Verify the named local premise for an option; if it is absent or already implemented, reject the candidate rather than reporting it as new.",
+    ] : []),
     "- **Drop only genuine noise:** vague, unactionable, unsupported, or out-of-scope assertions — regardless of how many perspectives raised them.",
     "- **Reject what HEAD has already fixed.** The grounds above are all about the FORM of an assertion, so a well-argued, actionable, in-scope claim whose defect is simply NOT THERE matches none of them. Check each candidate's named defect against the current code. A candidate whose defect is absent, already remediated, or otherwise refuted at HEAD is `rejected` with `verification_status: \"refuted_at_head\"` — never merged at a high `modification_percent`, which records a real finding where there is none.",
     "- **Flag what the perspectives MISSED.** You are the final reviewer, not only a merger. If, across every perspective, a significant whole-system issue went unraised — a shared assumption none of them questioned, a structural risk no lens covered, a doubt about whether the fundamental approach is even right — add it as a finding, mark its title with `(judge-added)`, and hold it to the same evidence and grounding bar as any other finding. Add only what genuinely matters and is genuinely absent; do not pad.",

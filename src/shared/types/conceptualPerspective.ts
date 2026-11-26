@@ -7,6 +7,8 @@ export interface ConceptualPerspective {
   lens: string;
 }
 
+export const OUTSIDE_IN_PERSPECTIVE_NAME = "Novelty-seeker";
+
 /**
  * Built-in conceptual perspectives. Each is a maximally dissimilar value system
  * so the union covers angles no single pass would. A reviewer may sharpen its
@@ -37,9 +39,9 @@ export const CONCEPTUAL_PERSPECTIVES: readonly ConceptualPerspective[] = [
       "Frustrated by anything taking >30 seconds to understand. If a design can't be explained simply, it's too complex. Flag cognitive-load hotspots and implicit knowledge.",
   },
   {
-    name: "Novelty-seeker",
+    name: OUTSIDE_IN_PERSPECTIVE_NAME,
     lens:
-      "Always hunting for the latest tool, pattern, or library that could replace hand-rolled machinery. Flag wheels being reinvented and standards being ignored.",
+      "Question whether the project is solving its most important problems the right way. Bring in independent alternatives; prefer what fits over what is newer.",
   },
   {
     name: "Adversary",

@@ -165,7 +165,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     ).toBe(3); // 2 perspectives + the judge
   });
 
-  async function prepareRetryFixture(viaCli = false) {
+  async function prepareRetryFixture(viaCli = false, perspectives: number | string[] = 3, unitMarker?: string) {
     const dir = await artifactsDir();
     const root = dirname(dirname(dir));
     await mkdir(join(root, "src"), { recursive: true });
@@ -181,7 +181,9 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       syntax_resolution_status: {},
       external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
       external_analyzer_results: [{ tool: "eslint", results: [] }],
-      unit_manifest: { units: [] },
+      unit_manifest: { units: unitMarker ? [
+        { unit_id: unitMarker, name: "Implementation marker", files: ["src/app.ts"], required_lenses: [] },
+      ] : [] },
       surface_manifest: { surfaces: [] },
       graph_bundle: { graphs: {} },
       critical_flows: { flows: [], fallback_required: false },
@@ -234,7 +236,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
         design_review: {
           answered_at: "2026-01-01T00:00:00.000Z",
           conceptual_depth: "deep",
-          perspectives: 3,
+          perspectives,
         },
       },
     } as ArtifactBundle);
@@ -294,6 +296,40 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     await writeFile(evidence!, artifact + "changed evidence\n");
     expect(await readAuditReviewBinding(dir, lane)).toBeUndefined();
     expect(await readAuditReviewBinding(dir, firstManifest.judge.lane_id)).toBeUndefined();
+  });
+
+  it("issues the outside-in method on an unseeded frozen fixture and preserves design options at the judge", async () => {
+    const marker = "implementation-only-unit-7f9";
+    const { firstManifest, firstStep } = await prepareRetryFixture(true, ["Novelty-seeker", "Pragmatist"], marker);
+    expect(firstManifest.perspectives).toHaveLength(2);
+    const [outsideIn, pragmatist] = await Promise.all(
+      firstManifest.perspectives.map((lane: { prompt_path: string }) => readFile(lane.prompt_path, "utf8")),
+    );
+    const purpose = outsideIn!.indexOf("State the problem without inheriting the solution");
+    const outside = outsideIn!.indexOf("Look outside before reading implementation details");
+    const frozen = outsideIn!.indexOf("Then verify fit in frozen source");
+    expect(purpose).toBeGreaterThan(-1);
+    expect(purpose).toBeLessThan(outside);
+    expect(outside).toBeLessThan(frozen);
+    expect(outsideIn).not.toContain("### Starting points");
+    expect(outsideIn).not.toContain("## Project context");
+    expect(outsideIn).not.toContain(marker);
+    expect(pragmatist).toContain(marker);
+    expect(outsideIn).toContain("keeping, deleting, simplifying, or replacing");
+    expect(outsideIn).toContain("label alternatives as unverified hypotheses");
+    expect(outsideIn).toContain("Do not expose private identifiers, source, or project data");
+    expect(outsideIn).toContain("[in scope]");
+    expect(outsideIn).toContain("design option, not a defect");
+    expect(pragmatist).not.toContain("Look outside before reading implementation details");
+    const judge = await readFile(firstManifest.judge.prompt_path, "utf8");
+    expect(judge).toContain("A well-grounded alternative to working code can survive on its merits");
+    expect(judge).toContain("relevant local and external evidence, main trade-off and deciding check");
+    const evidencePath = firstStep.access.read_paths.find((path: string) => basename(path) === "design-review-shared-evidence.md");
+    expect(evidencePath).toBeDefined();
+    expect(await readFile(evidencePath!, "utf8")).toContain(marker);
+    expect(outsideIn).toContain(toPromptPathToken(evidencePath!));
+    expect(outsideIn).toContain("After the alternatives are written down, read Unit structure");
+    expect([outsideIn, judge].join("\n")).not.toMatch(/codebase.memory|github\.com|npmjs\.com/i);
   });
 
   it("reissues unavailable and invalid perspective results before the judge has submitted", async () => {
