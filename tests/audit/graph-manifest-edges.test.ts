@@ -532,24 +532,13 @@ test("go submodule: extractGoWorkspaceModuleEdges is exported", () => {
   expect(typeof goEdges).toBe("function");
 });
 
-test("go submodule: goWorkspaceUseSpecifiers parses single-line use directive (via extractGoWorkspaceModuleEdges)", () => {
-  const content = "use ./module-a\nuse ./module-b\n";
-  const lookup = new Map([
-    ["module-a/go.mod", "module-a/go.mod"],
-    ["module-b/go.mod", "module-b/go.mod"],
-  ]);
-  const edges = goEdges("go.work", content, lookup);
-  expect(edges.length >= 1, "expected at least one go-workspace-module-link edge").toBeTruthy();
-});
-
-test("go submodule: extractGoWorkspaceModuleEdges handles block use directives", () => {
-  const content = "use (\n  ./mod-c\n  ./mod-d\n)\n";
-  const lookup = new Map([
-    ["mod-c/go.mod", "mod-c/go.mod"],
-    ["mod-d/go.mod", "mod-d/go.mod"],
-  ]);
-  const edges = goEdges("go.work", content, lookup);
-  expect(edges.length >= 1, "expected edges from block use directive").toBeTruthy();
+test.each([
+  { form: "single-line", content: "use ./module-a\nuse ./module-b\n", modules: ["module-a", "module-b"] },
+  { form: "block", content: "use (\n  ./mod-c\n  ./mod-d\n)\n", modules: ["mod-c", "mod-d"] },
+])("go submodule: resolves $form use directives", ({ content, modules }) => {
+  const paths = modules.map((name) => name + "/go.mod");
+  const lookup = new Map(paths.map((path) => [path, path]));
+  expect(goEdges("go.work", content, lookup).map((edge) => edge.to)).toEqual(paths);
 });
 
 // maven submodule exports Maven module extractor

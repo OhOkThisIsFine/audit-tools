@@ -504,6 +504,22 @@
         "src/audit/orchestrator/unitBuilder.ts": "128cbea3ca4352f7dfd37e2501ab827a7eb68733"
       }
     },
+    "6e602a027f50ded0": {
+      "reviewed_by": "OpenAI Dot with independent review agents",
+      "attester_class": "agent",
+      "checked": "Independent review traced raw byte proof to each Git pin generation and checked publication order and both readers. CRLF, retry refusal, dirty and staged restore, and stale pre-repin manifest cases passed. Fixture consolidation preserves exact coverage and both branches.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "b292d4d108effbab635e5fba256304a24e138f7d",
+        "ran_at": "2026-11-26T20:25:37.447Z"
+      },
+      "attested_at": "2026-11-26T20:25:37.505Z",
+      "vouches": {
+        "src/audit/io/runSnapshot.ts": "226521dd28faa3c3876f206426ea58d19e59b5ca"
+      }
+    },
     "74f5fdb4c95e9366": {
       "reviewed_by": "OpenAI Codex with independent intake, close and recovery reviewers",
       "attester_class": "agent",
@@ -986,7 +1002,7 @@
       "review": "aef2aac1e2d57f15"
     },
     "src/audit/io/runSnapshot.ts": {
-      "review": "aef2aac1e2d57f15"
+      "review": "6e602a027f50ded0"
     },
     "src/audit/orchestrator/acquisitionExecutor.ts": {
       "review": "ea151410085234cc"

@@ -11,12 +11,20 @@ import {
   ensureRunSnapshot,
   ensureRunSourceRoot,
   lookupRunSince,
+  readRunSourceRoot,
   removeRunSnapshot,
   repinRunSnapshot,
   resolveRunSince,
   runSnapshotPath,
   writeBackSnapshotEdits,
 } from "../../src/audit/io/runSnapshot.js";
+
+import { buildRepoManifestFromFs } from "../../src/audit/extractors/fsIntake.js";
+
+async function recordFrozenManifest(sourceRoot: string, artifactsDir: string): Promise<void> {
+  const manifest = await buildRepoManifestFromFs({ root: sourceRoot, hash_files: true });
+  await writeFile(join(artifactsDir, "repo_manifest.json"), JSON.stringify(manifest));
+}
 
 const snapshotFault = vi.hoisted(() => ({ path: "", operation: "", blockRollback: false, rollbackDir: "", acquiring: "" }));
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -327,11 +335,31 @@ describe("ensureRunSnapshot — git root", () => {
     // line-ending conversion off it reproduces the copied bytes exactly.
     await git(root, ["config", "core.autocrlf", "false"]);
     const first = await ensureRunSnapshot(root, artifactsDir);
+    await recordFrozenManifest(first.source_root, artifactsDir);
+    const staged = await gitOut(first.source_root, ["diff", "--cached", "--name-status"]);
     await removeRunSnapshotDirOnly(first.pins[0].path);
     await writeFile(join(root, "src", "a.ts"), "export const a = 9;\n");
     const resumed = await ensureRunSnapshot(root, artifactsDir);
     expect(resumed).toEqual(first);
+    expect(await gitOut(resumed.source_root, ["diff", "--cached", "--name-status"])).toBe(staged);
+    expect(await readFile(join(resumed.source_root, "src", "new.ts"), "utf8")).toBe("export const n = 1;\n");
     expect(await readFile(join(resumed.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 2;\n");
+  });
+
+  test.each([true, false])("refuses non-verifiable recovery even on retry (manifest present: %s)", async (hasManifest) => {
+    const { root, artifactsDir } = await dirtyRepo();
+    await git(root, ["config", "core.autocrlf", "false"]);
+    await writeFile(join(root, ".gitattributes"), "*.ts text eol=lf\n");
+    await writeFile(join(root, "src", "a.ts"), "export const a = 42;\r\n");
+    const first = await ensureRunSnapshot(root, artifactsDir);
+    expect(await readFile(join(first.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 42;\r\n");
+    if (hasManifest) await recordFrozenManifest(first.source_root, artifactsDir);
+    await removeRunSnapshotDirOnly(first.pins[0].path);
+    await expect(ensureRunSnapshot(root, artifactsDir)).rejects.toThrow(
+      hasManifest ? /unable to verify\/restore frozen bytes.*src\/a.ts/i : /unable to verify\/restore frozen bytes.*manifest/i,
+    );
+    await expect(ensureRunSnapshot(root, artifactsDir)).rejects.toThrow(/unable to verify\/restore frozen bytes/i);
+    await expect(readRunSourceRoot(root, artifactsDir)).rejects.toThrow(/unable to verify\/restore frozen bytes/i);
   });
 
   test("removal deletes the checkout, the ref and the worktree registration, never the linked live directory", async () => {
@@ -403,6 +431,7 @@ describe("ensureRunSnapshot — git root", () => {
       await rm(base, { recursive: true, force: true });
     });
     const first = await ensureRunSnapshot(root, artifactsDir);
+    await recordFrozenManifest(first.source_root, artifactsDir);
     await rm(join(first.source_root, ".git"), { force: true });
     await ensureRunSnapshot(root, artifactsDir);
     expect(await gitOut(first.source_root, ["symbolic-ref", "HEAD"])).toBe("refs/heads/audit-tools-unborn-snapshot");
@@ -426,6 +455,21 @@ describe("ensureRunSnapshot — git root", () => {
 });
 
 describe("the tool's own snapshot edits (opted-in auto-fix)", () => {
+  test("recovers the exact repin before intake refreshes its pre-format manifest", async () => {
+    const { root, artifactsDir } = await dirtyRepo();
+    await git(root, ["config", "core.autocrlf", "false"]);
+    const first = await ensureRunSnapshot(root, artifactsDir);
+    await recordFrozenManifest(first.source_root, artifactsDir);
+    const manifestPath = join(artifactsDir, "repo_manifest.json");
+    const oldManifest = await readFile(manifestPath, "utf8");
+    await writeFile(join(first.source_root, "src", "a.ts"), "export const a = 2; // formatted\n");
+    await repinRunSnapshot(artifactsDir, root);
+    await removeRunSnapshotDirOnly(first.pins[0].path);
+    const restored = await ensureRunSnapshot(root, artifactsDir);
+    expect(await readFile(join(restored.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 2; // formatted\n");
+    expect(await readFile(manifestPath, "utf8")).toBe(oldManifest);
+  });
+
   test("write back only files whose live bytes are still the run-start bytes, then re-pin", async () => {
     const { root, artifactsDir } = await dirtyRepo();
     await writeFile(join(root, "src", "b.ts"), "export const b = 1;\n");

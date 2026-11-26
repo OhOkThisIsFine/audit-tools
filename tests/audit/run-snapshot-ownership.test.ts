@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, test, vi } from "vitest";
 import { hashContent } from "audit-tools/shared";
+import { buildRepoManifestFromFs } from "../../src/audit/extractors/fsIntake.js";
 import { ensureRunSnapshot, removeRunSnapshot, repinRunSnapshot, runSnapshotPath, type RunSnapshot } from "../../src/audit/io/runSnapshot.js";
 
 // No destructive filesystem or Git operation runs, even for the deliberately
@@ -177,8 +178,29 @@ test("intact nested checkouts retain their record; repin uses only their owned r
   expect((JSON.parse(await readFile(runSnapshotPath(f.artifactsDir), "utf8")) as RunSnapshot).pins.every(pin => pin.commit === "e".repeat(40))).toBe(true);
 });
 
+/** Freeze real bytes first, then have the mocked checkout reconstruct them. */
+async function freezeNestedRestoreFixture(f: Awaited<ReturnType<typeof gitFixture>>) {
+  const { rename } = await import("node:fs/promises");
+  const contents = new Map(f.record.pins.map((pin, i) => [pin.path, `export const checkout = ${i};\n`]));
+  for (const [path, bytes] of contents) await writeFile(join(path, "source.ts"), bytes);
+  const manifest = await buildRepoManifestFromFs({ root: f.tree, hash_files: true });
+  await writeFile(join(f.artifactsDir, "repo_manifest.json"), JSON.stringify(manifest));
+  for (const [i, path] of [...contents.keys()].entries()) {
+    await rename(join(path, "source.ts"), join(f.base, `lost-source-${i}.ts`));
+  }
+  const previous = mocks.run.getMockImplementation()!;
+  mocks.run.mockImplementation(async (argv: string[], options: { cwd: string }) => {
+    const bytes = contents.get(options.cwd);
+    if (argv.includes("checkout-index") && bytes !== undefined) {
+      await writeFile(join(options.cwd, "source.ts"), bytes);
+    }
+    return previous(argv, options);
+  });
+}
+
 test("lost nested checkouts restore parent-first exclusively within the owned tree", async () => {
   const f = await gitFixture(true);
+  await freezeNestedRestoreFixture(f);
   expect(await ensureRunSnapshot(f.root, f.artifactsDir)).toEqual(f.record);
   const adds = mutatingGitCalls().filter(([args]) => args.includes("add"));
   expect(adds.map(([args, options]) => [options.cwd, args.at(-2)])).toEqual(f.record.pins.map(pin => [pin.repository, pin.path]));
@@ -210,6 +232,7 @@ test.each(["foreign", "backlink", "commondir", "symlink"])("refuses %s Git check
 
 test("restoration rechecks a child boundary after materializing its parent", async () => {
   const f = await gitFixture(true);
+  await freezeNestedRestoreFixture(f);
   const previous = mocks.run.getMockImplementation()!;
   mocks.run.mockImplementation(async (argv: string[], options: { cwd: string }) => {
     if (argv.includes("checkout-index") && options.cwd === f.tree) {
@@ -220,7 +243,15 @@ test("restoration rechecks a child boundary after materializing its parent", asy
     return previous(argv, options);
   });
   await expect(ensureRunSnapshot(f.root, f.artifactsDir)).rejects.toThrow(/ownership/i);
-  expect(mocks.rm.mock.calls.map(([path]) => path)).toEqual([f.tree]);
+  // The new unverified marker uses an atomic write. Only its own temporary
+  // file and the parent checkout may be removed; never touch the child.
+  expect(mocks.rm.mock.calls).toHaveLength(2);
+  const [temporary, temporaryOptions] = mocks.rm.mock.calls[0]!;
+  const parentRemoval = mocks.rm.mock.calls[1];
+  expect(dirname(String(temporary))).toBe(f.artifactsDir);
+  expect(basename(String(temporary))).toMatch(/^\.run-snapshot\.json\..+\.tmp$/u);
+  expect(temporaryOptions).toEqual({ force: true });
+  expect(parentRemoval).toEqual([f.tree, { recursive: true, force: true }]);
   expect(mocks.unlink).not.toHaveBeenCalled();
 });
 

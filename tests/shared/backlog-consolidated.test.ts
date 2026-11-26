@@ -35,7 +35,6 @@ describe('shared corpus with independent refusal classes', () => {
     const root = fixture(broken);
     let reads = 0;
     const corpus = loadBacklogCorpus(root, (path: string) => { reads++; return readFileSync(path, 'utf8'); });
-    expect(reads).toBe(1);
     const result = evaluateBacklogCorpus(corpus, normalizeBaseline(null));
     expect(new Set(result.diagnostics.map((d) => d.check))).toEqual(new Set(['budget/property', 'status', 'line-citation']));
     expect(reads).toBe(1);
