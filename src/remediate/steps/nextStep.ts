@@ -992,8 +992,9 @@ async function emitPlanRevisionBlockedStep(root:string,artifactsDir:string,block
     allowedCommands:[loaderCommand("next-step")],stopCondition:"Resolve the named plan/review issue before implementation.",artifactPaths:{execution_plan:executionPlanPaths(artifactsDir).canonical}});
 }
 
-/** A blocked activation is reported as its step; a planned one hands its state on. */
-function settleActivation(root: string, artifactsDir: string, outcome: PlanActivationOutcome): Promise<RemediationStep> | RemediationState {
+/** Intake activation hands off the new state or renders the reason it was blocked. */
+async function activateIntakePlan(root: string, artifactsDir: string, origin: "new_pre_edit_run"): Promise<RemediationStep | RemediationState> {
+  const outcome = await activateApprovedPlan(root, artifactsDir, { status: "pending" }, origin);
   return outcome.kind === "blocked"
     ? emitPlanRevisionBlockedStep(root, artifactsDir, outcome)
     : outcome.state;
@@ -1391,13 +1392,7 @@ async function handleReadyIntakeContractPipeline(
   // Resume the tool-owned plan without reconstructing completed intake.
   const earlyExtractedPlan = await readApprovedExecutionPlan(artifactsDir);
   if (earlyExtractedPlan && !existsSync(executionPlanPaths(artifactsDir).submission)) {
-    const outcome = await activateApprovedPlan(
-      root,
-      artifactsDir,
-      { status: "pending" },
-      origin,
-    );
-    return settleActivation(root, artifactsDir, outcome);
+    return activateIntakePlan(root, artifactsDir, origin);
   }
 
   if (await readPlanSource(artifactsDir)) {
@@ -1407,8 +1402,7 @@ async function handleReadyIntakeContractPipeline(
     if (step) return step;
     const approved = await readApprovedExecutionPlan(artifactsDir);
     if (!approved) return null;
-    const outcome = await activateApprovedPlan(root, artifactsDir, { status: "pending" }, origin);
-    return settleActivation(root, artifactsDir, outcome);
+    return activateIntakePlan(root, artifactsDir, origin);
   }
 
   const intake = await readIntakeArtifacts(artifactsDir);
@@ -1581,13 +1575,7 @@ async function handleReadyIntakeContractPipeline(
   if (!extractedPlan) {
     return null;
   }
-  const outcome = await activateApprovedPlan(
-    root,
-    artifactsDir,
-    { status: "pending" },
-    origin,
-  );
-  return settleActivation(root, artifactsDir, outcome);
+  return activateIntakePlan(root, artifactsDir, origin);
 }
 
 async function handlePendingIntake(

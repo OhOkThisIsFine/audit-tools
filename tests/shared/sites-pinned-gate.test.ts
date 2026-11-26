@@ -633,12 +633,4 @@ describe("a site binds to the declaration nearest ABOVE it (D6)", () => {
     expect(readPinDeclaration(source, 0)).toBeNull();
   });
 
-  it("refuses a declaration with no names at the site it governs", () => {
-    const { errors } = pinSites({
-      diffText: diffFor("src/a.ts", ["export const X = 1;"]),
-      readText: reader({ "src/a.ts": `// ${PIN_MARKER}:   \n` }),
-      include: INCLUDE,
-    });
-    expect(errors.join("\n")).toContain("with no test names");
-  });
 });

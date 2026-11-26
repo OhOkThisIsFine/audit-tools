@@ -687,34 +687,22 @@ export function crossLensDedupe(
     },
   });
 
-  // Preserve the direct edges before terminal collapse so the disposition map can
-  // explain B→A→C rather than reducing all provenance to B→C.
-  const directMergeMap = new Map(mergeMap);
-
-  // Collapse merge chains (B→A recorded before A→C): every mergeMap value must be
-  // the id of a finding present in the returned array, so follow each chain to its
-  // final (non-absorbed) survivor. Under `global` ids duplicates were rejected
-  // above, so a cycle is an internal invariant failure; under `local` ids a reused
-  // id can manufacture an apparent cycle from two unrelated merges, so the walk
-  // breaks tolerantly (this caller never consumes mergeMap).
-  for (const [absorbedId, survivorId] of mergeMap) {
-    let target = survivorId;
-    const visited = new Set([absorbedId]);
-    while (mergeMap.has(target) && !visited.has(target)) {
-      visited.add(target);
-      target = mergeMap.get(target)!;
-    }
-    if (visited.has(target) && mergeMap.has(target) && policy.idDiscipline === "global") {
-      throw new Error(`Dedupe merge cycle detected at finding id "${target}".`);
-    }
-    if (target !== survivorId) mergeMap.set(absorbedId, target);
-  }
-
   const emittedFindings = findings
     .filter((finding) => !removed.has(finding))
     .map((finding) => canonical(finding));
 
   if (policy.idDiscipline === "local") {
+    // Reused ids can manufacture a cycle from unrelated merges; leave this
+    // tolerant projection unchanged for the local draw.
+    for (const [absorbedId, survivorId] of mergeMap) {
+      let target = survivorId;
+      const visited = new Set([absorbedId]);
+      while (mergeMap.has(target) && !visited.has(target)) {
+        visited.add(target);
+        target = mergeMap.get(target)!;
+      }
+      if (target !== survivorId) mergeMap.set(absorbedId, target);
+    }
     return { findings: emittedFindings, mergeMap, dispositionById: null };
   }
 
@@ -728,10 +716,10 @@ export function crossLensDedupe(
     const mergePath = [finding.id];
     const visited = new Set(mergePath);
     let terminalFindingId = finding.id;
-    while (directMergeMap.has(terminalFindingId)) {
-      terminalFindingId = directMergeMap.get(terminalFindingId)!;
+    while (mergeMap.has(terminalFindingId)) {
+      terminalFindingId = mergeMap.get(terminalFindingId)!;
       if (visited.has(terminalFindingId)) {
-        throw new Error(`Dedupe provenance cycle detected at finding id "${terminalFindingId}".`);
+        throw new Error(`Dedupe merge cycle detected at finding id "${terminalFindingId}".`);
       }
       visited.add(terminalFindingId);
       mergePath.push(terminalFindingId);
@@ -747,6 +735,10 @@ export function crossLensDedupe(
       mergePath,
     });
   }
+
+  // Only now collapse the direct map; updating its values keeps absorption
+  // order without another graph walk or losing the recorded provenance paths.
+  for (const id of mergeMap.keys()) mergeMap.set(id, dispositionById.get(id)!.terminalFindingId);
 
   // Evidence is conserved by terminal destination, including through an
   // intermediate survivor that is later absorbed. Check the invariant at the

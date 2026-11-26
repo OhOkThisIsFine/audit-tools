@@ -19,12 +19,11 @@ import {
   pruneStaleSessionRecords,
   runPorcelainStatus,
   sanitizeSessionId,
+  sessionCheckout,
   writeSessionRecord,
 } from '../../scripts/shared/sessionRegistry.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-const STATE_DIR = join(ROOT, '.claude', 'hooks', '.state');
-const MARKER = join(STATE_DIR, 'stale-main.json');
 
 // SessionStart payload (fail-open). Bounded: under spawnSync with no input the
 // pipe closes immediately and the loop ends, but a harness that keeps stdin
@@ -179,16 +178,20 @@ let remoteName = null; // shared with the worktree leg below
 try {
   // Remote is discovered, never assumed: this repo's remote is `audit-tools`,
   // but a worktree or clone may name it differently.
-  const remotes = git(['remote']).stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const checkout = sessionCheckout(payload?.cwd, ROOT);
+  const stateDir = join(checkout, '.claude', 'hooks', '.state');
+  const marker = join(stateDir, 'stale-main.json');
+  const checkoutGit = (args) => gitIn(checkout, args);
+  const remotes = checkoutGit(['remote']).stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   const remote = remotes.includes('audit-tools') ? 'audit-tools' : remotes[0];
   remoteName = remote ?? null;
   if (remote) {
-    git(['fetch', remote, 'main']);
-    const count = git(['rev-list', '--count', `HEAD..${remote}/main`]);
+    checkoutGit(['fetch', remote, 'main']);
+    const count = checkoutGit(['rev-list', '--count', `HEAD..${remote}/main`]);
     const behind = count.ok ? Number(count.stdout) : 0;
-    mkdirSync(STATE_DIR, { recursive: true });
+    mkdirSync(stateDir, { recursive: true });
     if (Number.isFinite(behind) && behind > 0) {
-      writeFileSync(MARKER, JSON.stringify({ behind, remote, at: new Date().toISOString() }, null, 2));
+      writeFileSync(marker, JSON.stringify({ behind, remote, at: new Date().toISOString() }, null, 2));
       notes.push(
         `HEAD is ${behind} commit(s) BEHIND ${remote}/main. Sync BEFORE writing code — a lap branched from ` +
           `stale main once re-implemented an entire commit that had already landed:\n` +
@@ -198,7 +201,7 @@ try {
       // Up to date — clear any marker from a previous session so the deny-once
       // cannot fire against a tree that has since been synced.
       try {
-        rmSync(MARKER, { force: true });
+        rmSync(marker, { force: true });
       } catch {
         /* ignore */
       }

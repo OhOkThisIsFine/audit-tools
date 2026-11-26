@@ -326,13 +326,14 @@ export async function runValidateArtifactAction(options: {
   try {
     const raw = JSON.parse(options.file ? readFileSync(resolve(options.file), "utf8") : readFileSync(0, "utf8")) as unknown;
     const payload = options.name !== "execution_plan" && raw && typeof raw === "object" && "result" in raw ? raw.result : raw;
-    const parsed = schema.safeParse(payload);
+    const executionPlan = options.name === "execution_plan" ? PlanSubmissionSchema.safeParse(payload) : undefined;
+    const parsed = executionPlan ?? schema.safeParse(payload);
     const messages = parsed.success ? [] : parsed.error.issues.map(issue => `${issue.path.join(".")}: ${issue.message}`);
-    if (parsed.success && options.name === "execution_plan") {
+    if (executionPlan?.success) {
       const root = resolveRootOption(options.root);
       const source = await readPlanSource(resolveArtifactsDirOption(root, options.artifactsDir));
       if (!source) messages.push("Tool-owned source record missing.");
-      else messages.push(...executionPlanIssues(root, source, PlanSubmissionSchema.parse(payload).plan));
+      else messages.push(...executionPlanIssues(root, source, executionPlan.data.plan));
     }
     const issues: ValidationIssue[] = messages.map(message => ({ path: options.name, severity: "error", message }));
     return { result: { status: issues.length ? "error" : "ok", name: options.name, issue_count: issues.length, issues, message: "Shape/reference check only; next-step validates the live revision and review binding before acceptance." }, exitCode: issues.length ? 1 : 0 };

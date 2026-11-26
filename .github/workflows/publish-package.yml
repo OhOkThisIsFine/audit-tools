@@ -334,16 +334,10 @@ jobs:
               sleep "$SLEEP"
             fi
           done
-          echo "::error::npm publish failed after 3 attempts. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."
-          {
-            echo "### Publish outcome"
-            echo "- status: failed"
-            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-            echo "- attempts: 3"
-            echo "- reason: exhausted npm publish retries"
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+          # A transport failure can hide an accepted upload, even on the last
+          # attempt. Report uncertainty until the qualified registry readback.
+          echo "::warning::No upload acknowledgement after 3 attempts; checking registry integrity and dist-tag."
+          exit 0
       - name: Dry run publish (no upload)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
         timeout-minutes: 10

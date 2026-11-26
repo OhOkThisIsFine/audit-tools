@@ -8,7 +8,6 @@ import {
   isJsonParseError,
   type DesignReviewBinding,
   type IntentCheckpoint,
-  charterReviewDisposition,
   readTrailingSubmissionRefusals,
   resolveDesignReviewBinding,
 } from "audit-tools/shared";
@@ -50,14 +49,6 @@ export interface ConceptualReviewSettings {
   max_units?: number;
   conceptual_depth: "shallow" | "deep";
   perspectives?: NonNullable<IntentCheckpoint["design_review"]>["perspectives"];
-  /**
-   * True when any confirmed charter is low-confidence (Phase A conceptual spine):
-   * a review depending on a low-confidence charter must "flag for human intent
-   * input, never opine" (`charterReviewDisposition`). Absent/false when no charters
-   * are present or all are confident. The charter-aware prompt path consumes this
-   * (Phase C); until then it records the disposition on the settings contract.
-   */
-  flag_for_human?: boolean;
   /**
    * Host-visible one-liner surfaced when the settings were REUSED from an existing
    * `intent_checkpoint.design_review` (rather than freshly confirmed this step).
@@ -160,13 +151,6 @@ export function resolveConceptualReviewSettings(
   const binding = resolveDesignReviewBinding(bundle.intent_checkpoint);
   const checkpoint = binding.kind === "bound" ? binding.settings : undefined;
   const ignoredReviewNotice = renderIgnoredReviewNotice(binding);
-  // A low-confidence charter downgrades the dependent review to flag-for-human
-  // (charterReviewDisposition). Charters live on the REGISTER — the checkpoint
-  // carries only the ceiling as input (its never-written charter embed was
-  // deleted 2026-08-06, design resolution 4).
-  const flagForHuman = (bundle.charter_register?.lanes ?? []).some((lane) =>
-    lane.nodes.some((node) => charterReviewDisposition(node) === "flag_for_human"),
-  );
   const choices = resolveDesignReviewChoices(bundle);
   const conceptualDepth = choices.conceptual_depth;
   // Surface a notice only when the CONFIRMED block drives the workload. The
@@ -186,7 +170,6 @@ export function resolveConceptualReviewSettings(
   return {
     conceptual_depth: conceptualDepth,
     perspectives: choices.perspectives,
-    ...(flagForHuman ? { flag_for_human: true } : {}),
     ...(reuseNotice ? { reuse_notice: reuseNotice } : {}),
     ...(ignoredReviewNotice ? { ignored_review_notice: ignoredReviewNotice } : {}),
   };

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sites-pinned: tests/shared/hook-trap-guards.test.ts
+// sites-pinned: tests/shared/hook-trap-guards.test.ts, tests/shared/hook-session-start-guards.test.ts
 // PreToolUse guard on Edit / Write / Agent — the traps that live in a tool's
 // INPUT rather than in a shell command.
 //
@@ -14,6 +14,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, relative, isAbsolute } from 'node:path';
 import { resolveWithinRoot } from '../../scripts/shared/primitives.mjs';
+import { sessionCheckout } from '../../scripts/shared/sessionRegistry.mjs';
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -139,12 +140,11 @@ if (isProjectFile) {
 // Deny-ONCE on purpose: it must interrupt the lap before code is written, not
 // wedge a session where editing against the older tree is the actual intent.
 const SOURCE_EDIT = /^(src|tests|scripts)\//;
-const relPath = isAbsolute(filePath)
-  ? relative(ROOT, filePath).replace(/\\/g, '/')
-  : filePath.replace(/\\/g, '/');
+const checkout = payload?.cwd === ROOT ? ROOT : sessionCheckout(payload?.cwd, ROOT);
+const sourcePath = resolveWithinRoot(checkout, filePath);
 
-if (isProjectFile && SOURCE_EDIT.test(relPath)) {
-  const markerPath = join(ROOT, '.claude', 'hooks', '.state', 'stale-main.json');
+if (sourcePath !== null && SOURCE_EDIT.test(relative(checkout, sourcePath).replace(/\\/g, '/'))) {
+  const markerPath = join(checkout, '.claude', 'hooks', '.state', 'stale-main.json');
   if (existsSync(markerPath)) {
     let marker = null;
     try {
@@ -165,7 +165,7 @@ if (isProjectFile && SOURCE_EDIT.test(relPath)) {
     if (marker && Number(marker.behind) > 0 && typeof marker.remote === 'string' && marker.remote.trim()) {
       try {
         const count = spawnSync('git', ['rev-list', '--count', `HEAD..${marker.remote}/main`, '--'], {
-          cwd: ROOT,
+          cwd: checkout,
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           timeout: 5_000,

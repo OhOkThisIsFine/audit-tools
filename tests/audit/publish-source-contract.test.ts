@@ -318,3 +318,14 @@ test("registry status needs both exact tarball integrity and the requested tag",
   expect(status(sri, { latest: "1.2.3", next: "1.2.2" })).toBe("tag-mismatch");
   expect(status(sri, { latest: "1.2.2", next: "1.2.3" })).toBe("confirmed");
 });
+
+
+test("exhausted transient upload attempts must reach qualified registry readback", () => {
+  const steps = workflow().jobs.publish.steps;
+  const upload = steps.find((step: { name: string }) => step.name.startsWith("Publish to npm"));
+  const confirm = steps.find((step: { name: string }) => step.name === "Confirm qualified registry integrity and dist-tag");
+  expect(upload.run).toMatch(/done\s+#[\s\S]+No upload acknowledgement after 3 attempts; checking registry integrity and dist-tag[.]"\s+exit 0\s*$/);
+  expect(upload.run).toMatch(/permanent error[\s\S]+exit 1/);
+  expect(confirm.if).toBe(upload.if);
+  expect(confirm.run.trimEnd()).toMatch(/exit 1$/);
+});

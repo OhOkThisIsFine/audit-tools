@@ -25,15 +25,13 @@ export const ReviewPacketQualitySchema = z.object({
 });
 export type ReviewPacketQuality = z.infer<typeof ReviewPacketQualitySchema>;
 
+// sites-pinned: tests/audit/review-packets.test.ts
 export const WeaklyExplainedPacketSampleSchema = z.object({
   packet_id: z.string(),
   primary_gap: PrimaryGapSchema,
   file_count: z.number(),
   sample_file_paths: z.array(z.string()),
-  cohesion_score: z.number(),
-  internal_edge_count: z.number(),
-  boundary_edge_count: z.number(),
-  unexplained_file_count: z.number(),
+  ...ReviewPacketQualitySchema.shape,
 });
 export type WeaklyExplainedPacketSample = z.infer<
   typeof WeaklyExplainedPacketSampleSchema

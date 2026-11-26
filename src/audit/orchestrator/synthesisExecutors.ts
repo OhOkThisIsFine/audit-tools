@@ -166,6 +166,19 @@ export function rebuildConceptualAttributionIdSource(
   return buildBaseFindingsReport(bundle, bundle.audit_results ?? [], options);
 }
 
+function synthesisRenderOptions(bundle: ArtifactBundle, options: SynthesisOptions) {
+  return {
+    scope: bundle.scope,
+    intent_checkpoint: bundle.intent_checkpoint,
+    reflections: bundle.agent_reflections,
+    conceptual_adjudication: bundle.conceptual_review_adjudication,
+    submission_ledger: bundle.submission_ledger,
+    analyzer_capability: bundle.analyzer_capability,
+    charter_evidence_coverage: bundle.charter_register?.evidence_coverage,
+    charter_packet_archive: options.packetArchive,
+  };
+}
+
 export function runSynthesisExecutor(
   bundle: ArtifactBundle,
   results: AuditResult[] | undefined,
@@ -188,14 +201,7 @@ export function runSynthesisExecutor(
       ...bundle,
       audit_findings: findings,
       audit_report: renderAuditReportMarkdown(findings, {
-        scope: bundle.scope,
-        intent_checkpoint: bundle.intent_checkpoint,
-        reflections: bundle.agent_reflections,
-        conceptual_adjudication: bundle.conceptual_review_adjudication,
-        submission_ledger: bundle.submission_ledger,
-        analyzer_capability: bundle.analyzer_capability,
-        charter_evidence_coverage: bundle.charter_register?.evidence_coverage,
-        charter_packet_archive: options.packetArchive,
+        ...synthesisRenderOptions(bundle, options),
       }),
     },
     artifacts_written: ["audit-findings.json", AUDIT_REPORT_FILENAME],
@@ -260,17 +266,10 @@ export function runSynthesisNarrativeExecutor(
       ...bundle,
       audit_findings: enriched,
       audit_report: renderAuditReportMarkdown(enriched, {
-        scope: bundle.scope,
-        intent_checkpoint: bundle.intent_checkpoint,
-        reflections: bundle.agent_reflections,
-        conceptual_adjudication: bundle.conceptual_review_adjudication,
+        ...synthesisRenderOptions(bundle, options),
         conceptual_attribution_id_source: bundle.audit_findings
           ? rebuildConceptualAttributionIdSource(bundle, baseReport, options)
           : undefined,
-        submission_ledger: bundle.submission_ledger,
-        analyzer_capability: bundle.analyzer_capability,
-        charter_evidence_coverage: bundle.charter_register?.evidence_coverage,
-        charter_packet_archive: options.packetArchive,
       }),
       synthesis_narrative: record,
     },

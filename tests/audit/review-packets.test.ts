@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import * as affinity from "../../src/audit/orchestrator/taskAffinityGraph.js";
-import { AuditPlanMetricsSchema } from "../../src/audit/types/reviewPlanning.js";
+import { AuditPlanMetricsSchema, WeaklyExplainedPacketSampleSchema } from "../../src/audit/types/reviewPlanning.js";
 import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 
 import type { AuditTask } from "../../src/audit/types.js";
@@ -9,6 +9,23 @@ import {
   buildPacket,
   buildReviewPacketPlanningData,
 } from "../../src/audit/orchestrator/reviewPackets.js";
+
+test("weak packet diagnostics keep all four flattened numeric quality fields", () => {
+  const sample = {
+    packet_id: "packet-a",
+    primary_gap: "missing_internal_edges",
+    file_count: 2,
+    sample_file_paths: ["src/a.ts"],
+    cohesion_score: 0.25,
+    internal_edge_count: 1,
+    boundary_edge_count: 2,
+    unexplained_file_count: 1,
+  };
+  expect(WeaklyExplainedPacketSampleSchema.parse(sample)).toEqual(sample);
+  for (const field of ["cohesion_score", "internal_edge_count", "boundary_edge_count", "unexplained_file_count"] as const) {
+    expect(WeaklyExplainedPacketSampleSchema.safeParse({ ...sample, [field]: "1" }).success).toBe(false);
+  }
+});
 
 function task(
   taskId: string,

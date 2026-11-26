@@ -1,4 +1,3 @@
-import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 /**
  * Tests for renderReuseNotice helper (TST-4c8bd93a-3).
  * This test file covers the reuse notice generation for conceptual dispatch.
@@ -106,13 +105,8 @@ test("renderReuseNotice: fallback to resolvedDepth when checkpoint depth absent"
 
 // INV 11 (audit-artifact-promotion-lifecycle): the CONSUMER-ENTRY-POINT leg.
 //
-// conceptualDispatch reads two NESTED bundle paths by name —
-// `intent_checkpoint.design_review` and `charter_register.lanes[].nodes`.
-// The typechecker covers a rename within one build; it cannot see a bundle
-// written in one phase and read back in another, which is exactly the position
-// this consumer is in. So the entry point is driven here and both paths are
-// asserted to resolve, alongside the field-set pin in io-remediation.test.ts.
-test("INV 11: resolveConceptualReviewSettings resolves both the run-bound depth and the charter path it reads by name", () => {
+// Read the persisted design-review path through the consumer entry point.
+test("INV 11: resolveConceptualReviewSettings resolves the run-bound depth", () => {
   const confirmedAt = "2026-08-20T00:00:00Z";
   const bundle = {
     intent_checkpoint: {
@@ -125,12 +119,6 @@ test("INV 11: resolveConceptualReviewSettings resolves both the run-bound depth 
         perspectives: 2,
       },
     },
-    charter_register: {
-      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-      lanes: [
-        { kind: "stated", nodes: [{ node_id: "c", confidence: "low" }], edges: [] },
-      ],
-    },
   } as never;
 
   const settings = resolveConceptualReviewSettings(bundle);
@@ -142,15 +130,6 @@ test("INV 11: resolveConceptualReviewSettings resolves both the run-bound depth 
     "conceptualDispatch reads intent_checkpoint.design_review.conceptual_depth by name",
   ).toBe("deep");
   expect(settings.perspectives).toBe(2);
-  // Resolved through charter_register.lanes[].nodes: the low-confidence goal
-  // node must reach charterReviewDisposition. A rename of that path would
-  // leave this undefined and silently stop flagging for a human.
-  expect(
-    settings.flag_for_human,
-    "conceptualDispatch reads charter_register.lanes[].nodes by name",
-  ).toBe(true);
-  // And the notice derives from the same checkpoint, so its presence is a third
-  // witness that the nested read resolved.
   expect(settings.reuse_notice).toBeDefined();
 });
 

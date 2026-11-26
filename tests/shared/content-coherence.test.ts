@@ -781,6 +781,30 @@ describe(RED_SIGNATURE, () => {
     expect(whole.components).toEqual([["k1", "k2", "k3", "k4", "k5", "k6"]]);
   });
 
+  it("scores a multi-file, multi-tag bridge once and ignores relationship-only eligibility", async () => {
+    const core = await loadCore();
+    // The bridge already shares a file and tag. Extra shared files and tags
+    // cannot add another weighted edge; that would make the thin seam stronger.
+    const items = twoClustersOneBridge().map((item) =>
+      item.id === "a3" || item.id === "b1" ? {
+        ...item,
+        file_paths: [...(item.file_paths as string[]), "link/extra1.ts", "link/extra2.ts", "link/extra3.ts"],
+        tags: ["security", "extra", "another", "review"],
+      } : item,
+    );
+    items.push({ id: "isolated", file_paths: ["unrelated/file.ts"], unit_ids: [], tags: ["other"] });
+    const trace = core.buildContentCoherenceTrace({
+      items,
+      relationships: [
+        { left: "a1", right: "isolated", kind: "shared_file" },
+        { left: "a1", right: "isolated", kind: "same_lens" },
+      ],
+    }, core.FINDINGS_DRAW_COHERENCE_POLICY);
+    expect(trace.components).toEqual([
+      ["a1", "a2", "a3"], ["b1", "b2", "b3"], ["isolated"],
+    ]);
+  });
+
   it("splits a loose component at its thin seam and keeps a uniform clique whole", async () => {
     const core = await loadCore();
     const findingsPolicy = core.FINDINGS_DRAW_COHERENCE_POLICY;

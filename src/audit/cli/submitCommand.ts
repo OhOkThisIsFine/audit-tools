@@ -156,6 +156,14 @@ export async function cmdSubmit(argv: string[]): Promise<void> {
 }
 
 
+function withActiveQuestionAdminRun<T>(artifactsDir: string, run: (runId: string) => Promise<T>): Promise<T> {
+  return withArtifactTreeHold(artifactsDir, undefined, async () => {
+    const runId = await readQuestionReviewRunId(artifactsDir);
+    if (!runId) throw new Error("No active question-review run; finished reports are immutable.");
+    return run(runId);
+  });
+}
+
 // sites-pinned: tests/audit/question-consolidation-cli.test.ts
 // Dispatcher-only: the file is the explicit reviewed same-repair decision,
 // not an invitation to infer or auto-merge from similar wording.
@@ -165,9 +173,7 @@ export async function cmdConsolidateFindings(argv: string[]): Promise<void> {
   const decision = ReviewFindingConsolidationSchema.parse(JSON.parse(await readFile(from, "utf8")));
   const artifactsDir = getArtifactsDir(argv);
   const root = getRootDir(argv);
-  const receipt = await withArtifactTreeHold(artifactsDir, undefined, async () => {
-    const runId = await readQuestionReviewRunId(artifactsDir);
-    if (!runId) throw new Error("No active question-review run; finished reports are immutable.");
+  const receipt = await withActiveQuestionAdminRun(artifactsDir, async runId => {
     const { bundle, sourceRoot } = await verifyCurrentQuestionInputs(root, artifactsDir);
     const context = await deriveQuestionCycleUnlocked({ root, artifactsDir, sourceRoot, bundle, readOnlyRunId: runId });
     const disposition = await consolidateAuditQuestionFindings({ root, artifactsDir, runId,
@@ -185,9 +191,7 @@ export async function cmdReopenQuestions(argv: string[]): Promise<void> {
   const request = ReviewReopenRequestSchema.parse(JSON.parse(await readFile(from, "utf8")));
   const artifactsDir = getArtifactsDir(argv);
   const root = getRootDir(argv);
-  const receipt = await withArtifactTreeHold(artifactsDir, undefined, async () => {
-    const runId = await readQuestionReviewRunId(artifactsDir);
-    if (!runId) throw new Error("No active question-review run; finished reports are immutable.");
+  const receipt = await withActiveQuestionAdminRun(artifactsDir, async runId => {
     const { bundle, sourceRoot } = await verifyCurrentQuestionInputs(root, artifactsDir, request.tooling_transition);
     const context = await deriveQuestionCycleUnlocked({ root, artifactsDir, sourceRoot, bundle, readOnlyRunId: runId });
     const disposition = await reopenAuditQuestions({

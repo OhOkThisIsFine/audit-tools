@@ -225,3 +225,46 @@ describe('session-start-guards: finished agent worktrees are reported, never rem
     expect(existsSync(wt('landed2'))).toBe(true);
   });
 });
+
+
+describe('stale-main evidence belongs to the active linked checkout', () => {
+  it.each([true, false])('main checkout is stale: %s', (mainIsStale) => {
+    const base = mkdtempSync(join(tmpdir(), 'wt-behind-'));
+    try {
+      const repo = join(base, 'repo');
+      const upstream = join(base, 'upstream');
+      const worktree = join(base, 'linked tree');
+      initRepo(upstream);
+      const runGit = (cwd: string, ...args: string[]) => {
+        const result = git(cwd, ...args);
+        if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
+      };
+      runGit(upstream, 'commit', '--allow-empty', '-qm', 'newer upstream');
+      runGit(base, 'clone', '-q', upstream, repo);
+      runGit(repo, 'worktree', 'add', '-q', '--detach', worktree, mainIsStale ? 'HEAD' : 'HEAD~1');
+      if (mainIsStale) runGit(repo, 'reset', '--hard', 'HEAD~1');
+      const marker = (path: string) => join(path, '.claude', 'hooks', '.state', 'stale-main.json');
+      const env = { ...process.env, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: repo };
+      const start = spawnSyncHidden(process.execPath, [GUARDS], {
+        cwd: repo, env, input: JSON.stringify({ cwd: worktree }), encoding: 'utf8',
+      });
+      expect(start.status).toBe(0);
+      expect(start.stdout.includes('1 commit(s) BEHIND origin/main')).toBe(!mainIsStale);
+      expect(existsSync(marker(repo))).toBe(false);
+      expect(existsSync(marker(worktree))).toBe(!mainIsStale);
+
+      const edit = () => spawnSyncHidden(process.execPath, [join(REPO_ROOT, '.claude', 'hooks', 'tool-input-guard.mjs')], {
+        cwd: repo, env, encoding: 'utf8',
+        input: JSON.stringify({
+          cwd: worktree, tool_name: 'Write',
+          tool_input: { file_path: join(worktree, 'src', 'fixture.ts'), content: 'export {};' },
+        }),
+      });
+      expect(edit().status).toBe(mainIsStale ? 0 : 2);
+      expect(existsSync(marker(worktree))).toBe(false);
+      expect(edit().status).toBe(0);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});

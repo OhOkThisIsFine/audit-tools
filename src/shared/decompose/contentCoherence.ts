@@ -32,8 +32,8 @@ export const CONTENT_COHERENCE_THRESHOLD = 60;
 
 /**
  * Which pairs may join at all — the ONE policy axis of the shared core, never a
- * fork. Both draws run the identical scan, union-find, and canonical ordering;
- * they differ only in this predicate and in {@link ContentCoherencePolicy.refineAtModularityPeak}.
+ * fork. Both draws share scoring, union-find, and canonical ordering;
+ * this predicate permits a narrower candidate scan for findings; see also {@link ContentCoherencePolicy.refineAtModularityPeak}.
  *
  * - `weighted_score_threshold` — a pair joins when its summed evidence weight
  *   reaches {@link CONTENT_COHERENCE_THRESHOLD}. Disjunctive: four of the six
@@ -495,6 +495,35 @@ function findRoot(parent: Map<string, string>, id: string): string {
 }
 
 /**
+ * Enumerate direct shared-file AND shared-tag pairs without scoring unrelated
+ * items. The posting list holds only earlier items; the per-item set prevents
+ * scoring the same pair twice when it shares several files or tags.
+ */
+function visitFindingsCandidatePairs(
+  items: readonly NormalizedContentCoherenceItem[],
+  visit: (left: number, right: number) => void,
+): void {
+  const byFile = new Map<string, Map<string, number[]>>();
+  for (const [right, item] of items.entries()) {
+    const matched = item.file_paths.length > 1 || item.tags.length > 1 ? new Set<number>() : undefined;
+    for (const file of item.file_paths) {
+      let byTag = byFile.get(file);
+      if (!byTag) byFile.set(file, byTag = new Map());
+      for (const tag of item.tags) {
+        let previous = byTag.get(tag);
+        if (!previous) byTag.set(tag, previous = []);
+        for (const left of previous) {
+          if (matched) matched.add(left);
+          else visit(left, right);
+        }
+        previous.push(right);
+      }
+    }
+    if (matched) for (const left of matched) visit(left, right);
+  }
+}
+
+/**
  * Build the complete canonical trace used by both audit and findings draws.
  *
  * `policy` is REQUIRED and has no default: a draw that forgot to declare its
@@ -520,38 +549,32 @@ export function buildContentCoherenceTrace(
   // Index only after item and relationship validation, preserving first errors.
   // Each item's five sets and parent directories are built once per invocation.
   const evidenceIndexes = normalizedItems.map(indexEvidence);
-  // Only ELIGIBLE pairs are retained. The ineligible majority (82% of pairs on
-  // the 3,194-finding dogfood run) can affect nothing downstream — union-find
-  // consumes eligibility alone — so materializing the full O(N²) pair layer was
-  // pure cost. Scoring itself is unchanged; the sort comparator below is total
-  // over distinct (left,right) pairs, so filtering during the scan yields the
-  // byte-identical candidate order the filter-then-sort form produced.
   const eligibleCandidates: CoherenceCandidate[] = [];
-
-  for (let leftIndex = 0; leftIndex < normalizedItems.length; leftIndex += 1) {
-    for (
-      let rightIndex = leftIndex + 1;
-      rightIndex < normalizedItems.length;
-      rightIndex += 1
-    ) {
-      const left = normalizedItems[leftIndex]!;
-      const right = normalizedItems[rightIndex]!;
-      const evidence = directEvidence(
-        evidenceIndexes[leftIndex]!,
-        evidenceIndexes[rightIndex]!,
-      );
-      // Captured BEFORE relationship evidence is folded in — the conjunctive
-      // policy must read only what the items themselves assert.
-      const direct: DirectConjuncts = {
-        sharedFile: evidence.shared_file,
-        sameLens: evidence.shared_semantic_tag_or_same_lens,
-      };
-      for (const kind of relationshipEvidence.get(pairKey(left.id, right.id)) ?? []) {
-        evidence[kind] = true;
-      }
-      const score = scoreEvidence(evidence);
-      if (!isEligible(direct, score, policy)) continue;
-      eligibleCandidates.push({ left: left.id, right: right.id, score });
+  const scorePair = (leftIndex: number, rightIndex: number) => {
+    const left = normalizedItems[leftIndex]!;
+    const right = normalizedItems[rightIndex]!;
+    const evidence = directEvidence(
+      evidenceIndexes[leftIndex]!,
+      evidenceIndexes[rightIndex]!,
+    );
+    // Captured BEFORE relationship evidence is folded in: the conjunctive
+    // policy must read only what the items themselves assert.
+    const direct: DirectConjuncts = {
+      sharedFile: evidence.shared_file,
+      sameLens: evidence.shared_semantic_tag_or_same_lens,
+    };
+    for (const kind of relationshipEvidence.get(pairKey(left.id, right.id)) ?? []) {
+      evidence[kind] = true;
+    }
+    const score = scoreEvidence(evidence);
+    if (!isEligible(direct, score, policy)) return;
+    eligibleCandidates.push({ left: left.id, right: right.id, score });
+  };
+  if (policy.eligibility === "shared_file_and_same_lens") {
+    visitFindingsCandidatePairs(normalizedItems, scorePair);
+  } else {
+    for (let left = 0; left < normalizedItems.length; left++) {
+      for (let right = left + 1; right < normalizedItems.length; right++) scorePair(left, right);
     }
   }
 

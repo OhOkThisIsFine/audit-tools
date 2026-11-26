@@ -538,33 +538,6 @@
         "src/shared/submission/submissionLedger.ts": "545a2b34d94254b6c5e1eb7a1b6ade0b12f44cba"
       }
     },
-    "92a14c6e9e3ff056": {
-      "reviewed_by": "Codex independent reviewer, task-5 (01a13aa5-86e7-718a-b50b-8a39bff4f03f)",
-      "attester_class": "agent",
-      "checked": "Fresh task-5 source review traced historical-baseline admission before locked reconciliation and direct host verification, failed/NUL Git discovery refusal, shared acquisition deadlines and single status ownership, consume-before-omit staging and carried outcomes, first-owner packet semantics, exact-member conflict coalescing and legacy handoff retention, and recursive index probe behavior. Concrete regression assertions were inspected; no reviewer-run tests or mutations are claimed. Twelve reviewed staged loop-core blobs remain unchanged. Receipt audit-fresh-loop-core-review.txt SHA256928c9f50818bf1b8f172b374fc586aea0c415e97d302b383dfb1dc885d12f0f0. Independent task-5 relocation review also checked exact exports, emitted statements and dependency order while restoring the existing orphan scanner edge; receipt audit-orphan-export-relocation-review.txt SHA2563116b28edefe2a67c66049df71fce5f0b30ae27a08b61549a510ac41aaf55760.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "0a62d58c0c7c48f29d09920bc79e5dd649648db6",
-        "ran_at": "2026-10-14T19:00:43.286Z"
-      },
-      "attested_at": "2026-10-14T19:02:56.300Z",
-      "vouches": {
-        "src/audit/cli/nextStepCommand.ts": "6e65cfb648d515cf97223b9abd0a3b52acef5b5a",
-        "src/audit/cli/nextStepHelpers.ts": "3702c75d5b9c460b0f981f210c18b3cd7c6fe53f",
-        "src/audit/orchestrator/acquisitionExecutor.ts": "101b7c8056f3e6041a206dd667107ec985ae5174",
-        "src/audit/orchestrator/reviewPacketSizing.ts": "75efb00fc67eba9e5ef591cf044bebe01970b27b",
-        "src/audit/orchestrator/reviewPackets.ts": "8644195242b6f8d9d3098bd830fd94a93cf3589c",
-        "src/audit/orchestrator/runtimeCommand.ts": "161e189cde3fabe5a2a62a90b54e5a7d9eef12a3",
-        "src/audit/orchestrator/scopeIndexBaseline.ts": "f6c5a3e8fe9e326bbf29fc5663b2d2a4a56bbe41",
-        "src/audit/orchestrator/selectiveDeepening/conflict.ts": "65cb0e3a8a2fc1b97c918e93b29c92e901384f64",
-        "src/audit/orchestrator/selectiveDeepening/index.ts": "af679448b988be2b4988187a8c939d2d286218b8",
-        "src/remediate/steps/dispatch/hostCorroboration.ts": "186399ba8fc976952f3aaeb2bfffc3be5ba00566",
-        "src/remediate/steps/dispatch/hostHandoff.ts": "db0674ae8c063a91c0978e7c168cb9020f9b3536",
-        "src/remediate/steps/nextStep.ts": "b1a1a5987bbc151afde71db8d9be3b5a77a3b563"
-      }
-    },
     "9ae8f3b83f558bae": {
       "reviewed_by": "claude-session:7e4d0c11 (author self-review; owner chose the wording)",
       "attester_class": "agent",
@@ -581,6 +554,26 @@
         "src/audit/cli/dispatch/hostHandoff.ts": "8c85ada46e0d40418ffd33e49f47da294d092e05",
         "src/remediate/steps/dispatch/hostHandoff.ts": "c7feaad2952372f10ecba83e6df9df9ae28fa371",
         "src/shared/submission/hostHandoffCore.ts": "acc2336b1fa419dc1539a90d74b95b8531eb0bf8"
+      }
+    },
+    "a1a3dd0149010098": {
+      "reviewed_by": "dot-independent-integration",
+      "attester_class": "agent",
+      "checked": "Reviewed exact integrated code changes and independently compared charter prompt behavior, command authority and freshness, Windows spawn wrapping, synthesis provenance and plan activation. Confirmed the staged packet-schema regression and full suite.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "2b64b75411dfce30124be4191129110e105de43c",
+        "ran_at": "2026-11-26T04:32:29.668Z"
+      },
+      "attested_at": "2026-11-26T04:32:39.985Z",
+      "vouches": {
+        "src/audit/cli/conceptualDispatch.ts": "2930f10731fd9c1c6734916a5db698283dd18402",
+        "src/audit/cli/submitCommand.ts": "13e09ac2ccf03cc0a92551bdd780675a7ff2c7c0",
+        "src/audit/orchestrator/runtimeCommand.ts": "a3eeb19e13eecc26d0c2446d4870e33e442bf09c",
+        "src/audit/orchestrator/synthesisExecutors.ts": "5d4fb848fe6d41dc19aa1e1a243250b3824a9266",
+        "src/remediate/steps/nextStep.ts": "1fbc283026eae08b2d76ba833cc9ec02c8e86070"
       }
     },
     "a6bf59c41c6e9e97": {
@@ -714,31 +707,6 @@
       "vouches": {
         "src/audit/orchestrator/intentCheckpointExecutor.ts": "6fe8caa0ff440c505b644a66af4a7441047fe9df",
         "src/audit/orchestrator/questionPlanning.ts": "041cd15a2e1f9d0c2ac65146b453d6e38d285880"
-      }
-    },
-    "daa728eac345f91f": {
-      "reviewed_by": "dot-independent-review",
-      "attester_class": "agent",
-      "checked": "Verified the exact staged patch against the qualified compatibility revision; traced the stale epoch fence, append-only supersession, current report freshness, both guidance lock orders and preserved historical tooling; checked that restricted recovery restores only the eligible synthesis lane and leaves the staged upstream fallback untouched.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "554f54cf5b3ab64f1e60c339e632eb51f62dbaaa",
-        "ran_at": "2026-11-22T08:42:44.156Z"
-      },
-      "attested_at": "2026-11-22T08:43:00.923Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "d408be0b3a8827d541a2734495c6126413230a9c",
-        "src/audit/cli/dispatch/questionReviewAcceptance.ts": "e0738318bccce6030fe78e2a2eef7e85a100c886",
-        "src/audit/cli/foldTransaction.ts": "41f3a4166cc01878ae498b5149fa33f612fcbee7",
-        "src/audit/cli/nextStepCommand.ts": "05ba4f75eb6dac9be89a2cb2831f2ef4c1214b4a",
-        "src/audit/cli/nextStepHelpers.ts": "8121035e45bc9020895426ddc72ca855ed79841e",
-        "src/audit/cli/questionReviewCycle.ts": "dd1ef22fb0c07b6a2228ed5d23b7e43db2b7c9fc",
-        "src/audit/cli/questionWorkloadBindings.ts": "c340e6525b484a1344c51021e2b8825d5c34d075",
-        "src/audit/cli/submitCommand.ts": "68831f525f17955b585ec730df510f1daf2f5a2b",
-        "src/audit/orchestrator/executorRunners.ts": "43d3ff1a079d7f8f65ae845a11e992a37a3b412f",
-        "src/remediate/steps/nextStep.ts": "e8d48778eb2bcd88562db99e1664e5643005af0e"
       }
     },
     "e27b7c336e51764b": {
@@ -958,7 +926,7 @@
       "review": "380a3e547fdf760b"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "a1a3dd0149010098"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "review": "e36223304299f9c6"
@@ -1000,7 +968,7 @@
       "review": "481abf3e9efbbca4"
     },
     "src/audit/cli/submitCommand.ts": {
-      "review": "daa728eac345f91f"
+      "review": "a1a3dd0149010098"
     },
     "src/audit/cli/submitGateResult.ts": {
       "review": "435c17a0f11016cc"
@@ -1210,7 +1178,7 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/runtimeCommand.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "a1a3dd0149010098"
     },
     "src/audit/orchestrator/runtimeValidation.ts": {
       "review": "e36223304299f9c6"
@@ -1261,7 +1229,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/synthesisExecutors.ts": {
-      "review": "e36223304299f9c6"
+      "review": "a1a3dd0149010098"
     },
     "src/audit/orchestrator/systemicChallengeExecutor.ts": {
       "review": "3e7d0736a83209a4"
@@ -1339,7 +1307,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "a1a3dd0149010098"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "e36223304299f9c6"
