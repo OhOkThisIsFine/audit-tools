@@ -148,7 +148,7 @@ test("INV-audit-tests-05: computeStaleArtifacts returns empty Set when artifact_
 });
 
 // ── INV-audit-tests-06: test helpers must import from .mjs helpers, not global mocks ──
-// This invariant guards that test helper modules (withTempDir, sourceImport, etc.)
+// This invariant guards that test helper modules (such as withTempDir)
 // are importable as ESM modules. If they contain CommonJS-only constructs the
 // entire test runner silently skips tests.
 

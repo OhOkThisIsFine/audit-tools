@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { importSourceModule } from "./helpers/sourceImport.mjs";
 import type {
   Finding,
 } from "../../src/audit/types.js";
@@ -12,22 +11,16 @@ import { loadSessionIntent } from "../../src/shared/sessionConfig.js";
 
 const { validateAuditResults }: typeof import(
   "../../src/audit/validation/auditResults.js"
-) = await importSourceModule(
-  "src/validation/auditResults.ts",
-);
+) = await import("../../src/audit/validation/auditResults.js");
 const { buildAuditReportModel: buildAuditReportModelRaw }: typeof import(
   "../../src/audit/reporting/synthesis.js"
-) = await importSourceModule(
-  "src/reporting/synthesis.ts",
-);
+) = await import("../../src/audit/reporting/synthesis.js");
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
 ) => buildAuditReportModelRaw(params);
 const { buildRequeuePayload }: typeof import(
   "../../src/audit/orchestrator/requeueCommand.js"
-) = await importSourceModule(
-  "src/orchestrator/requeueCommand.ts",
-);
+) = await import("../../src/audit/orchestrator/requeueCommand.js");
 function requireFirstFinding(
   report: AuditReportModel,
   message: string,

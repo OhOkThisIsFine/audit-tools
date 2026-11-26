@@ -2,7 +2,6 @@ import { test, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { importSourceModule } from "./helpers/sourceImport.mjs";
 import type { RepoManifest } from "../../src/audit/types.js";
 import type { GraphSignals } from "../../src/audit/extractors/graphSignals.js";
 import type {
@@ -11,31 +10,27 @@ import type {
   SurfaceManifest,
 } from "audit-tools/shared";
 
-// `importSourceModule` compiles the TypeScript source to a temp dir and returns
-// the compiled module untyped. Annotating each binding with the module's own
-// `typeof import(...)` type restores the real contract for the typechecker
-// without changing what runs.
 const { bucketFile }: typeof import("../../src/audit/extractors/bucketing.js") =
-  await importSourceModule("src/extractors/bucketing.ts");
+  await import("../../src/audit/extractors/bucketing.js");
 const {
   buildFileDisposition,
   isAuditExcludedStatus,
 }: typeof import("../../src/audit/extractors/disposition.js") =
-  await importSourceModule("src/extractors/disposition.ts");
+  await import("../../src/audit/extractors/disposition.js");
 const { buildGraphBundle }: typeof import("../../src/audit/extractors/graph.js") =
-  await importSourceModule("src/extractors/graph.ts");
+  await import("../../src/audit/extractors/graph.js");
 const {
   buildRepoManifest,
 }: typeof import("../../src/audit/extractors/fileInventory.js") =
-  await importSourceModule("src/extractors/fileInventory.ts");
+  await import("../../src/audit/extractors/fileInventory.js");
 const {
   buildCriticalFlowManifest,
 }: typeof import("../../src/audit/extractors/flows.js") =
-  await importSourceModule("src/extractors/flows.ts");
+  await import("../../src/audit/extractors/flows.js");
 const {
   buildUnitManifest,
 }: typeof import("../../src/audit/orchestrator/unitBuilder.js") =
-  await importSourceModule("src/orchestrator/unitBuilder.ts");
+  await import("../../src/audit/orchestrator/unitBuilder.js");
 const {
   EXTRACTOR_HEURISTIC_NOTE,
   isAsyncTaskPath,
@@ -55,19 +50,19 @@ const {
   isTestPath,
   normalizeExtractorPath,
 }: typeof import("../../src/audit/extractors/pathPatterns.js") =
-  await importSourceModule("src/extractors/pathPatterns.ts");
+  await import("../../src/audit/extractors/pathPatterns.js");
 const {
   buildSurfaceManifest,
 }: typeof import("../../src/audit/extractors/surfaces.js") =
-  await importSourceModule("src/extractors/surfaces.ts");
+  await import("../../src/audit/extractors/surfaces.js");
 const { loadIgnoreFile }: typeof import("../../src/audit/extractors/ignore.js") =
-  await importSourceModule("src/extractors/ignore.ts");
+  await import("../../src/audit/extractors/ignore.js");
 const { buildRiskRegister }: typeof import("../../src/audit/extractors/risk.js") =
-  await importSourceModule("src/extractors/risk.ts");
+  await import("../../src/audit/extractors/risk.js");
 const {
   buildRepoManifestFromFs,
 }: typeof import("../../src/audit/extractors/fsIntake.js") =
-  await importSourceModule("src/extractors/fsIntake.ts");
+  await import("../../src/audit/extractors/fsIntake.js");
 
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 

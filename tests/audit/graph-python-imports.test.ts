@@ -1,9 +1,8 @@
 import { test, describe, it, expect } from "vitest";
-import { importSourceModule } from "./helpers/sourceImport.mjs";
 import type { GraphEdge } from "audit-tools/shared";
 
 const { resolvePythonImportTarget, resolvePythonFromImportTargets, extractPythonImportEdges } =
-  await importSourceModule("src/extractors/graphPythonImports.ts");
+  await import("../../src/audit/extractors/graphPythonImports.js");
 
 type PythonFromImportTarget = { specifier: string; target: string };
 
@@ -167,7 +166,7 @@ await test("resolvePythonAbsoluteModuleSpecifier disambiguation: score-based uni
   // The src/app/models.py candidate shares "src/app" with the fromPath directory
   // and should win the common-prefix disambiguation.
   expect(result !== undefined, "expected a resolved path, got undefined").toBeTruthy();
-  expect(result.includes("src/app/models"), `Expected src/app/models.py, got ${result}`).toBeTruthy();
+  expect(result?.includes("src/app/models"), `Expected src/app/models.py, got ${result}`).toBeTruthy();
 });
 
 await test("resolvePythonAbsoluteModuleSpecifier disambiguation: src/ tiebreak when scores are tied and one candidate is under src/", () => {
@@ -217,7 +216,7 @@ await test("extractPythonImportEdges delegates from-import resolution to resolve
   expect(edges[0].kind === "python-from-import").toBeTruthy();
   // The resolved specifier is recorded in the edge `reason` (GraphEdge has no
   // `specifier` field); the submodule specifier should be `app.services.auth`.
-  expect(edges[0].reason.includes("app.services.auth"), `Expected submodule specifier in reason, got ${edges[0].reason}`).toBeTruthy();
+  expect(edges[0]?.reason).toContain("app.services.auth");
   expect(edges[0].to.endsWith("auth.py"), `Expected submodule target auth.py, got ${edges[0].to}`).toBeTruthy();
 });
 
@@ -233,7 +232,7 @@ await test("extractPythonImportEdges delegates from-import resolution: falls bac
   expect(edges[0].kind).toBe("python-from-import");
   // Module-level fallback: the resolved specifier (recorded in `reason`) is the
   // module itself, `app.handlers`, not a submodule.
-  expect(edges[0].reason.includes("app.handlers"), `Expected module specifier app.handlers in reason, got ${edges[0].reason}`).toBeTruthy();
+  expect(edges[0]?.reason).toContain("app.handlers");
   expect(edges[0].to.endsWith("handlers.py"), `Expected handlers.py, got ${edges[0].to}`).toBeTruthy();
 });
 
@@ -262,7 +261,7 @@ await test("extractPythonImportEdges delegates from-import resolution: wildcard 
   expect(edges[0].kind).toBe("python-from-import");
   // '*' is filtered out, so the only resolved specifier (recorded in `reason`)
   // is the module-level fallback `app.utils`.
-  expect(edges[0].reason.includes("app.utils"), `Expected module specifier app.utils in reason, got ${edges[0].reason}`).toBeTruthy();
+  expect(edges[0]?.reason).toContain("app.utils");
   expect(edges[0].to.endsWith("utils.py"), `Expected utils.py, got ${edges[0].to}`).toBeTruthy();
 });
 

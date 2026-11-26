@@ -1,11 +1,10 @@
 import { test, expect } from "vitest";
-import type { GraphEdge } from "audit-tools/shared";
-import { importSourceModule } from "./helpers/sourceImport.mjs";
+import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 
 const { deriveGraphSignals, allGraphEdges, structuralImportEdges } =
-  await importSourceModule("src/extractors/graphSignals.ts");
+  await import("../../src/audit/extractors/graphSignals.js");
 
-function bundle(imports: unknown[], extra: Record<string, unknown> = {}) {
+function bundle(imports: GraphEdge[], extra: Record<string, unknown> = {}): GraphBundle {
   return { graphs: { imports, ...extra } };
 }
 
@@ -132,7 +131,7 @@ test("structuralImportEdges returns only the imports and calls buckets, dropping
       routes: [{ path: "/x", handler: "h" }],
       junk: "not-an-array",
     },
-  });
+  } as unknown as GraphBundle);
   expect(edges.map((e: GraphEdge) => `${e.from}->${e.to}`)).toEqual(["a->b", "b->c"]);
 });
 

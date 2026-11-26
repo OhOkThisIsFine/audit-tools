@@ -6,11 +6,12 @@
  * These are deterministic, in-process tests — no LLM calls.
  */
 import { test, expect } from "vitest";
+import assert from "node:assert/strict";
+import type { GitSpawn } from "../../src/audit/extractors/disposition.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, writeFile } from "node:fs/promises";
-import { importSourceModule } from "./helpers/sourceImport.mjs";
 import { withTempDir } from "./helpers/withTempDir.mjs";
 import type { Finding } from "../../src/audit/types.js";
 import type { GraphEdge } from "audit-tools/shared";
@@ -58,9 +59,9 @@ test("INV-01: each graphManifestEdges language analyzer imports independently (n
 // Confidence and direction must be within the shared contract's allowed types.
 
 test("INV-02: extractors emit edges that conform to shared GraphEdge shape", async () => {
-  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
-  const { buildFileDisposition } = await importSourceModule("src/extractors/disposition.ts");
-  const { buildRepoManifest } = await importSourceModule("src/extractors/fileInventory.ts");
+  const { buildGraphBundle } = await import("../../src/audit/extractors/graph.js");
+  const { buildFileDisposition } = await import("../../src/audit/extractors/disposition.js");
+  const { buildRepoManifest } = await import("../../src/audit/extractors/fileInventory.js");
 
   const repoManifest = buildRepoManifest("fixture", [
     { path: "src/api/auth.ts", size_bytes: 100 },
@@ -94,6 +95,8 @@ test("INV-02: extractors emit edges that conform to shared GraphEdge shape", asy
 
   let total = 0;
   for (const edges of allEdgeLists) {
+    if (edges === undefined) continue;
+    assert(Array.isArray(edges), "edge buckets must be arrays");
     for (const edge of edges) {
       total++;
       expect(typeof edge.from, `edge.from must be string, got ${typeof edge.from}`).toBe("string");
@@ -118,7 +121,7 @@ test("INV-02: extractors emit edges that conform to shared GraphEdge shape", asy
 // X is skipped and the cycle X→C→X is missed.
 
 test("INV-03: detectCycles finds cycle reachable only through already-visited shared node", async () => {
-  const { buildDesignAssessment } = await importSourceModule("src/extractors/designAssessment.ts");
+  const { buildDesignAssessment } = await import("../../src/audit/extractors/designAssessment.js");
 
   // Graph: A→X (leaf from A), B→X, X→C, C→X (cycle X↔C).
   // If DFS starts at A, visits X (no cycle since C→X doesn't exist from A's path alone).
@@ -147,13 +150,13 @@ test("INV-03: detectCycles finds cycle reachable only through already-visited sh
   const cycleFinding = result.findings.find(
     (finding: Finding) => finding.category === "dependency_cycle",
   );
-  expect(cycleFinding, "must detect the X↔C cycle reachable via the shared X node").toBeTruthy();
+  assert(cycleFinding, "must detect the X↔C cycle reachable via the shared X node");
   expect(cycleFinding.affected_files.some((f: { path: string }) => f.path === "X.ts") ||
     cycleFinding.affected_files.some((f: { path: string }) => f.path === "C.ts"), "cycle finding must include X.ts or C.ts").toBeTruthy();
 });
 
 test("INV-03: detectCycles finds direct 2-node cycle (basic regression)", async () => {
-  const { buildDesignAssessment } = await importSourceModule("src/extractors/designAssessment.ts");
+  const { buildDesignAssessment } = await import("../../src/audit/extractors/designAssessment.js");
 
   const result = buildDesignAssessment({
     unitManifest: { units: [] },
@@ -176,16 +179,14 @@ test("INV-03: detectCycles finds direct 2-node cycle (basic regression)", async 
   const cycleFinding = result.findings.find(
     (finding: Finding) => finding.category === "dependency_cycle",
   );
-  expect(cycleFinding, "must detect the a↔b cycle").toBeTruthy();
+  assert(cycleFinding, "must detect the a↔b cycle");
 });
 
 // ── INV-audit-extractors-04: regex-based extraction is linear-time-safe ──────
 // A deeply-nested Angular route object must not catastrophically backtrack.
 
 test("INV-04: Angular route ANGULAR_ROUTE_OBJECT_PATTERN does not hang on deeply nested input", async () => {
-  const { extractFrameworkRouteEvidence } = await importSourceModule(
-    "src/extractors/graphRoutes.ts",
-  );
+  const { extractFrameworkRouteEvidence } = await import("../../src/audit/extractors/graphRoutes.js");
 
   // Construct a deeply nested Angular-style routes object that exercises the
   // ANGULAR_ROUTE_OBJECT_PATTERN without triggering catastrophic backtracking.
@@ -217,7 +218,7 @@ test("INV-04: Angular route ANGULAR_ROUTE_OBJECT_PATTERN does not hang on deeply
 // (b) VCS-backed disposition correctly excludes negation/wildcard patterns via git
 
 test("INV-05: loadIgnoreFile returns patterns including wildcard and negation lines unchanged", async () => {
-  const { loadIgnoreFile } = await importSourceModule("src/extractors/ignore.ts");
+  const { loadIgnoreFile } = await import("../../src/audit/extractors/ignore.js");
 
   await withTempDir("audit-code-inv05-", async (root) => {
     await writeFile(
@@ -239,7 +240,7 @@ test("INV-05: loadIgnoreFile returns patterns including wildcard and negation li
 });
 
 test("INV-05: loadIgnoreFile tolerates a missing .auditorignore file", async () => {
-  const { loadIgnoreFile } = await importSourceModule("src/extractors/ignore.ts");
+  const { loadIgnoreFile } = await import("../../src/audit/extractors/ignore.js");
 
   await withTempDir("audit-code-inv05b-", async (root) => {
     const patterns = await loadIgnoreFile(root);
@@ -252,8 +253,8 @@ test("INV-05: loadIgnoreFile tolerates a missing .auditorignore file", async () 
 // disposition's vcs_ignore summary, not silently applied.
 
 test("INV-06: buildFileDisposition surfaces root_ignored guard branch", async () => {
-  const { buildFileDisposition } = await importSourceModule("src/extractors/disposition.ts");
-  const { buildRepoManifest } = await importSourceModule("src/extractors/fileInventory.ts");
+  const { buildFileDisposition } = await import("../../src/audit/extractors/disposition.js");
+  const { buildRepoManifest } = await import("../../src/audit/extractors/fileInventory.js");
 
   const repoManifest = buildRepoManifest("fixture", [
     { path: "src/a.ts", size_bytes: 10 },
@@ -261,9 +262,9 @@ test("INV-06: buildFileDisposition surfaces root_ignored guard branch", async ()
   ]);
 
   // Fake spawn: reports ALL files as ignored (root_ignored guard fires).
-  const fakeSpawn = (_cmd: string, _args: string[], opts: { input: string }) => ({
+  const fakeSpawn: GitSpawn = async (_cmd, _args, opts) => ({
     status: 0,
-    stdout: opts.input.replace(/\0/g, "\0"),
+    stdout: opts.input ?? "",
     stderr: "",
     error: undefined,
     pid: 1,
@@ -282,10 +283,8 @@ test("INV-06: buildFileDisposition surfaces root_ignored guard branch", async ()
 });
 
 test("INV-06: buildFileDisposition surfaces share_exceeded guard branch", async () => {
-  const { buildFileDisposition, VCS_IGNORED_MAX_SHARE } = await importSourceModule(
-    "src/extractors/disposition.ts",
-  );
-  const { buildRepoManifest } = await importSourceModule("src/extractors/fileInventory.ts");
+  const { buildFileDisposition, VCS_IGNORED_MAX_SHARE } = await import("../../src/audit/extractors/disposition.js");
+  const { buildRepoManifest } = await import("../../src/audit/extractors/fileInventory.js");
 
   // Create enough files so that ignoring all BUT one exceeds the share threshold.
   const filePaths = Array.from({ length: 20 }, (_, i) => `src/file${i}.ts`);
@@ -296,7 +295,7 @@ test("INV-06: buildFileDisposition surfaces share_exceeded guard branch", async 
 
   // Fake spawn: ignores all but the last file → share = 19/20 = 0.95 > VCS_IGNORED_MAX_SHARE
   const ignoredPaths = filePaths.slice(0, -1).map((p) => p.replace(/\\/g, "/"));
-  const fakeSpawn = (_cmd: string, _args: string[], _opts: unknown) => ({
+  const fakeSpawn: GitSpawn = async () => ({
     status: 0,
     stdout: ignoredPaths.join("\0") + "\0",
     stderr: "",
@@ -335,7 +334,7 @@ test("INV-07: typescript analyzer source does not import readFileSync", () => {
 // with a content hash when hashing is enabled.
 
 test("INV-08: buildRepoManifestFromFs hashes oversized files", async () => {
-  const { buildRepoManifestFromFs } = await importSourceModule("src/extractors/fsIntake.ts");
+  const { buildRepoManifestFromFs } = await import("../../src/audit/extractors/fsIntake.js");
 
   await withTempDir("audit-code-inv08-", async (root) => {
     await mkdir(join(root, "src"), { recursive: true });
@@ -351,10 +350,10 @@ test("INV-08: buildRepoManifestFromFs hashes oversized files", async () => {
     const small = manifest.files.find((f: { path: string }) => f.path === "src/small.ts");
     const huge = manifest.files.find((f: { path: string }) => f.path === "src/huge.ts");
 
-    expect(small, "small file must appear in manifest").toBeTruthy();
+    assert(small, "small file must appear in manifest");
     expect(typeof small.hash, "small file must have a hash").toBe("string");
 
-    expect(huge, "oversized file must appear in manifest (not silently dropped)").toBeTruthy();
+    assert(huge, "oversized file must appear in manifest (not silently dropped)");
     expect(huge.hash, "oversized file must have a content hash").toMatch(/^[a-f0-9]{64}$/);
     expect(huge.size_bytes > 100, "oversized file must have its actual size_bytes recorded").toBeTruthy();
   });
@@ -365,9 +364,9 @@ test("INV-08: buildRepoManifestFromFs hashes oversized files", async () => {
 // not emit edges for every name-matching file in the entire repository.
 
 test("INV-09: heuristicAuthSession edges connect only auth-named to session-named files", async () => {
-  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
-  const { buildFileDisposition } = await importSourceModule("src/extractors/disposition.ts");
-  const { buildRepoManifest } = await importSourceModule("src/extractors/fileInventory.ts");
+  const { buildGraphBundle } = await import("../../src/audit/extractors/graph.js");
+  const { buildFileDisposition } = await import("../../src/audit/extractors/disposition.js");
+  const { buildRepoManifest } = await import("../../src/audit/extractors/fileInventory.js");
 
   const repoManifest = buildRepoManifest("fixture", [
     { path: "src/auth/service.ts", size_bytes: 10 },     // auth file
@@ -379,7 +378,9 @@ test("INV-09: heuristicAuthSession edges connect only auth-named to session-name
   const disposition = await buildFileDisposition(repoManifest);
   const graph = buildGraphBundle(repoManifest, disposition);
 
-  const authSessionEdges = graph.graphs.heuristics.filter(
+  const heuristicEdges = graph.graphs.heuristics;
+  assert(Array.isArray(heuristicEdges), "expected heuristic edges");
+  const authSessionEdges = heuristicEdges.filter(
     (e: GraphEdge) => e.kind === "heuristic-auth-session-link",
   );
 
@@ -402,9 +403,7 @@ test("INV-09: heuristicAuthSession edges connect only auth-named to session-name
 // errors — not vanish silently.
 
 test("INV-10: graphSuites JSON parse error emits a stderr diagnostic", async () => {
-  const { extractJsonSchemaReferenceEdges } = await importSourceModule(
-    "src/extractors/graphSuites.ts",
-  );
+  const { extractJsonSchemaReferenceEdges } = await import("../../src/audit/extractors/graphSuites.js");
 
   const stderrLines: string[] = [];
   const origWrite = process.stderr.write;
@@ -437,7 +436,7 @@ test("INV-10: fsIntake emits warn diagnostic for unreadable directory", async ()
 });
 
 test("INV-10: fsIntake hashes oversized files without a skip diagnostic", async () => {
-  const { buildRepoManifestFromFs } = await importSourceModule("src/extractors/fsIntake.ts");
+  const { buildRepoManifestFromFs } = await import("../../src/audit/extractors/fsIntake.js");
 
   await withTempDir("audit-code-inv10-", async (root) => {
     await mkdir(join(root, "src"), { recursive: true });
@@ -485,9 +484,11 @@ test("INV-10: fsIntake hashes oversized files without a skip diagnostic", async 
 //   "import resolution is heuristic/regex today — ARC-27aceb61."
 
 test("ARC-27aceb61: buildGraphBundle extracts ESM static import edges", async () => {
-  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
+  const { buildGraphBundle } = await import("../../src/audit/extractors/graph.js");
 
   const repoManifest = {
+    repository: { name: "fixture" },
+    generated_at: "2026-01-01T00:00:00Z",
     files: [
       { path: "src/a.ts", language: "typescript", size_bytes: 50, excluded: false },
       { path: "src/b.ts", language: "typescript", size_bytes: 50, excluded: false },
@@ -499,18 +500,20 @@ test("ARC-27aceb61: buildGraphBundle extracts ESM static import edges", async ()
   };
 
   const bundle = buildGraphBundle(repoManifest, undefined, { fileContents });
-  const importEdges = bundle.graphs.imports;
+  const importEdges = bundle.graphs.imports ?? [];
 
   const edge = importEdges.find((e: GraphEdge) => e.from === "src/a.ts" && e.to === "src/b.ts");
-  expect(edge !== undefined, "buildGraphBundle must extract an ESM import edge from src/a.ts → src/b.ts").toBeTruthy();
+  assert(edge, "buildGraphBundle must extract an ESM import edge from src/a.ts → src/b.ts");
   expect(edge.kind, "import edge must have kind 'esm'").toBe("esm");
   expect(typeof edge.confidence === "number" && edge.confidence > 0, "import edge must have positive confidence").toBeTruthy();
 });
 
 test("ARC-27aceb61: buildGraphBundle extracts re-export edges", async () => {
-  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
+  const { buildGraphBundle } = await import("../../src/audit/extractors/graph.js");
 
   const repoManifest = {
+    repository: { name: "fixture" },
+    generated_at: "2026-01-01T00:00:00Z",
     files: [
       { path: "src/index.ts", language: "typescript", size_bytes: 60, excluded: false },
       { path: "src/utils.ts", language: "typescript", size_bytes: 40, excluded: false },
@@ -522,19 +525,21 @@ test("ARC-27aceb61: buildGraphBundle extracts re-export edges", async () => {
   };
 
   const bundle = buildGraphBundle(repoManifest, undefined, { fileContents });
-  const importEdges = bundle.graphs.imports;
+  const importEdges = bundle.graphs.imports ?? [];
 
   const edge = importEdges.find(
     (e: GraphEdge) => e.from === "src/index.ts" && e.to === "src/utils.ts",
   );
-  expect(edge !== undefined, "buildGraphBundle must extract a re-export edge from src/index.ts → src/utils.ts").toBeTruthy();
+  assert(edge, "buildGraphBundle must extract a re-export edge from src/index.ts → src/utils.ts");
   expect(edge.kind, "re-export edge must have kind 're-export'").toBe("re-export");
 });
 
 test("ARC-27aceb61: buildGraphBundle extracts string-literal dynamic import edges", async () => {
-  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
+  const { buildGraphBundle } = await import("../../src/audit/extractors/graph.js");
 
   const repoManifest = {
+    repository: { name: "fixture" },
+    generated_at: "2026-01-01T00:00:00Z",
     files: [
       { path: "src/loader.ts", language: "typescript", size_bytes: 80, excluded: false },
       { path: "src/module.ts", language: "typescript", size_bytes: 40, excluded: false },
@@ -546,12 +551,12 @@ test("ARC-27aceb61: buildGraphBundle extracts string-literal dynamic import edge
   };
 
   const bundle = buildGraphBundle(repoManifest, undefined, { fileContents });
-  const importEdges = bundle.graphs.imports;
+  const importEdges = bundle.graphs.imports ?? [];
 
   const edge = importEdges.find(
     (e: GraphEdge) => e.from === "src/loader.ts" && e.to === "src/module.ts",
   );
-  expect(edge !== undefined, "buildGraphBundle must extract a dynamic-import edge for string-literal specifier").toBeTruthy();
+  assert(edge, "buildGraphBundle must extract a dynamic-import edge for string-literal specifier");
   expect(edge.kind, "dynamic import edge must have kind 'dynamic-import'").toBe("dynamic-import");
 });
 
@@ -561,9 +566,11 @@ test("ARC-27aceb61: buildGraphBundle does NOT extract template-literal dynamic i
   // statically resolved by regex. The TypeScript compiler API could resolve these
   // when the template expression is a union of string literals, but the regex
   // approach silently misses them. This is the trade-off recorded in ARC-27aceb61.
-  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
+  const { buildGraphBundle } = await import("../../src/audit/extractors/graph.js");
 
   const repoManifest = {
+    repository: { name: "fixture" },
+    generated_at: "2026-01-01T00:00:00Z",
     files: [
       { path: "src/dynamic.ts", language: "typescript", size_bytes: 100, excluded: false },
       { path: "src/feature.ts", language: "typescript", size_bytes: 40, excluded: false },
@@ -577,7 +584,7 @@ test("ARC-27aceb61: buildGraphBundle does NOT extract template-literal dynamic i
   };
 
   const bundle = buildGraphBundle(repoManifest, undefined, { fileContents });
-  const importEdges = bundle.graphs.imports;
+  const importEdges = bundle.graphs.imports ?? [];
 
   const edge = importEdges.find(
     (e: GraphEdge) => e.from === "src/dynamic.ts" && e.to === "src/feature.ts",
@@ -868,7 +875,7 @@ test("fail-3: malformed output and a rejected-flag run are both parse_error, tol
 
 // fail-1: an unreadable file degrades the graph, never the build.
 test("fail-1: buildGraphBundleFromFs skips an unreadable file, logs it, and still returns a bundle", async () => {
-  const { buildGraphBundleFromFs } = await importSourceModule("src/extractors/graph.ts");
+  const { buildGraphBundleFromFs } = await import("../../src/audit/extractors/graph.js");
 
   await withTempDir("audit-code-graph-unreadable-", async (root) => {
     await mkdir(join(root, "src"), { recursive: true });
