@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/source-read-only-executors.test.ts
+import { readAnalyzerCoverageGaps } from "./analyzerCalibration.js";
 import { readQuestionReportCharterOptions, type ArtifactBundle } from "../io/artifacts.js";
 import { EXECUTOR_REGISTRY } from "./executors.js";
 import { readRunSnapshotLinks } from "../io/runSnapshot.js";
@@ -100,6 +101,7 @@ async function synthesisReadInputs(
       : null,
     charter: options.artifactsDir ? await readQuestionReportCharterOptions(options.artifactsDir) : undefined,
     questionReview: { accepted: cycle.answers, evidence: cycle.evidence, adjudications: cycle.adjudications,
+      analyzerCoverageGaps: options.artifactsDir ? await readAnalyzerCoverageGaps(options.artifactsDir, bundle) : undefined,
       dependenciesByQuestion: cycle.dependenciesByQuestion, consolidations: cycle.consolidations, reopens: cycle.reopens ?? [] },
   };
 }

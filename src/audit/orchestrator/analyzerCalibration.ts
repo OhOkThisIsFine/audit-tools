@@ -1,3 +1,6 @@
+import { join } from "node:path";
+import { readOptionalJsonFile } from "../../shared/io/json.js";
+import { AnalyzerSelectionSchema } from "./analyzerSelection.js";
 import { z } from "zod";
 import { hashContent, stableStringify } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -41,4 +44,20 @@ export function currentAnalyzerCalibration(value: unknown, request: AnalyzerCali
   if (!request.tools.every(tool => byId.has(tool.tool) &&
       (!tool.incomplete || byId.get(tool.tool)?.action !== "accept"))) return;
   return answer.data;
+}
+
+/** Report only operator dispositions bound to the evidence still in use. */
+export async function readAnalyzerCoverageGaps(artifactsDir: string, bundle: ArtifactBundle): Promise<string[]> {
+  const raw = await readOptionalJsonFile<unknown>(join(artifactsDir, "analyzer-calibration.json"));
+  if (!raw) return [];
+  const selection = await readOptionalJsonFile<unknown>(join(artifactsDir, "analyzer-selection.json"));
+  const receipt = currentAnalyzerCalibration(raw, analyzerCalibrationRequest(bundle, selection));
+  if (!receipt || receipt.decisions.some(row => row.action === "retry")) return [];
+  const acceptedSelection = AnalyzerSelectionSchema.safeParse(selection);
+  const notes = [
+    ...receipt.unresolved,
+    ...receipt.decisions.flatMap(row => row.action === "limited" ? [row.tool + ": " + row.coverage] : []),
+    ...(acceptedSelection.success ? acceptedSelection.data.gaps : []),
+  ];
+  return [...new Set(notes.map(note => note.replace(/\s+/gu, " ").trim()))];
 }

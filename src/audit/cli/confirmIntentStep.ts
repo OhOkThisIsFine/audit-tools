@@ -76,6 +76,7 @@ export function renderConfirmIntentPrompt(
     continueCommand: string;
     evidenceGraphCommand?: string | null;
     evidenceGraphStatus?: string;
+    analyzerCoverageGaps?: readonly string[];
     /**
      * Blocking checkpoint questions raised by unencodable `free_form_intent`
      * clauses that the host has not yet answered. When non-empty, the audit
@@ -152,6 +153,7 @@ export function renderConfirmIntentPrompt(
     "",
     "In one message, ask whether to stop here with the analyzer and graph evidence or continue with the proposed scope, lenses, and design-review depth below. Present both choices together; do not ask whether to continue and then ask about scope and lenses in a second round. Honor choices the user has already made.",
     "If stopping, use or present the evidence and its limitations. Do not write intent_checkpoint.json, choose lenses, or run the continuation. This is not a completed audit.",
+    ...(opts.analyzerCoverageGaps?.length ? ["", "Unresolved analyzer coverage:", ...opts.analyzerCoverageGaps.map(gap => "- " + gap)] : []),
     ...(opts.evidenceGraphStatus ? [opts.evidenceGraphStatus] : []),
     ...(opts.evidenceGraphCommand ? ["Query admitted files using: " + opts.evidenceGraphCommand] : []),
     "",

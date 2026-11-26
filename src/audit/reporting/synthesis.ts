@@ -1691,6 +1691,11 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
     }
     for (const risk of report.top_risks ?? []) lines.push(`- Risk: ${risk}`);
   }
+  if (review.analyzer_coverage_gaps?.length) {
+    lines.push("", "## Unresolved analyzer coverage", "",
+      "These checks were incomplete or unavailable. This is separate from reviewer coverage.",
+      ...review.analyzer_coverage_gaps.map(gap => "- " + gap));
+  }
   lines.push("", "## Lens coverage", "");
   for (const lens of review.lens_decisions) {
     const questions = review.questions.filter(row => row.lens === lens.lens);

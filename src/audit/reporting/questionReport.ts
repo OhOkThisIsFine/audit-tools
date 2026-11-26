@@ -34,6 +34,7 @@ export interface QuestionReportInput {
   consolidations?: readonly Decisions[number][];
   reopens?: readonly ReviewReopenEvent[];
   auditRead: AuditRead | null;
+  analyzerCoverageGaps?: readonly string[];
 }
 
 export function projectQuestionForReport(
@@ -212,6 +213,7 @@ export function buildQuestionAuditFindingsReport(input: QuestionReportInput): Qu
   const question_review: QuestionReviewReport = {
     schema_version: REVIEW_QUESTION_CONTRACT_VERSION, snapshot_id: input.plan.snapshot_id,
     completion, questions, findings: groups.map(({ row }) => row), consolidations, adjudications, accepted,
+    ...(input.analyzerCoverageGaps?.length ? { analyzer_coverage_gaps: [...input.analyzerCoverageGaps] } : {}),
     ...(input.reopens?.length ? { reopens: [...input.reopens] } : {}),
     inventory: input.plan.inventory, omissions: input.plan.omissions, lens_decisions: input.plan.lens_decisions,
     ...(input.plan.signal_dispositions === undefined ? {} : { signal_dispositions: input.plan.signal_dispositions }),

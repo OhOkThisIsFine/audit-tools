@@ -7,6 +7,7 @@ import type { AuditFindingsReport, AuditRead } from "audit-tools/shared";
 import { deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
 import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
 import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
+import { analyzerCalibrationRequest } from "../../src/audit/orchestrator/analyzerCalibration.js";
 import { EXECUTOR_RUNNERS } from "../../src/audit/orchestrator/executorRunners.js";
 import {
   runQuestionSynthesisExecutor,
@@ -169,6 +170,29 @@ describe("the RUNNER is the writer: synthesis_executor records the repository it
     expect(second.updated.audit_findings?.audit_read).toEqual(
       first.updated.audit_findings?.audit_read,
     );
+  });
+
+  it("keeps current analyzer gaps in the report and ignores a stale receipt", async () => {
+    const bundle = await readyBundle();
+    bundle.external_analyzer_acquisition = { enabled: true, tool_statuses: [
+      { tool: "fixture", status: "failed", resolved: true },
+    ] };
+    await mkdir(ARTIFACTS_DIR, { recursive: true });
+    const binding = analyzerCalibrationRequest(bundle, undefined);
+    writeFileSync(join(ARTIFACTS_DIR, "analyzer-calibration.json"), JSON.stringify({
+      input_sha256: binding.input_sha256,
+      decisions: [{ tool: "fixture", action: "limited", reason: "Runner unavailable", coverage: "generated files not scanned" }],
+      unresolved: ["one fixture check could not run"],
+    }));
+    const context = { ...ctx(REPO_DIR), options: { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR } };
+    const first = await EXECUTOR_RUNNERS.synthesis_executor!(bundle, context as never);
+    expect(first.updated.audit_report).toContain("## Unresolved analyzer coverage");
+    expect(first.updated.audit_report).toContain("fixture: generated files not scanned");
+    expect(first.updated.audit_findings).toMatchObject({ question_review: { analyzer_coverage_gaps: [
+      "one fixture check could not run", "fixture: generated files not scanned",
+    ] } });
+    const revised = await EXECUTOR_RUNNERS.synthesis_executor!({ ...bundle, external_analyzer_results: [] }, context as never);
+    expect(revised.updated.audit_report).not.toContain("## Unresolved analyzer coverage");
   });
 
   it("states null when the run has no root to read", async () => {

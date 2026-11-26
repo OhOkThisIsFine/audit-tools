@@ -37,6 +37,7 @@ export const QuestionReviewReportSchema = z.strictObject({
   schema_version: z.literal(REVIEW_QUESTION_CONTRACT_VERSION),
   snapshot_id: id,
   completion: z.enum(["complete", "incomplete"]),
+  analyzer_coverage_gaps: z.array(z.string().min(1)).optional(),
   inventory: ReviewPlanObjectSchema.shape.inventory,
   omissions: ReviewPlanObjectSchema.shape.omissions,
   lens_decisions: ReviewPlanObjectSchema.shape.lens_decisions,

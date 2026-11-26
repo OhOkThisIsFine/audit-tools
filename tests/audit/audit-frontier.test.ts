@@ -349,6 +349,8 @@ test("one shared checkpoint offers using evidence without accepting audit intent
     const checkpointPrompt = await readFile(first.prompt_path, "utf8");
     expect(checkpointPrompt).toMatch(/In one message, ask whether to stop here.*continue with the proposed scope, lenses, and design-review depth/u);
     expect(checkpointPrompt).toContain("A reply choosing to continue with no changes confirms the proposal");
+    expect(checkpointPrompt).toContain("Unresolved analyzer coverage:");
+    expect(checkpointPrompt).toContain(SCHEDULED + " still omitted by Semgrep");
     expect(first.artifact_paths.graph_index).toEqual(expect.any(String));
     const graphIndex = first.artifact_paths.graph_index;
     const graph = await readFile(graphIndex, "utf8");

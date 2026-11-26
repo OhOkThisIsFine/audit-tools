@@ -1,4 +1,4 @@
-import { analyzerCalibrationRequest, currentAnalyzerCalibration } from "../orchestrator/analyzerCalibration.js";
+import { analyzerCalibrationRequest, currentAnalyzerCalibration, readAnalyzerCoverageGaps } from "../orchestrator/analyzerCalibration.js";
 import { hashContent } from "../../shared/hash.js";
 import { charterComparisonInputRevision } from "./charterComparisonPrompt.js";
 import { systemicReviewInputRevision } from "../orchestrator/systemicChallengeExecutor.js";
@@ -1381,6 +1381,7 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
         intentCheckpointPath,
         continueCommand,
         evidenceGraphCommand: query,
+        analyzerCoverageGaps: await readAnalyzerCoverageGaps(artifactsDir, result.bundle),
         evidenceGraphStatus: graph.indexed ? "Codebase Memory is available for indexed symbols and call sites." :
           (graph.graphIndexFailed ? "Codebase Memory failed; use the native graph and frozen source." : "Codebase Memory is not configured; use the native graph and frozen source."),
         unresolvedConstraintClauses: unresolvedConstraintClauses(
