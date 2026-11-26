@@ -215,7 +215,6 @@ export async function dispatchBoundedItems({
 
   const records = [];
   let cursor = 0;
-  let retried = 0;
 
   /**
    * The ERROR ROW shape for one item — same identity echo on every path.
@@ -247,7 +246,6 @@ export async function dispatchBoundedItems({
       } catch (err) {
         failures.push(errText(err));
         if (round === 2) return { laneResult: null, failures, record: errorRow(e, new Error(failures.join(' | retry: '))) };
-        retried += 1;
         continue;
       }
       try {
@@ -261,7 +259,6 @@ export async function dispatchBoundedItems({
       } catch (err) {
         if (round === 1 && retryRecordError?.(err)) {
           failures.push(errText(err));
-          retried += 1;
           continue;
         }
         return { laneResult, failures, record: errorRow(e, err) };
@@ -281,7 +278,9 @@ export async function dispatchBoundedItems({
         rec.finish_reason = laneResult.finishReason;
         rec.output_bytes = Buffer.byteLength(raw, 'utf8');
       }
+      fs.appendFileSync(outPath, JSON.stringify(rec) + '\n');
       stamp.attempted += 1;
+      if (failures.length > 0) stamp.retried += 1;
       if (rec.error) stamp.errored += 1;
       else stamp.classified += 1;
       // Cumulative, because the per-pass `classified` reads as near-total
@@ -293,7 +292,6 @@ export async function dispatchBoundedItems({
       // Rewritten per completion (cheap, atomic-enough for a progress sidecar):
       // a killed run leaves an honest partial stamp, not silence.
       stampSafe(stamp);
-      fs.appendFileSync(outPath, JSON.stringify(rec) + '\n');
       records.push(rec);
       if (onProgress) onProgress(e, rec);
     }
@@ -301,7 +299,6 @@ export async function dispatchBoundedItems({
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   stamp.finished_at = /** @type {any} */ (new Date().toISOString());
-  stamp.retried = retried;
   stampSafe(stamp);
   return { stamp, records };
 }

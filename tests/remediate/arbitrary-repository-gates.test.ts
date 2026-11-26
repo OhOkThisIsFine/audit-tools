@@ -1,9 +1,14 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
+import { runTrackedAsync } from "audit-tools/shared";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { discoverProjectCommands } from "../../src/shared/tooling/testCommand.js";
 import { runToolOwnedFinalGate } from "../../src/remediate/steps/finalGate.js";
+vi.mock("audit-tools/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("audit-tools/shared")>();
+  return { ...actual, runTrackedAsync: vi.fn(actual.runTrackedAsync) };
+});
 const roots: string[] = [];
 function repo(scripts: Record<string, unknown> = {}): string {
   const root = mkdtempSync(join(tmpdir(), "arbitrary-gates-")); roots.push(root);
@@ -111,4 +116,37 @@ test("real npm commands run in the target repository and recover from a failing 
   rmSync(join(root, "fail"));
   expect((await runToolOwnedFinalGate(root)).passed).toBe(true);
   expect(readFileSync(join(root, "commands.log"), "utf8")).toBe("build\ntypecheck\nlint\nbuild\ntypecheck\nlint\ntest\n");
+});
+
+test("the default final gate refuses an execution error despite a zero root exit", async () => {
+  const run = vi.mocked(runTrackedAsync);
+  run.mockClear();
+  run.mockResolvedValueOnce({
+    argv: ["npm", "run", "build"], duration_ms: 1, status: 0,
+    stdout: "root finished", stderr: "child diagnostics",
+    error: new Error("execution deadline exceeded while cleaning up"),
+  });
+  try {
+    const gate = await runToolOwnedFinalGate(repo({ build: "b", test: "t" }));
+    expect(gate.passed).toBe(false);
+    expect(gate.results).toHaveLength(1);
+    expect(gate.results[0]).toMatchObject({
+      passed: false, exit_code: 0, stdout_tail: "root finished",
+      stderr_tail: "child diagnostics\nexecution deadline exceeded while cleaning up",
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  } finally {
+    run.mockClear();
+  }
+});
+
+test("a pre-runner-error-classification green is not reused on an otherwise matching tree", async () => {
+  const root = repo({ test: "node checks.mjs" });
+  const binding = finalGateBinding(root);
+  writeFileSync(join(root, "final-gate-verdict.json"), JSON.stringify({
+    schema_version: "remediate-code-final-gate-verdict/v1alpha1",
+    scope: "phase 1", tree: "same-tree", binding, passed: true, scoped_out: false,
+    outcome: "executed", recorded_at: "2026-11-26T00:00:00Z", results: [],
+  }));
+  expect(await readFinalGateVerdict(root, "phase 1", "same-tree", binding)).toBeUndefined();
 });

@@ -169,7 +169,12 @@ export async function queryReviewerCbm(index: string, meta: ReviewerCbm, allowed
   const binary = executable();
   if (!binary) throw new Error("Codebase Memory is not configured on this host. Use native file links or rebuild the indexed graph on this host.");
   const home = cacheDirectory(index, meta.key);
-  await access(join(home, MANIFEST));
+  try {
+    await access(join(home, MANIFEST));
+  } catch (error) {
+    if (!isFileMissingError(error)) throw error;
+    throw new Error("The Codebase Memory index manifest is missing. Run next-step on the indexing host to rebuild or use native file links.", { cause: error });
+  }
   if (meta.build !== await executableBuild(binary)) {
     throw new Error("The installed Codebase Memory build changed or is on a different host. Run next-step on that host to rebuild or use native file links.");
   }

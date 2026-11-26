@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/hook-trap-guards.test.ts
 //
 // Raw-control-byte gate.
 //
@@ -19,9 +20,8 @@ function git(args) {
   return execFileSync('git', args, { encoding: 'utf8', windowsHide: true });
 }
 
-const tracked = git(['ls-files'])
-  .split(/\r?\n/)
-  .map((l) => l.trim())
+const tracked = git(['ls-files', '-z'])
+  .split('\0')
   .filter((p) => p && SOURCE_EXT.test(p));
 
 const violations = [];

@@ -79,3 +79,8 @@ describe("backlog status-token guard — the live backlog is clean", () => {
     }
   });
 });
+
+test("a fence closes only on a matching delimiter long enough with no info string", () => {
+  const text = ["````md", "~~~", "```", "````still-code", "- DONE: inside", "`````", "- DONE: outside"].join("\n");
+  expect(findStatusMarkers(text).map((hit) => hit.line)).toEqual([7]);
+});

@@ -24,6 +24,15 @@ test("score-audit refuses missing findings but scores an explicit empty array wi
     }
 
     await writeFile(findings, JSON.stringify({ findings: [] }));
+    for (const label of [{ signature: "known", label: "true-positve" }, { signature: "known" }]) {
+      await writeFile(labels, JSON.stringify({ schema_version: "score-audit-corpus-labels/v1", run_id: "fixture", labels: [label] }));
+      const result = await run();
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/Could not read labels.*labels\.0\.label/s);
+      await expect(readFile(out)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(`${out}.md`)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    await writeFile(labels, JSON.stringify({ schema_version: "score-audit-corpus-labels/v1", run_id: "fixture", labels: [] }));
     expect((await run()).code).toBe(0);
     expect(JSON.parse(await readFile(out, "utf8"))).toMatchObject({ counts: { findings_emitted: 0 } });
     expect(await readFile(`${out}.md`, "utf8")).toMatch(/^# .*Scorecard/i);

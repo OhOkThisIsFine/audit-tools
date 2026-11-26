@@ -44,6 +44,7 @@
 // nothing is guarded at all.
 //
 //   node scripts/check-backlog-line-numbers.mjs
+import { markdownFenceFilter } from "./shared/markdownFenceFilter.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -74,13 +75,9 @@ function looksLikeRepoPath(prefix) {
  */
 export function findLineNumberCitations(text, lines = text.split(/\r?\n/)) {
   const found = [];
-  let inFence = false;
+  const isFenceLine = markdownFenceFilter();
   lines.forEach((raw, i) => {
-    if (/^\s*(```|~~~)/.test(raw)) {
-      inFence = !inFence;
-      return;
-    }
-    if (inFence) return;
+    if (isFenceLine(raw)) return;
 
     const spanRe = /`([^`]+)`/g;
     let m;

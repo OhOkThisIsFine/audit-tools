@@ -19,6 +19,7 @@ import { makeState as makeBaseState } from "./test-helpers.js";
 import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import type { RemediationItemState, RemediationPlan, SourceVerification } from "../../src/remediate/state/types.js";
 import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
+import { validateArtifacts } from "../../src/remediate/validation/artifacts.js";
 import { validateVerificationReport } from "../../src/remediate/validation/verificationReport.js";
 import { scratchDir } from "../helpers/scratch.js";
 import { submissionLedgerPath } from "../../src/shared/submission/submissionLedger.js";
@@ -218,7 +219,9 @@ describe("runClosePhase", () => {
     expect(events.filter(event => event.kind === "outcome")).toHaveLength(1);
   });
 
-  it.each([null, 1])("journals a PR with exit status %s without assuming no effect or replaying", async exit => {
+  it.each([null, 1, 0])("journals a PR with exit status %s without assuming no effect or replaying", async exit => {
+    const uncertain = exit !== 1;
+    const diagnostic = exit === 0 ? "synthetic remote failure\ndeadline during child cleanup" : "synthetic remote failure";
     const state = makeState({
       items: { U1: { status: "blocked", failure_reason: "Preserve close artifacts" } },
       applied_edit_surface: ["initial.txt"],
@@ -241,12 +244,15 @@ describe("runClosePhase", () => {
       }
       if (argv[0] === "gh" && argv[1] === "pr") {
         prIntent = inspect();
-        return { argv, duration_ms: 1, status: exit, stdout: "", stderr: "synthetic remote failure" };
+        return {
+          argv, duration_ms: 1, status: exit, stdout: "", stderr: "synthetic remote failure",
+          ...(exit === 0 ? { error: new Error("deadline during child cleanup") } : {}),
+        };
       }
       return actual.runTrackedAsync(argv, opts);
     });
     try {
-      if (exit === null) await expect(runClosePhase(state, BASE_OPTIONS)).rejects.toThrow("outcome is unresolved");
+      if (uncertain) await expect(runClosePhase(state, BASE_OPTIONS)).rejects.toThrow("outcome is unresolved");
       else expect((await runClosePhase(state, BASE_OPTIONS)).status).toBe("complete");
       expect(pushIntent).toMatchObject({ action: "open-pr", in_flight: ["git", "push"] });
       const [staged, committed] = pushIntent.receipts;
@@ -258,8 +264,8 @@ describe("runClosePhase", () => {
         receipts: [staged, committed, { command: ["git", "push"], exit_code: 0, stdout: "synthetic push receipt" }],
       });
       const closeCallCount = mocked.mock.calls.length;
-      if (exit === null) {
-        expect(inspect().receipts.at(-1)).toMatchObject({ exit_code: null, stderr: "synthetic remote failure" });
+      if (uncertain) {
+        expect(inspect().receipts.at(-1)).toMatchObject({ exit_code: null, stderr: diagnostic });
         for (const options of [{}, { finalizeClosing: true }]) {
           const blocked = await decideNextStep({ root: REPO_DIR, ...options });
           expect(blocked.step_kind).toBe("close_run");
@@ -267,6 +273,29 @@ describe("runClosePhase", () => {
           expect(blocked.allowed_commands).toEqual([]);
         }
         expect(existsSync(join(OUTPUT_DIR, "remediation-report.md"))).toBe(false);
+        const resolution = join(TEST_DIR, "closing_reconciliation.json");
+        const decision = {
+          disposition: "abandoned",
+          note: "The destination could not be verified. Preserve the commands already attempted.",
+        };
+        await writeFileAsync(resolution, JSON.stringify({ ...decision, receipt_sha256: "0".repeat(64) }));
+        expect((await decideNextStep({ root: REPO_DIR })).status).toBe("blocked");
+        expect(existsSync(join(OUTPUT_DIR, "remediation-report.md"))).toBe(false);
+        await writeFileAsync(resolution, JSON.stringify({ ...decision, receipt_sha256: inspect().sha256 }));
+        expect((await decideNextStep({ root: REPO_DIR })).step_kind).toBe("present_report");
+        const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+        expect(report).toContain("Status: unresolved");
+        expect(report).toContain(decision.note);
+        const outcomes = JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
+        expect(outcomes.closing_result).toMatchObject({
+          status: "unresolved", action: "open-pr",
+          reconciliation: decision,
+          commands: expect.arrayContaining([expect.objectContaining({ command: ["gh", "pr", "create", "--fill"], exit_code: null, stderr: diagnostic })]),
+        });
+        expect((await decideNextStep({ root: REPO_DIR })).step_kind).toBe("present_report");
+        const validation = await validateArtifacts(TEST_DIR, REPO_DIR);
+        expect(validation.issues.filter(issue => issue.includes("remediation-closing-result.json"))).toEqual([]);
+
       } else {
         expect((await decideNextStep({ root: REPO_DIR })).step_kind).toBe("present_report");
         const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
@@ -408,11 +437,15 @@ describe("runClosePhase", () => {
     );
     expect(outcomesJson.step_count).toBe(7);
     expect(outcomesJson.combined_test_result).toEqual({
-      passed: true,
+      status: "not_configured",
+      passed: null,
       duration_ms: 0,
     });
+    expect(outcomesJson.e2e_result).toEqual({ status: "not_configured", passed: null });
 
     const markdown = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+    expect(markdown).toContain("Combined test suite: not configured");
+    expect(markdown).toContain("End-to-end tests: not configured");
     expect(markdown).toContain("  - *Verification*: tool-observed requirement verification");
     expect(markdown).not.toContain("check A");
 
@@ -2051,6 +2084,31 @@ describe("closing spawns refuse a command that leaves the declared single-invoca
     // exits 0, e2e passes, and the close completes instead.
     expect(existsSync(join(REPO_DIR, "canary.txt"))).toBe(false);
   });
+
+  it("preserves a refused E2E declaration in both reports when no item can be re-blocked", async () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1", findings: [], blocks: [], project_type: "unknown",
+        candidate_closing_actions: ["none"], e2e_command: SHAPE_LEAVING_CANARY_COMMAND,
+      },
+      closing_plan: { action: "none", pre_authorized: true },
+    });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    expect((await runClosePhase(state, BASE_OPTIONS)).status).toBe("complete");
+    expect(existsSync(join(REPO_DIR, "canary.txt"))).toBe(false);
+    const json = JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
+    expect(json.e2e_result).toEqual({
+      status: "refused",
+      passed: null,
+      failure_summary: expect.stringContaining("leaves the single-invocation command shape"),
+    });
+    const markdown = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+    expect(markdown).toContain("End-to-end tests: refused");
+    const verification = JSON.parse(await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8"));
+    expect(verification.overall_status).toBe("failed");
+    expect(markdown).toContain("leaves the single-invocation command shape");
+  });
+
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2365,5 +2423,47 @@ describe("blockResolvedItemsOnCombinedFailure — per-item attribution", () => {
     expect(state.items!.F1!.failure_reason ?? "").toContain(
       "falling back to re-blocking all resolved items",
     );
+  });
+});
+
+describe("explicit close suites reject runner errors on a zero root exit", () => {
+  const failedExecution = () => ({
+    argv: ["node", "test-fake.mjs"], duration_ms: 1, status: 0,
+    stdout: "test process exited", stderr: "",
+    error: new Error("deadline during owned child cleanup"),
+  });
+  it("does not certify a combined test suite", async () => {
+    vi.mocked(runTrackedAsync).mockResolvedValueOnce(failedExecution());
+    const result = await runCombinedTestSuite(makeState({
+      plan: { test_command: "node test-fake.mjs", test_command_source: "explicit" },
+    }), BASE_OPTIONS);
+    expect(result).toMatchObject({
+      ran: true, passed: false, exit_code: 0,
+      output: expect.stringContaining("deadline during owned child cleanup"),
+    });
+  });
+  it("does not certify E2E in a report-only close", async () => {
+    const state = makeState({
+      plan: { e2e_command: "node test-fake.mjs", e2e_command_source: "explicit" },
+      closing_plan: { action: "none", pre_authorized: true },
+    });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const original = vi.mocked(runTrackedAsync).getMockImplementation()!;
+    vi.mocked(runTrackedAsync).mockImplementation((argv, options) => {
+      if (argv[0] === "node" && argv[1] === "test-fake.mjs") return Promise.resolve(failedExecution());
+      return original(argv, options);
+    });
+    try {
+      expect((await runClosePhase(state, BASE_OPTIONS)).status).toBe("complete");
+    } finally {
+      vi.mocked(runTrackedAsync).mockImplementation(original);
+    }
+    const report = JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
+    expect(report.e2e_result).toMatchObject({
+      status: "failed", passed: false,
+      failure_summary: expect.stringContaining("deadline during owned child cleanup"),
+    });
+    const verification = JSON.parse(await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8"));
+    expect(verification.overall_status).toBe("failed");
   });
 });

@@ -60,8 +60,10 @@ test("COR-df0bf37c: import-external-analyzer rejects non-array results before di
     const input = join(root, "normalized-findings.json");
     const artifacts = join(root, ".audit-tools", "audit");
     const args = ["import-external-analyzer", "--external-analyzer-results", input];
-    await writeFile(input, JSON.stringify({ tool: "fixture-analyzer", results: { length: 0 } }));
-    await expect(runWrapper(args, { cwd: root })).rejects.toThrow(/must have a 'results' array/);
+    for (const malformed of [null, { tool: "fixture-analyzer", results: { length: 0 } }]) {
+      await writeFile(input, JSON.stringify(malformed));
+      await expect(runWrapper(args, { cwd: root })).rejects.toThrow(/must have a 'results' array/);
+    }
     await expect(stat(artifacts)).rejects.toMatchObject({ code: "ENOENT" });
 
     const empty = { tool: "fixture-analyzer", results: [] };

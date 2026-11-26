@@ -1,6 +1,6 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import assert from "node:assert/strict";
-import { mkdir, writeFile, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join, dirname, parse } from "node:path";
 import {
   AUDIT_FINDINGS_FILENAME,
@@ -18,6 +18,22 @@ import { captureConsole } from "./helpers/captureConsole.mjs";
 import { withTempDir } from "./helpers/withTempDir.mjs";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+
+const interruptedCleanup = vi.hoisted(() => ({ dir: "", pending: "" }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readdir: async (...args: Parameters<typeof actual.readdir>) => {
+      const entries = await actual.readdir(...args);
+      return args[0] === interruptedCleanup.dir ? entries.sort() : entries;
+    },
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (args[0] === interruptedCleanup.pending) throw new Error("synthetic cleanup interruption");
+      return actual.rm(...args);
+    },
+  };
+});
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -714,5 +730,51 @@ test("next-step sweeps a complete dir whose promotion has nothing left to do", a
     expect(await dirExists(artifactsDir), "the artifacts dir should be recreated for the fresh run").toBeTruthy();
     expect(step.step_kind, "the fresh run starts instead of re-presenting the finished audit").not.toBe("present_report");
     expect(await fileExists(promotedAuditReportPath(artifactsDir)), "the promoted report is untouched").toBeTruthy();
+  });
+});
+
+test("interrupted forced cleanup keeps its identity and can retry", async () => {
+  await withTempDir("audit-cleanup-retry-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    const marker = join(artifactsDir, "audit_state.json");
+    const pending = join(artifactsDir, "pending");
+    await writeState(artifactsDir, "active");
+    await writeFile(pending, "disposable run data");
+
+    interruptedCleanup.dir = artifactsDir;
+    interruptedCleanup.pending = pending;
+    const options = { force: true, requireAuditMarker: true };
+    try {
+      await expect(cleanupStaleArtifactsDir(artifactsDir, options)).rejects.toThrow("synthetic cleanup interruption");
+    } finally {
+      interruptedCleanup.dir = "";
+      interruptedCleanup.pending = "";
+    }
+    expect(await fileExists(marker)).toBe(true);
+    expect(await fileExists(pending)).toBe(true);
+    await expect(cleanupStaleArtifactsDir(artifactsDir, options)).resolves.toMatchObject({ action: "deleted" });
+    expect(await dirExists(artifactsDir)).toBe(false);
+  });
+});
+
+test("an interrupted ordinary cleanup can resume after deleting its working report", async () => {
+  await withTempDir("audit-cleanup-ordinary-retry-", async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await plantFullyPromotedCompleteRun(artifactsDir);
+    const promoted = await readFile(promotedAuditReportPath(artifactsDir));
+    const pending = join(artifactsDir, "zz-pending");
+    await writeFile(pending, "disposable run data");
+    Object.assign(interruptedCleanup, { dir: artifactsDir, pending });
+    try {
+      await expect(cleanupStaleArtifactsDir(artifactsDir)).rejects.toThrow("synthetic cleanup interruption");
+    } finally {
+      Object.assign(interruptedCleanup, { dir: "", pending: "" });
+    }
+    expect(await fileExists(join(artifactsDir, "audit-report.md"))).toBe(false);
+    await expect(cleanupStaleArtifactsDir(artifactsDir, { dryRun: true })).resolves.toMatchObject({ action: "dry-run" });
+    expect(await fileExists(pending)).toBe(true);
+    await expect(cleanupStaleArtifactsDir(artifactsDir)).resolves.toMatchObject({ action: "deleted" });
+    expect(await dirExists(artifactsDir)).toBe(false);
+    expect(await readFile(promotedAuditReportPath(artifactsDir))).toEqual(promoted);
   });
 });

@@ -36,12 +36,14 @@ async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: st
     ) || step.progress?.pending_tasks !== issued.questions.length) return { state: "stale" };
 
     const rejectedAtPublication = step.progress.rejected_tasks;
-    const action = issued.pending === 0 ? "continue"
-      : rejectedAtPublication === undefined ? "await_or_correct_results"
-      : rejectedAtPublication > 0 ? "correct_results" : "await_results";
+    // Acceptance can advance after publication. The old count and summary
+    // cannot tell us which of the currently pending answers need correction.
     return {
-      state: "current", action, workload_path: boundPath, pending_answers: issued.pending,
-      summary: issued.pending === 0 ? "Issued answers are accepted. Run next-step to continue." : step.progress.summary,
+      state: "current", action: issued.pending === 0 ? "continue" : "await_results",
+      workload_path: boundPath, pending_answers: issued.pending,
+      ...(rejectedAtPublication === undefined ? {} : { previous_publication_rejections: rejectedAtPublication }),
+      summary: issued.pending === 0 ? "Issued answers are accepted. Run next-step to continue."
+        : "Waiting for " + issued.pending + (issued.pending === 1 ? " question answer." : " question answers."),
     };
   } catch {
     return { state: "unavailable" };

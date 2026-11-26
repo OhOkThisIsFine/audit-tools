@@ -44,6 +44,7 @@
 // nothing is guarded at all. Widen only on evidence of the form actually recurring.
 //
 //   node scripts/check-backlog-status-tokens.mjs
+import { markdownFenceFilter } from "./shared/markdownFenceFilter.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -89,13 +90,9 @@ const HAS_BLOCK_MARKER = /^[\s>]*(?:[-*+]\s+|\d+\.\s+|#{1,6}\s+)/;
  */
 export function findStatusMarkers(text, lines = text.split(/\r?\n/)) {
   const found = [];
-  let inFence = false;
+  const isFenceLine = markdownFenceFilter();
   lines.forEach((raw, i) => {
-    if (/^\s*(```|~~~)/.test(raw)) {
-      inFence = !inFence;
-      return;
-    }
-    if (inFence) return;
+    if (isFenceLine(raw)) return;
 
     const line = maskCodeSpans(raw);
     const at = (index, kind, snippet) =>

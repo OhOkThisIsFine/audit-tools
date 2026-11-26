@@ -1,3 +1,4 @@
+import { nextStepCommand } from "./prompts.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { assertQualifiedReviewObligation, assertQualifiedReviewStillCurrent, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
 import { publishAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
@@ -510,17 +511,13 @@ export async function buildTerminalStep(
 ): Promise<TerminalStepResult> {
   const reportRendered =
     state.status === "complete" || Boolean(bundle.audit_report);
-  await writeHandoffOnly({
-    root: params.root,
-    artifactsDir: params.artifactsDir,
-    bundle,
-    audit_state: state,
-    progress_summary:
-      reportRendered && state.status !== "complete"
-        ? `Audit report already rendered; ending run. ${blockedReason}`
-        : blockedReason,
+  const persist = (reason: string, kind: "blocked" | "complete", retry = false) => writeHandoffOnly({
+    root: params.root, artifactsDir: params.artifactsDir, bundle, audit_state: state,
+    progress_summary: reason,
+    stop: { kind, ...(retry ? { command: nextStepCommand(params.root, params.artifactsDir) } : {}) },
   });
   if (!reportRendered) {
+    await persist(blockedReason, "blocked");
     return { kind: "blocked", state, bundle, reason: blockedReason };
   }
   const { questionRun, finalReportPath } = await withArtifactTreeHold(params.artifactsDir, undefined, async () => {
@@ -531,8 +528,16 @@ export async function buildTerminalStep(
     return { questionRun, finalReportPath: await promoteCompletedReport(params.root, params.artifactsDir) };
   });
   if (questionRun && finalReportPath === auditReportPath(params.artifactsDir)) {
-    return { kind: "blocked", state, bundle,
-      reason: "The current question report and its custody records could not be verified and promoted. Restore the matching question plan, accepted answers and report or resolve the reported archive issue, then run next-step again. The working audit was kept." };
+    const reason = "The current question report and its custody records could not be verified and promoted. Restore the matching question plan, accepted answers and report or resolve the reported archive issue, then run next-step again. The working audit was kept.";
+    await persist(reason, "blocked", true);
+    return { kind: "blocked", state, bundle, reason };
+  }
+  try {
+    await persist(state.status === "complete" ? "Audit report is ready." : `Audit report already rendered; ending run. ${blockedReason}`, "complete");
+  } catch (error) {
+    // Promotion is already committed. Failing an advisory sidecar must not
+    // hide this report and turn the next invocation into an implicit rollover.
+    process.stderr.write(`[audit-code] report is ready; operator handoff could not be written: ${String(error)}\n`);
   }
   return {
     kind: "complete",
@@ -2967,7 +2972,8 @@ async function runHostDelegationObligation(
   }
   if (cycle.pending.length === 0) return { kind: "transition", state: carried };
   const pendingIds = new Set(cycle.pending.map(({ assignment }) => assignment.assignment_id));
-  const rejections = cycle.issues.filter(issue => pendingIds.has(issue.assignment_id)).slice(0, 8)
+  const pendingIssues = cycle.issues.filter(issue => pendingIds.has(issue.assignment_id));
+  const rejections = pendingIssues.slice(0, 8)
     .map(issue => ({ assignmentId: issue.assignment_id, guidance: issue.reason }));
   const published = await publishAuditQuestionWorkload({
     root: ctx.params.root, sourceRoot, artifactsDir: ctx.params.artifactsDir, runId: cycle.runId, bindings: cycle.pending,
@@ -2979,7 +2985,7 @@ async function runHostDelegationObligation(
     step: { kind: "question_review", state: deriveAuditState(carried, { emitStaleness: false }), bundle: carried,
       runId: cycle.runId, workloadPath: published.workload_path, routingPath: published.routing_path,
       graphIndexFailed: published.workload.graph_index_failed, pendingCount: cycle.pending.length,
-      rejectedCount: cycle.issues.length, rejections },
+      rejectedCount: pendingIssues.length, rejections },
     state: carried,
   };
 }
@@ -3317,6 +3323,7 @@ async function runDeterministicFold(
       bundle,
       audit_state: state,
       progress_summary: reason,
+      stop: { kind: "paused", command: nextStepCommand(params.root, params.artifactsDir) },
     });
     return { kind: "blocked", state, bundle, reason };
   }
@@ -3330,15 +3337,15 @@ async function runDeterministicFold(
   if (stalled) {
     const bundle = await withArtifactTreeHold(params.artifactsDir, undefined, () => loadArtifactBundle(params.artifactsDir, {}));
     const decision = decideNextStep(bundle);
-    return {
-      kind: "blocked",
-      state: decision.state,
-      bundle,
-      reason:
-        `The deterministic fold ${stalled.cause} — an obligation is re-selecting without clearing its own ` +
-        `actionable state (${stalled.spinning}). ` +
-        "The run is paused. Inspect its current question workload and recorded errors, then re-run next-step.",
-    };
+    const reason = `The deterministic fold ${stalled.cause} — an obligation is re-selecting without clearing its own ` +
+      `actionable state (${stalled.spinning}). ` +
+      "The run is paused. Inspect its current question workload and recorded errors, then re-run next-step.";
+    await writeHandoffOnly({
+      root: params.root, artifactsDir: params.artifactsDir, bundle, audit_state: decision.state,
+      progress_summary: reason,
+      stop: { kind: "blocked", command: nextStepCommand(params.root, params.artifactsDir) },
+    });
+    return { kind: "blocked", state: decision.state, bundle, reason };
   }
 
   // No actionable obligation: the fold reached completion (e.g. synthesis flipped

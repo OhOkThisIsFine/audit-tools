@@ -25,6 +25,7 @@ import {
   decideNextStep,
   defaultInputCandidates,
 } from "../../src/remediate/steps/nextStep.js";
+import { cleanupTempBranchesAndArtifacts } from "../../src/remediate/phases/close.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { Finding } from "../../src/remediate/state/types.js";
@@ -536,15 +537,38 @@ const LEFTOVER_SOURCE_AUDIT_READ = {
 };
 
 describe("CP-NODE-15 inv-12/fail-8: the leftover emit, driven", () => {
-  it("emits the remediation-owned pair, logs it, and leaves the canonical pair BYTE-IDENTICAL", async () => {
-    // Autonomous review mode is what reaches the leftover emit at all.
-    const auditDir = join(REPO_DIR, ".audit-tools", "audit");
+  async function readyAutonomousReview() {
+    const auditDir = auditArtifactsDir(REPO_DIR);
     await mkdir(auditDir, { recursive: true });
     await writeFile(
       join(auditDir, "session-config.json"),
       JSON.stringify({ review_mode: "autonomous", observability: "standard" }),
       "utf8",
     );
+    const auditPath = join(REPO_DIR, "my-audit.json");
+    await writeFile(auditPath, autonomousAuditReport(), "utf8");
+    await harness.writeReadyStructuredAuditIntake(auditPath);
+    await acknowledgeResume();
+  }
+
+  it("does not commit approval until both leftover outputs land, then retries", async () => {
+    await readyAutonomousReview();
+    const blockedPath = autonomousLeftoverFindingsPath(REPO_DIR);
+    await mkdir(blockedPath, { recursive: true });
+    const options = { root: REPO_DIR, skipFinalGate: true };
+    await expect(decideNextStep(options)).rejects.toThrow();
+    expect(existsSync(join(ARTIFACTS_DIR, "review_decision.json"))).toBe(false);
+    expect(await readFile(autonomousLeftoverReportPath(REPO_DIR), "utf8")).toContain("Autonomous Leftovers");
+    await rm(blockedPath, { recursive: true });
+    await decideNextStep(options);
+    expect(existsSync(join(ARTIFACTS_DIR, "review_decision.json"))).toBe(true);
+    expect(await readFile(autonomousLeftoverReportPath(REPO_DIR), "utf8")).toContain("Autonomous Leftovers");
+    expect(JSON.parse(await readFile(autonomousLeftoverFindingsPath(REPO_DIR), "utf8")))
+      .toMatchObject({ audit_read: LEFTOVER_SOURCE_AUDIT_READ });
+  });
+
+  it("emits the remediation-owned pair, logs it, and leaves the canonical pair BYTE-IDENTICAL", async () => {
+    await readyAutonomousReview();
 
     // The canonical pair, pre-existing with SENTINEL bytes. This is the audit
     // source `defaultInputCandidates` resolves first; the emit used to overwrite
@@ -555,11 +579,6 @@ describe("CP-NODE-15 inv-12/fail-8: the leftover emit, driven", () => {
     await writeFile(canonicalReport, "# The original audit render\n", "utf8");
     const findingsBefore = await readFile(canonicalFindings);
     const reportBefore = await readFile(canonicalReport);
-
-    const auditPath = join(REPO_DIR, "my-audit.json");
-    await writeFile(auditPath, autonomousAuditReport(), "utf8");
-    await harness.writeReadyStructuredAuditIntake(auditPath);
-    await acknowledgeResume();
 
     await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
 
@@ -596,6 +615,20 @@ describe("CP-NODE-15 inv-12/fail-8: the leftover emit, driven", () => {
       await readFile(autonomousLeftoverFindingsPath(REPO_DIR), "utf8"),
     ) as { audit_read: unknown };
     expect(leftover.audit_read).toEqual(LEFTOVER_SOURCE_AUDIT_READ);
+
+    const leftoversBefore = await readFile(autonomousLeftoverFindingsPath(REPO_DIR));
+    const leftoverRenderBefore = await readFile(autonomousLeftoverReportPath(REPO_DIR));
+    await cleanupTempBranchesAndArtifacts(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      { status: "complete", run_start_dirty: [], run_start_dirty_encoding: "git-z/v1" },
+      { ran: true, passed: true, duration_ms: 0, output: "" },
+      { ran: true, passed: true, output: "" },
+      { contract_version: "remediate-code-closing-result/v1alpha1", action: "none", status: "skipped", commands: [] },
+    );
+    expect(existsSync(ARTIFACTS_DIR)).toBe(false);
+    await expect(readFile(autonomousLeftoverFindingsPath(REPO_DIR))).resolves.toEqual(leftoversBefore);
+    await expect(readFile(autonomousLeftoverReportPath(REPO_DIR))).resolves.toEqual(leftoverRenderBefore);
+
   });
 });
 

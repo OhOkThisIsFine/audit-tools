@@ -116,3 +116,17 @@ test("refuses incompatible graph output before advertising indexed lookup, and c
     path: "a.ts", detail: "call-sites", direction: "outbound", limit: 1,
   })).rejects.toThrow(/cannot continue this page/);
 });
+
+test("missing ready manifest gives rebuild or native-file guidance before querying", async () => {
+  const f = await setup();
+  runner.mockImplementation(async argv => argv.includes("index_repository") ? success({ status: "indexed" })
+    : success(emptyPage));
+  const meta = await prepareReviewerCbm(f.run, f.frozen, f.files);
+  expect(meta).not.toBeNull();
+  await rm(join(f.run, "review-cbm", meta!.key, "ready.json"));
+  runner.mockClear();
+  await expect(queryReviewerCbm(f.index, meta!, new Set(["a.ts"]), {
+    path: "a.ts", detail: "symbols", direction: "both", limit: 1,
+  })).rejects.toThrow(/missing.*rebuild.*native file links/i);
+  expect(runner).not.toHaveBeenCalled();
+});

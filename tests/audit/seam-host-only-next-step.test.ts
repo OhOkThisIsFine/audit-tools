@@ -61,7 +61,7 @@ import {
 
 // ── Module imports ────────────────────────────────────────────────────────────
 
-const { writeCurrentStep, STEP_CONTRACT_VERSION } = await import("../../src/audit/cli/steps.js");
+const { writeCurrentStep, STEP_CONTRACT_VERSION, StepKindSchema } = await import("../../src/audit/cli/steps.js");
 
 const { StepStatus: _StepStatus } = await import("audit-tools/shared").catch(
   () => null,
@@ -218,19 +218,10 @@ test("C2: the terminal status values align with the semantic contract (complete/
 
 // ── D. ALLOWED-COMMANDS NON-EMPTY for non-terminal steps ────────────────────
 
-// Non-terminal step kinds are those where the host must continue the pipeline.
-// "complete" and "blocked" are terminal — allowed_commands can be empty.
-const NON_TERMINAL_STEP_KINDS: StepKind[] = [
-  "dispatch_review",
-  "design_review",
-  "design_review_parallel",
-  "design_review_contract",
-  "design_review_conceptual",
-  "confirm_intent",
-  "analyzer_install",
-  "edge_reasoning_dispatch",
-  "synthesis_narrative",
-];
+// Classify the actual schema, with terminal behavior spelled independently.
+const TERMINAL_STEP_STATUS = { blocked: "blocked", present_report: "complete" } as const;
+const ALL_STEP_KINDS = StepKindSchema.options;
+const NON_TERMINAL_STEP_KINDS = ALL_STEP_KINDS.filter((kind) => !Object.hasOwn(TERMINAL_STEP_STATUS, kind));
 
 test("D1: non-terminal step kinds are written with a non-empty allowed_commands array", async () => {
   await withTempDir(async (dir) => {
@@ -345,20 +336,6 @@ test("E4: artifact_paths always includes current_step and current_prompt keys", 
 
 // ── F. STEP-KIND COVERAGE — every StepKind round-trips through JSON ──────────
 
-const ALL_STEP_KINDS: StepKind[] = [
-  "dispatch_review",
-  "design_review",
-  "design_review_parallel",
-  "design_review_contract",
-  "design_review_conceptual",
-  "confirm_intent",
-  "analyzer_install",
-  "edge_reasoning_dispatch",
-  "synthesis_narrative",
-  "present_report",
-  "blocked",
-];
-
 test("F1: all StepKind values are non-empty strings that survive JSON round-trip", () => {
   for (const kind of ALL_STEP_KINDS) {
     const rt = JSON.parse(JSON.stringify(kind));
@@ -367,26 +344,25 @@ test("F1: all StepKind values are non-empty strings that survive JSON round-trip
   }
 });
 
-test("F2: every non-terminal kind in ALL_STEP_KINDS appears in NON_TERMINAL_STEP_KINDS or is 'blocked'/'present_report'", () => {
-  const terminalKinds = new Set(["blocked", "present_report"]);
-  const nonTerminalSet = new Set(NON_TERMINAL_STEP_KINDS);
-  for (const kind of ALL_STEP_KINDS) {
-    if (!terminalKinds.has(kind)) {
-      expect(nonTerminalSet.has(kind), `StepKind "${kind}" is not categorized as terminal or non-terminal — update NON_TERMINAL_STEP_KINDS`).toBeTruthy();
-    }
+test("F2: the explicitly terminal step kinds belong to the schema", () => {
+  for (const kind of Object.keys(TERMINAL_STEP_STATUS)) {
+    expect(StepKindSchema.safeParse(kind).success, kind).toBe(true);
   }
 });
 
-test("F3: writeCurrentStep writes step_kind verbatim for each non-terminal kind", async () => {
+test("F3: the writer and JSON preserve every schema step kind", async () => {
   await withTempDir(async (dir) => {
-    for (const stepKind of NON_TERMINAL_STEP_KINDS) {
+    for (const stepKind of ALL_STEP_KINDS) {
       const artifactsDir = join(dir, `kind-${stepKind}`);
       await mkdir(artifactsDir, { recursive: true });
+      const terminalStatus = TERMINAL_STEP_STATUS[stepKind as keyof typeof TERMINAL_STEP_STATUS];
       const step = await writeCurrentStep({
         ...baseParams(artifactsDir),
         stepKind,
+        status: terminalStatus ?? "ready",
+        ...(terminalStatus ? { allowedCommands: [] } : {}),
       });
-      expect(step.step_kind, `step_kind must round-trip: expected "${stepKind}", got "${step.step_kind}"`).toBe(stepKind);
+      expect(JSON.parse(JSON.stringify(step)).step_kind).toBe(stepKind);
     }
   });
 });

@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/generated-artifacts-write.test.ts
 // The ONE generated-artifact substrate (F1, ceremony review 2026-08-29).
 //
 // Fifteen scripts independently implemented "read source → render → compare to
@@ -11,8 +12,23 @@
 // CLI convention (the ONE convention): bare invocation WRITES the target(s);
 // `--check` verifies byte parity and exits 1 on drift, printing the
 // generator's stale rationale plus the fix command.
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { chmodSync, lstatSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+function replaceGeneratedFile(path, content) {
+  const target = lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() ? realpathSync(path) : path;
+  const previous = statSync(target, { throwIfNoEntry: false });
+  const temp = join(dirname(target), `.generated-${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temp, content, { encoding: "utf8", flag: "wx" });
+    if (previous) chmodSync(temp, previous.mode & 0o777);
+    renameSync(temp, target);
+  } catch (error) {
+    try { rmSync(temp, { force: true }); } catch { /* preserve the publish error */ }
+    throw error;
+  }
+}
 
 /**
  * Replace the generated region between two exact marker lines.
@@ -117,7 +133,7 @@ export function runGeneratedArtifactCli({
     return;
   }
   for (const { target, next } of files) {
-    writeFileSync(join(repoRoot, target), next, "utf8");
+    replaceGeneratedFile(join(repoRoot, target), next);
     process.stdout.write(`wrote ${target}${wroteSuffix}\n`);
   }
 }

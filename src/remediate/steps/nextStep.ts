@@ -91,6 +91,7 @@ import {
   promotedAuditFindingsPath,
   promotedAuditReportPath,
   remediationArtifactsDir,
+  auditToolsDir,
   remediationRequiredTestLogsDir,
 } from "../../shared/io/auditToolsPaths.js";
 import {
@@ -271,7 +272,8 @@ function resolveArtifactsDir(root: string, artifactsDir?: string): string {
 /**
  * Where an autonomous run's LEFTOVER deliverable pair lands.
  *
- * REMEDIATION-OWNED, deliberately. This module used to write the canonical
+ * REMEDIATION-OWNED and outside its disposable working directory, deliberately.
+ * This module used to write the canonical
  * `.audit-tools/audit-findings.json` + `audit-report.md` pair directly and
  * unarchived, which destroys the audit source `defaultInputCandidates` resolves
  * FIRST — the original contract becomes unrecoverable for any external consumer
@@ -280,11 +282,11 @@ function resolveArtifactsDir(root: string, artifactsDir?: string): string {
  * only sanctioned way to replace it.
  */
 export function autonomousLeftoverFindingsPath(root: string): string {
-  return join(remediationArtifactsDir(root), "autonomous-leftovers-findings.json");
+  return join(auditToolsDir(root), "autonomous-leftovers-findings.json");
 }
 
 export function autonomousLeftoverReportPath(root: string): string {
-  return join(remediationArtifactsDir(root), "autonomous-leftovers-report.md");
+  return join(auditToolsDir(root), "autonomous-leftovers-report.md");
 }
 
 /**
@@ -1253,16 +1255,15 @@ async function runReviewApprovalGate(
     // Leftovers stay LIVE: declined is EMPTY (no durable rejection). The
     // decision REPLAY keys on approved_ids (COR-227a02ae), so on later calls
     // exactly the approved subset — never the live leftovers — re-enters.
+    const leftovers = survivors.filter((f) => !approvedSet.has(f.id));
+    // Leave the decision uncommitted if either output fails, so re-entry can
+    // safely rebuild the pair before reusing the approved subset.
+    await emitAutonomousLeftoverDeliverable(root, artifactsDir, leftovers, sourceAuditRead);
     await writeReviewDecisionRecord(decisionPath, {
       planId: randomRunId("path-a-review"),
       approvedIds: auto.approved_ids,
       declined: [],
     });
-    // Re-emit the leftovers as a standard, re-consumable audit deliverable pair
-    // so the next nightly run picks them up via defaultInputCandidates. Always
-    // on disk regardless of whether a git remote / PR is available.
-    const leftovers = survivors.filter((f) => !approvedSet.has(f.id));
-    await emitAutonomousLeftoverDeliverable(root, artifactsDir, leftovers, sourceAuditRead);
     return {
       kind: "proceed",
       approved: survivors.filter((f) => approvedSet.has(f.id)),
@@ -1330,9 +1331,9 @@ async function runReviewApprovalGate(
  * nor durably rejected) as a standard, re-consumable audit deliverable pair:
  * `audit-findings.json` (machine contract, source of truth) + `audit-report.md`
  * (human render), built by the SHARED emitter. Written to `<repo>/.audit-tools/`
- * — exactly where the remediator's `defaultInputCandidates` looks first — so the
- * next nightly run round-trips them straight back through intake and re-evaluates
- * the allowlist FRESH. Always on disk regardless of any git remote / PR.
+ * outside the disposable working directory. `defaultInputCandidates` tries
+ * the leftover pair only after all canonical audit inputs; it can also be
+ * selected explicitly. No git remote or PR is required.
  *
  * Empty leftovers still emit an (empty) pair so a downstream "is there work?"
  * probe sees a deterministic deliverable rather than a stale one.
@@ -1364,10 +1365,8 @@ async function emitAutonomousLeftoverDeliverable(
   const findingsPath = autonomousLeftoverFindingsPath(root);
   const reportPath = autonomousLeftoverReportPath(root);
   await mkdir(dirname(findingsPath), { recursive: true });
-  await Promise.all([
-    writeJsonFile(findingsPath, pair.findings_report),
-    writeTextFile(reportPath, pair.report_markdown),
-  ]);
+  await writeTextFile(reportPath, pair.report_markdown);
+  await writeJsonFile(findingsPath, pair.findings_report);
   // NAMED IN THE DURABLE LOG. A leftover emit that left no event was invisible
   // after the fact: an operator could not tell an emit from a silent no-op.
   // The run log is opened here rather than threaded down: the two frames above
@@ -3492,12 +3491,23 @@ async function emitUnresolvedClosingStep(
   state: RemediationState | null,
   error: UnresolvedClosingActionError,
 ): Promise<RemediationStep> {
+  const resolution = error.reconciliation;
+  const prompt = ["# Closing action needs reconciliation", error.message, "Receipt: " + error.receiptPath];
+  if (resolution) {
+    if (resolution.problem) prompt.push(resolution.problem);
+    prompt.push(
+      "Only after the operator explicitly chooses report-only closeout, write " + resolution.path + " with " +
+      JSON.stringify({ receipt_sha256: resolution.receiptSha256, disposition: "observed", note: "<operator's evidence>" }) +
+      ". Use abandoned instead of observed if the operator cannot verify or elects not to pursue the outcome. " +
+      "Then invoke next-step again. This only writes a report and never retries the action or marks it successful.",
+    );
+  }
   return writeCurrentStep({
     stepKind: "close_run", status: "blocked", runId: stateRunId(state),
     repoRoot: root, artifactsDir,
-    prompt: ["# Closing action needs reconciliation", error.message, `Receipt: ${error.receiptPath}`].join("\n\n"),
+    prompt: prompt.join("\n\n"),
     allowedCommands: [],
-    artifactPaths: { closing_receipt: error.receiptPath },
+    artifactPaths: { closing_receipt: error.receiptPath, ...(resolution ? { closing_reconciliation: resolution.path } : {}) },
     stopCondition: "Report the unresolved outcome to the operator. Do not rerun a closing command.",
   });
 }
@@ -3522,15 +3532,17 @@ async function advanceUnderPhaseLock(deps: {
     await assertNoUnresolvedClosingAction(artifactsDir);
   } catch (error) {
     if (!(error instanceof UnresolvedClosingActionError)) throw error;
+    let unresolved = error;
     if (state) {
       try {
         const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
         if (completed) return handleComplete(root, artifactsDir, await store.loadState());
       } catch (reconcileError) {
         if (!(reconcileError instanceof UnresolvedClosingActionError)) throw reconcileError;
+        unresolved = reconcileError;
       }
     }
-    return emitUnresolvedClosingStep(root, artifactsDir, state, error);
+    return emitUnresolvedClosingStep(root, artifactsDir, state, unresolved);
   }
   const bareRequest = options.input === undefined && options.severity === undefined && options.findingIds === undefined &&
     options.guidanceFile === undefined && options.guidanceText === undefined && options.verificationCommand === undefined &&

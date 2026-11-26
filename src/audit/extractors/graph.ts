@@ -807,7 +807,7 @@ function extractPerFileContribution(
  * (fail-safe) instead of replaying contributions built under different rules.
  */
 // sites-pinned: tests/audit/graph-edge-cache.test.ts
-export const GRAPH_EDGE_CACHE_KEY_VERSION = "v21";
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v22";
 
 /**
  * The ONE definition of "this file's content was available to the extractors".

@@ -122,6 +122,48 @@ await test("buildTerminalStep returns blocked when audit_report is falsy and sta
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") throw new Error("expected kind=blocked");
     expect(result.reason).toBe("blocked reason");
+    expect(JSON.parse(await readFile(join(artifactsDir, "operator-handoff.json"), "utf8"))).toMatchObject({
+      disposition: "blocked", status: "active", summary: result.reason, suggested_inputs: [], suggested_commands: [],
+    });
+  });
+});
+
+test("a failed advisory handoff cannot hide an already promoted report", async () => {
+  await withTempDir(async (artifactsDir) => {
+    const params = { root: artifactsDir, sourceRoot: artifactsDir, artifactsDir };
+    await writeFile(join(artifactsDir, "audit-report.md"), "# report");
+    await mkdir(join(artifactsDir, "operator-handoff.md"));
+    const result = await buildTerminalStep(
+      params, { audit_report: "# report" }, { status: "complete", obligations: [] }, "fold complete",
+    );
+    expect(result.kind).toBe("complete");
+    if (result.kind !== "complete") throw new Error("expected completed promotion");
+    expect(await readFile(result.finalReportPath, "utf8")).toBe("# report");
+    expect(existsSync(join(artifactsDir, "run-ended.json"))).toBe(true);
+  });
+});
+
+test("a refused question report promotion persists the returned recovery reason and command", async () => {
+  await withTempDir(async (artifactsDir) => {
+    const params = { root: artifactsDir, sourceRoot: artifactsDir, artifactsDir };
+    await writeFile(join(artifactsDir, "audit-report.md"), "# working report");
+    await writeFile(join(artifactsDir, "audit-findings.json"), JSON.stringify({
+      contract_version: "audit-tools/audit-findings/v2",
+    }));
+    const result = await buildTerminalStep(
+      params, { audit_report: "# working report" }, { status: "complete", obligations: [] }, "fold complete",
+    );
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") throw new Error("expected blocked promotion");
+    expect(result.reason).toContain("could not be verified and promoted");
+    const json = JSON.parse(await readFile(join(artifactsDir, "operator-handoff.json"), "utf8"));
+    expect(json).toMatchObject({
+      disposition: "blocked", summary: result.reason, suggested_inputs: [],
+      suggested_commands: [expect.stringContaining("next-step")],
+    });
+    const markdown = await readFile(join(artifactsDir, "operator-handoff.md"), "utf8");
+    expect(markdown).toContain(result.reason);
+    expect(markdown).toContain("Disposition: blocked");
   });
 });
 

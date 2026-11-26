@@ -11,6 +11,7 @@ import {
   scoreAudit,
   hallucinationRegressed,
   renderScorecardMarkdown,
+  CorpusLabelsSchema,
   type CorpusLabels,
   type Scorecard,
 } from "../reporting/scoreAudit.js";
@@ -67,7 +68,12 @@ export async function cmdScoreAudit(argv: string[]): Promise<void> {
 
   let labels: CorpusLabels;
   try {
-    labels = await readJsonFile<CorpusLabels>(labelsPath);
+    const parsed = CorpusLabelsSchema.safeParse(await readJsonFile<unknown>(labelsPath));
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      throw new Error(`Invalid corpus labels at ${issue.path.join(".") || "document"}: ${issue.message}`);
+    }
+    labels = parsed.data;
   } catch (error) {
     console.error(
       `Could not read labels at ${labelsPath}: ${(error as Error).message}`,

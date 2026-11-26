@@ -46,11 +46,11 @@
  * snapshot leaked by a crashed run is replaced, never accumulated.
  */
 import { constants as fsConstants, existsSync } from "node:fs";
-import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rename, rm, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
-import { compareCodeUnits, hashContent, readOptionalJsonFile, resolveAuditCodeStateDir, resolveWithinRoot, toPosixPath, uniqueSorted, writeJsonFile } from "audit-tools/shared";
+import { compareCodeUnits, hashContent, isFileMissingError, readOptionalJsonFile, resolveAuditCodeStateDir, resolveWithinRoot, toPosixPath, uniqueSorted, writeJsonFile } from "audit-tools/shared";
 import { headCommit, isGitRepo, workingTreeTree } from "../../shared/git.js";
 import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../../shared/tooling/exec.js";
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
@@ -88,6 +88,7 @@ const RunSnapshotSchema = z.object({
 export type RunSnapshot = z.infer<typeof RunSnapshotSchema>;
 
 export const runSnapshotPath = (artifactsDir: string): string => join(artifactsDir, "run-snapshot.json");
+const acquiringSnapshotPath = (artifactsDir: string): string => join(artifactsDir, "run-snapshot-acquiring.json");
 
 /** The branch an unborn checkout's `HEAD` names; it is never created. */
 const UNBORN_BRANCH = "refs/heads/audit-tools-unborn-snapshot";
@@ -104,11 +105,12 @@ const SNAPSHOT_COMMIT_ENV = {
  * daemon started inside a snapshot checkout would hold it open and block its
  * removal.
  */
-async function git(cwd: string, args: string[], env?: Record<string, string>): Promise<string> {
+async function git(cwd: string, args: string[], env?: Record<string, string>, input?: string): Promise<string> {
   const result = await runTrackedAsync(["git", "-c", "core.fsmonitor=false", ...args], {
     cwd,
     encoding: "utf8",
     timeout: TRACKED_CHILD_DEADLINE_MS,
+    ...(input === undefined ? {} : { input }),
     ...(env ? { env: { ...process.env, ...env } } : {}),
   });
   if (result.status !== 0) {
@@ -208,24 +210,26 @@ async function addCheckout(pin: Pick<GitPin, "repository" | "path" | "base">): P
 type TreeMapping = { live: string; snap: string };
 
 /**
- * Re-create a symlink as a symlink; `false` when the platform refuses (win32
- * without the privilege). A target inside `mapping.live` — relative or absolute
+ * Re-create a symlink as a symlink. A target inside `mapping.live` — relative or absolute
  * — is mapped onto the snapshot, so it resolves there and never reaches the live
  * tree; one outside points at its absolute live path. A win32 junction needs an
  * absolute target, so it gets the snapshot-side one; any other link a relative one.
  */
-async function copySymlink(source: string, dest: string, mapping: TreeMapping): Promise<boolean> {
+async function copySymlink(source: string, dest: string, mapping: TreeMapping): Promise<void> {
   const absolute = resolve(dirname(source), await readlink(source));
   const inside = resolveWithinRoot(mapping.live, absolute) !== null;
   const pointsAtDirectory = await stat(source).then((info) => info.isDirectory(), () => false);
   const junction = pointsAtDirectory && process.platform === "win32";
   const snapTarget = join(mapping.snap, relative(mapping.live, absolute));
   const linkTarget = !inside ? absolute : junction ? snapTarget : relative(dirname(dest), snapTarget) || ".";
+  await symlink(linkTarget, dest, pointsAtDirectory ? (junction ? "junction" : "dir") : "file");
+}
+
+async function copyAdmittedSymlink(source: string, dest: string, mapping: TreeMapping): Promise<void> {
   try {
-    await symlink(linkTarget, dest, pointsAtDirectory ? (junction ? "junction" : "dir") : "file");
-    return true;
-  } catch {
-    return false;
+    await copySymlink(source, dest, mapping);
+  } catch (error) {
+    throw new Error("Cannot copy admitted audit symlink " + source + ": " + (error as Error).message, { cause: error });
   }
 }
 
@@ -255,7 +259,6 @@ async function copyListedFiles(
   snapDir: string,
   mapping: TreeMapping,
   skip: readonly string[],
-  warnings: string[],
   nested: TreeMapping[],
 ): Promise<void> {
   const tracked = new Set(splitNul(await git(liveDir, ["ls-files", "-z", "--cached"])));
@@ -268,26 +271,31 @@ async function copyListedFiles(
     if (skip.includes(path)) continue;
     const source = join(liveDir, path);
     const dest = join(snapDir, path);
-    const info = await lstat(source).catch(() => undefined);
-    // A deleted-but-tracked file is absent from the snapshot, as from the live tree.
-    if (info === undefined) continue;
+    let info;
+    try {
+      info = await lstat(source);
+    } catch (error) {
+      // A deleted-but-tracked file is absent from the snapshot, as from the live tree.
+      if (isFileMissingError(error)) continue;
+      throw new Error("Cannot inspect admitted audit source " + source + ": " + (error as Error).message, { cause: error });
+    }
     await mkdir(dirname(dest), { recursive: true });
     if (info.isSymbolicLink()) {
-      if (!(await copySymlink(source, dest, mapping))) warnings.push(`could not re-create the symlink ${source}`);
+      await copyAdmittedSymlink(source, dest, mapping);
     } else if (info.isDirectory()) {
       // A tracked directory is a submodule that is not checked out: empty, as live.
       if (tracked.has(raw)) {
         await mkdir(dest, { recursive: true });
         continue;
       }
-      try {
-        await copyListedFiles(source, dest, mapping, [], warnings, nested);
-        nested.push({ live: source, snap: dest });
-      } catch (error) {
-        warnings.push(`could not copy the nested repository ${source}: ${(error as Error).message}`);
-      }
+      await copyListedFiles(source, dest, mapping, [], nested);
+      nested.push({ live: source, snap: dest });
     } else if (info.isFile()) {
-      await copyFile(source, dest);
+      try {
+        await copyFile(source, dest);
+      } catch (error) {
+        throw new Error("Cannot copy admitted audit source " + source + ": " + (error as Error).message, { cause: error });
+      }
     }
   }
 }
@@ -308,7 +316,8 @@ async function placeEntry(
     const info = await lstat(source);
     await mkdir(dirname(dest), { recursive: true });
     if (info.isSymbolicLink()) {
-      return (await copySymlink(source, dest, mapping)) ? null : `could not re-create the symlink ${source}`;
+      await copySymlink(source, dest, mapping);
+      return null;
     }
     if (info.isDirectory()) {
       await symlink(source, dest, process.platform === "win32" ? "junction" : "dir");
@@ -388,18 +397,35 @@ async function populatedSubmodules(repository: string): Promise<string[]> {
  * entries; only then does the checkout take the base's tree (or the empty tree),
  * with a warning. Any other failure is thrown.
  */
-async function liveIndexTree(repository: string, base: string | null, warnings: string[]): Promise<string> {
+async function liveIndexTrees(
+  repository: string, base: string | null, warnings: string[],
+): Promise<{ indexTree: string; ownershipTree: string }> {
   const liveIndex = resolve(repository, (await git(repository, ["rev-parse", "--git-path", "index"])).trim());
   const scratch = await mkdtemp(join(tmpdir(), "audit-snapshot-index-"));
   try {
     const env = { GIT_INDEX_FILE: join(scratch, "index") };
     if (existsSync(liveIndex)) await copyFile(liveIndex, env.GIT_INDEX_FILE);
     try {
-      return (await git(repository, ["write-tree"], env)).trim();
+      const indexTree = (await git(repository, ["write-tree"], env)).trim();
+      return { indexTree, ownershipTree: indexTree };
     } catch (error) {
       if ((await git(repository, ["ls-files", "--unmerged"], env)).trim().length === 0) throw error;
       warnings.push(`${repository} has unmerged index entries; the snapshot's index is its HEAD tree`);
-      return base === null ? emptyTree(repository) : (await git(repository, ["rev-parse", `${base}^{tree}`])).trim();
+      const indexTree = base === null ? await emptyTree(repository) : (await git(repository, ["rev-parse", `${base}^{tree}`])).trim();
+      // The fallback is still the checkout's exact index. A separate temporary
+      // tree records live Gitlinks (including newly staged submodules that
+      // HEAD lacks) so an unfinished acquisition can verify their ownership.
+      const links = new Map<string, string>();
+      for (const row of splitNul(await git(repository, ["ls-files", "--stage", "-z"], env))) {
+        const match = /^160000 ([0-9a-f]+) [0-3]\t([\s\S]+)$/u.exec(row);
+        if (match && !links.has(match[2])) links.set(match[2], match[1]);
+      }
+      if (links.size === 0) return { indexTree, ownershipTree: indexTree };
+      const proofIndex = { GIT_INDEX_FILE: join(scratch, "gitlink-index") };
+      await git(repository, ["update-index", "-z", "--index-info"], proofIndex,
+        [...links].map(([path, object]) => `160000 ${object}\t${path}\0`).join(""));
+      const ownershipTree = (await git(repository, ["write-tree"], proofIndex)).trim();
+      return { indexTree, ownershipTree };
     }
   } finally {
     await rm(scratch, { recursive: true, force: true });
@@ -420,20 +446,23 @@ async function snapshotRepository(
   linked: Set<string>,
   linkPrefix: string,
   warnings: string[],
+  checkpoint: () => Promise<void>,
 ): Promise<void> {
   const repository = await realpath(liveDir);
   const mapping = { live: repository, snap: snapDir };
   const base = await headCommit(repository);
-  const indexTree = await liveIndexTree(repository, base, warnings);
-  await addCheckout({ repository, path: snapDir, base });
+  const { indexTree, ownershipTree } = await liveIndexTrees(repository, base, warnings);
   const slot = pins.length;
-  pins.push({ repository, path: snapDir, base, index: indexTree, commit: indexTree, ref });
+  pins.push({ repository, path: snapDir, base, index: indexTree, commit: ownershipTree, ref });
+  // Own the deterministic path and ref durably before Git can register either.
+  await checkpoint();
+  await addCheckout({ repository, path: snapDir, base });
 
   const submodules = await populatedSubmodules(repository);
   const nested: TreeMapping[] = [];
-  await copyListedFiles(repository, snapDir, mapping, submodules, warnings, nested);
+  await copyListedFiles(repository, snapDir, mapping, submodules, nested);
   for (const sub of submodules) {
-    await snapshotRepository(join(repository, sub), join(snapDir, sub), ref, pins, linked, `${linkPrefix}${sub}/`, warnings);
+    await snapshotRepository(join(repository, sub), join(snapDir, sub), ref, pins, linked, `${linkPrefix}${sub}/`, warnings, checkpoint);
   }
 
   const pin = pins[slot];
@@ -465,9 +494,11 @@ async function copyTree(
     // The state dir holds the snapshot being written; copying it would recurse.
     if (isNeverPlaced(relativePath) || resolve(source) === skip) continue;
     const dest = join(snapRoot, relativePath);
-    if (isIntakeIgnored(relativePath, ignores) || entry.isSymbolicLink()) {
+    if (isIntakeIgnored(relativePath, ignores)) {
       const warning = await placeEntry(source, dest, { live: liveRoot, snap: snapRoot }, linked, toPosixPath(relativePath));
       if (warning !== null) warnings.push(warning);
+    } else if (entry.isSymbolicLink()) {
+      await copyAdmittedSymlink(source, dest, { live: liveRoot, snap: snapRoot });
     } else if (entry.isDirectory()) {
       await copyTree(liveRoot, snapRoot, ignores, skip, linked, warnings, relativePath);
     } else if (entry.isFile()) {
@@ -476,9 +507,13 @@ async function copyTree(
   }
 }
 
-async function readRunSnapshot(artifactsDir: string): Promise<RunSnapshot | undefined> {
-  const raw = await readOptionalJsonFile<unknown>(runSnapshotPath(artifactsDir));
+async function readSnapshotRecord(path: string): Promise<RunSnapshot | undefined> {
+  const raw = await readOptionalJsonFile<unknown>(path);
   return raw === undefined || raw === null ? undefined : RunSnapshotSchema.parse(raw);
+}
+
+function readRunSnapshot(artifactsDir: string): Promise<RunSnapshot | undefined> {
+  return readSnapshotRecord(runSnapshotPath(artifactsDir));
 }
 
 /**
@@ -655,37 +690,42 @@ async function validateSnapshotOwnership(record: RunSnapshot, root: string | und
 }
 
 async function createRunSnapshot(root: string, artifactsDir: string): Promise<RunSnapshot> {
-  const { repositoryRoot, dir, ref } = await snapshotLayout(root, artifactsDir);
+  const { repositoryRoot, dir, tree, ref } = await snapshotLayout(root, artifactsDir);
   await removeSnapshotDir(dir);
   const linked = new Set<string>();
   const warnings: string[] = [];
-  let record: RunSnapshot;
-  if (await isGitRepo(repositoryRoot)) {
-    const toplevel = (await git(repositoryRoot, ["rev-parse", "--show-toplevel"])).trim();
-    const prefix = (await git(repositoryRoot, ["rev-parse", "--show-prefix"])).trim();
-    const pins: GitPin[] = [];
-    await snapshotRepository(toplevel, join(dir, "tree"), ref, pins, linked, "", warnings);
-    record = {
-      schema_version: "audit-run-snapshot/v1",
-      repository_root: repositoryRoot,
-      source_root: resolve(dir, "tree", prefix),
-      kind: "git",
-      pins,
-      linked: [...linked].sort(compareCodeUnits),
-      since: {},
-    };
-  } else {
-    const skip = resolve(await realpath(resolveAuditCodeStateDir()).catch(() => resolveAuditCodeStateDir()));
-    await copyTree(repositoryRoot, join(dir, "tree"), await loadIgnoreFile(repositoryRoot), skip, linked, warnings);
-    record = {
-      schema_version: "audit-run-snapshot/v1",
-      repository_root: repositoryRoot,
-      source_root: join(dir, "tree"),
-      kind: "copy",
-      pins: [],
-      linked: [...linked].sort(compareCodeUnits),
-      since: {},
-    };
+  const gitBacked = await isGitRepo(repositoryRoot);
+  const prefix = gitBacked ? (await git(repositoryRoot, ["rev-parse", "--show-prefix"])).trim() : "";
+  const record: RunSnapshot = {
+    schema_version: "audit-run-snapshot/v1", repository_root: repositoryRoot,
+    source_root: resolve(tree, prefix), kind: gitBacked ? "git" : "copy",
+    pins: [], linked: [], since: {},
+  };
+  const acquiring = acquiringSnapshotPath(artifactsDir);
+  const checkpoint = () => writeJsonFile(acquiring, record);
+  try {
+    if (gitBacked) {
+      const toplevel = (await git(repositoryRoot, ["rev-parse", "--show-toplevel"])).trim();
+      await snapshotRepository(toplevel, tree, ref, record.pins, linked, "", warnings, checkpoint);
+    } else {
+      await checkpoint();
+      const skip = resolve(await realpath(resolveAuditCodeStateDir()).catch(() => resolveAuditCodeStateDir()));
+      await copyTree(repositoryRoot, tree, await loadIgnoreFile(repositoryRoot), skip, linked, warnings);
+    }
+    record.linked = [...linked].sort(compareCodeUnits);
+    await checkpoint();
+    // Only this rename publishes the source root to any audit reader. A
+    // surviving acquisition receipt is solely authority to roll back.
+    await rename(acquiring, runSnapshotPath(artifactsDir));
+  } catch (error) {
+    const problems = await removeSnapshotTreeAndPins(dir, record.pins);
+    if (problems.length === 0) {
+      await rm(acquiring, { force: true }).catch(cleanupError => {
+        problems.push(`could not remove ${acquiring}: ${String(cleanupError)}`);
+      });
+    }
+    reportWarnings(problems);
+    throw error;
   }
   reportWarnings(warnings);
   return record;
@@ -715,9 +755,13 @@ export async function ensureRunSnapshot(root: string, artifactsDir: string): Pro
     }
     return (await pinsIntact(existing.pins)) ? existing : restoreSnapshot(existing, artifactsDir);
   }
-  const created = await createRunSnapshot(root, artifactsDir);
-  await writeJsonFile(runSnapshotPath(artifactsDir), created);
-  return created;
+  if (await readSnapshotRecord(acquiringSnapshotPath(artifactsDir)) !== undefined) {
+    const problems = await removeRunSnapshot(artifactsDir, root);
+    if (problems.length > 0) {
+      throw new Error(`Cannot recover the unfinished audit snapshot: ${problems.join("; ")}`);
+    }
+  }
+  return createRunSnapshot(root, artifactsDir);
 }
 
 /**
@@ -863,29 +907,45 @@ export async function removeRunSnapshot(artifactsDir: string, root: string | und
   const problems: string[] = [];
   let record: RunSnapshot | undefined;
   let dir: string;
+  let path = runSnapshotPath(artifactsDir);
   try {
-    record = await readRunSnapshot(artifactsDir);
+    record = await readSnapshotRecord(path);
+    if (record === undefined) {
+      path = acquiringSnapshotPath(artifactsDir);
+      record = await readSnapshotRecord(path);
+    }
     if (record === undefined) return problems;
     ({ dir } = await validateSnapshotOwnership(record, root, artifactsDir));
   } catch (error) {
-    return [`unreadable ${runSnapshotPath(artifactsDir)}: ${(error as Error).message}`];
+    return [`unreadable ${path}: ${(error as Error).message}`];
   }
+  problems.push(...await removeSnapshotTreeAndPins(dir, record.pins));
+  if (problems.length === 0) {
+    await rm(path, { force: true }).catch(error => problems.push(`could not remove ${path}: ${String(error)}`));
+  }
+  return problems;
+}
+
+/** Internal primitive: callers must validate the layout or own freshly acquired pins. */
+async function removeSnapshotTreeAndPins(dir: string, pins: readonly GitPin[]): Promise<string[]> {
+  const problems: string[] = [];
   try {
     await removeSnapshotDir(dir);
   } catch (error) {
     problems.push(`could not remove ${dir}: ${(error as Error).message}`);
     return problems;
   }
-  for (const pin of [...record.pins].reverse()) {
+  for (const pin of [...pins].reverse()) {
     // The directory is gone, so `worktree remove` only drops this checkout's
     // own registration; a registration git no longer lists is not an error.
     await git(pin.repository, ["worktree", "remove", "--force", "--force", pin.path]).catch(async (error: unknown) => {
-      const listed = await git(pin.repository, ["worktree", "list", "--porcelain"]).catch(() => "");
-      if (listed.includes(toPosixPath(pin.path))) problems.push((error as Error).message);
+      const listed = await git(pin.repository, ["worktree", "list", "--porcelain", "-z"]).catch(() => null);
+      if (listed === null || splitNul(listed).includes("worktree " + toPosixPath(pin.path))) {
+        problems.push((error as Error).message);
+      }
     });
     await git(pin.repository, ["update-ref", "-d", pin.ref])
       .catch((error: unknown) => problems.push((error as Error).message));
   }
-  if (problems.length === 0) await rm(runSnapshotPath(artifactsDir), { force: true });
   return problems;
 }

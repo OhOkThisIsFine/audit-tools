@@ -235,6 +235,9 @@ function closingStatusReason(closingResult: ClosingResult): string | undefined {
   if (closingResult.status === "skipped" && closingResult.action === "none") {
     return "closing action is 'none' — no commit/push/publish configured";
   }
+  if (closingResult.status === "unresolved") {
+    return "the operator closed reporting without a tool-verified action outcome";
+  }
   if (closingResult.status === "failed") {
     return `closing action '${closingResult.action}' failed`;
   }
@@ -765,8 +768,9 @@ export interface ClosingCommandResult {
 export interface ClosingResult {
   contract_version: "remediate-code-closing-result/v1alpha1";
   action: ClosingAction;
-  status: "success" | "failed" | "skipped";
+  status: "success" | "failed" | "skipped" | "unresolved";
   commands: ClosingCommandResult[];
+  reconciliation?: ClosingReconciliation;
   observed_git_ref?: { ref: string; object_id: string };
   /** See `ClosingActionPreviewSchema.leftover_files` — same untouched-dirt set, at execute time. */
   leftover_files?: string[];
@@ -794,15 +798,22 @@ function trimOutput(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function trackedExecutionDiagnostic(result: Awaited<ReturnType<typeof runTrackedAsync>>): string | undefined {
+  return result.error?.message ?? (result.signal ? `Stopped by signal ${result.signal}.` : undefined);
+}
+
 function commandResult(
   command: string[],
   result: Awaited<ReturnType<typeof runTrackedAsync>>,
 ): ClosingCommandResult {
+  const diagnostic = trackedExecutionDiagnostic(result);
   return {
     command,
-    exit_code: result.status,
+    // A root exit code alone is not a receipt of the destination when the
+    // tracked invocation failed. Use the existing no-replay recovery path.
+    exit_code: result.error || result.signal ? null : result.status,
     stdout: trimOutput(result.stdout),
-    stderr: trimOutput(result.stderr),
+    stderr: trimOutput([result.stderr, diagnostic].filter(Boolean).join("\n")),
   };
 }
 
@@ -1375,16 +1386,20 @@ export async function runCombinedTestSuite(
     timeout: CLOSING_CHILD_DEADLINE_MS,
   });
   const durationMs = Date.now() - startedAt;
-  if (result.status === 0) {
+  if (trackedTestPassed(result)) {
     return { ran: true, passed: true, exit_code: result.status, suite_name: suiteName, duration_ms: durationMs, output: "" };
   }
   const output = combinedOutputTail(result);
   return { ran: true, passed: false, exit_code: result.status, suite_name: suiteName, duration_ms: durationMs, output };
 }
 
-/** The tail of a tracked run's stdout then stderr, cut to `FAILURE_OUTPUT_TAIL_CHARS`. */
+function trackedTestPassed(result: Awaited<ReturnType<typeof runTrackedAsync>>): boolean {
+  return result.status === 0 && !result.error && result.signal == null;
+}
+
+/** Preserve the runner diagnostic even when the child logged a zero exit. */
 function combinedOutputTail(result: Awaited<ReturnType<typeof runTrackedAsync>>): string {
-  return ((result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? ""))
+  return [result.stdout, result.stderr, trackedExecutionDiagnostic(result)].filter(Boolean).join("\n")
     .trim()
     .slice(-FAILURE_OUTPUT_TAIL_CHARS);
 }
@@ -1560,7 +1575,7 @@ async function runE2eTests(
       timeout: CLOSING_CHILD_DEADLINE_MS,
     },
   );
-  const e2ePassed = e2eResult.status === 0;
+  const e2ePassed = trackedTestPassed(e2eResult);
   if (!e2ePassed) {
     const e2eOutput = combinedOutputTail(e2eResult);
     console.warn("End-to-end tests failed after remediation. Transitioning to triage.");
@@ -1644,6 +1659,16 @@ function renderResolvedEntry(entry: ResolvedReportEntry): string {
   return text;
 }
 
+/** Project verification evidence without inheriting the close policy's vacuous pass. */
+function closeSuiteEvidence({ ran, passed, output }: E2eTestResult) {
+  const status = ran ? (passed ? "passed" : "failed") : (passed ? "not_configured" : "refused");
+  return {
+    status,
+    passed: ran ? passed : null,
+    ...(output ? { failure_summary: output } : {}),
+  };
+}
+
 /**
  * Render `remediation-report.md` from the partitioned entries, closing action,
  * e2e result, and per-finding outcomes. Pure string builder (no I/O).
@@ -1652,7 +1677,7 @@ export function buildRemediationReportMarkdown(
   state: RemediationState,
   entries: ReportEntries,
   closingResult: ClosingResult,
-  e2ePassed: boolean | undefined,
+  e2eResult: E2eTestResult | undefined,
   outcomesReport: RemediationOutcomesReport,
   combinedTest: CombinedTestResult,
   reflections: AgentReflection[] = [],
@@ -1762,6 +1787,11 @@ export function buildRemediationReportMarkdown(
   if (closingResult.status === "failed") {
     reportContent += "A command failed. This does not establish that the destination was unchanged.\n";
   }
+  if (closingResult.reconciliation) {
+    const { disposition, note } = closingResult.reconciliation;
+    reportContent += "Report-only reconciliation (" + disposition + "): no closing command was repeated, and tool verification of the action outcome is unavailable.\n";
+    reportContent += "Operator note: " + note + "\n";
+  }
   if (closingResult.observed_git_ref) {
     const { ref, object_id } = closingResult.observed_git_ref;
     reportContent += `Reconciled from the actual local Git ref: \`${ref}\` points to \`${object_id}\`; no command was repeated.\n`;
@@ -1844,8 +1874,10 @@ export function buildRemediationReportMarkdown(
     reportContent += `\nWarning: ${outcomesReport.recovery.dropped_lines} ledger line(s) could not be read (torn, or written by another release), so an unread recovery event may be missing from this section.\n`;
   }
 
-  if (e2ePassed !== undefined) {
-    reportContent += `\n## End-to-End Tests\n\nResult: ${e2ePassed ? "passed" : "failed"}\n`;
+  if (e2eResult !== undefined) {
+    const evidence = closeSuiteEvidence(e2eResult);
+    reportContent += `\n## End-to-End Tests\n\nEnd-to-end tests: ${evidence.status.replace("_", " ")}\n`;
+    if (evidence.failure_summary) reportContent += `\n\`\`\`\n${evidence.failure_summary}\n\`\`\`\n`;
   }
 
   const o = outcomesReport.by_outcome;
@@ -1877,10 +1909,12 @@ export function buildRemediationReportMarkdown(
     reportContent += `\nMechanical re-verify (analyzer-born findings): ${count("verified_mechanically")} verified by analyzer re-run, ${count("lead_persists")} lead(s) persisting, ${count("skipped")} skipped (analyzer unavailable/unadmitted).\n`;
   }
 
-  if (!combinedTest.passed) {
-    reportContent += `\n## Combined Test Suite Failure\n\nThe full test suite failed after remediation. No items with a resolved status were available to re-block, so the run completed, but the following failure was recorded:\n\n`;
-    if (combinedTest.output) reportContent += `\`\`\`\n${combinedTest.output}\n\`\`\`\n`;
+  const combined = closeSuiteEvidence(combinedTest);
+  reportContent += `\nCombined test suite: ${combined.status.replace("_", " ")}\n`;
+  if (combined.status === "failed") {
+    reportContent += "\n## Combined Test Suite Failure\n\nThe full test suite failed after remediation. No items with a resolved status were available to re-block, so the run completed, but the following failure was recorded:\n";
   }
+  if (combined.failure_summary) reportContent += `\n\`\`\`\n${combined.failure_summary}\n\`\`\`\n`;
 
   // THE LANDING GATES. Every discovered gate is reported, not only the failures:
   // a reader has to be able to tell "the tree-wide gates ran and passed" from
@@ -2100,6 +2134,7 @@ export function buildVerificationReport(
   closingResult: ClosingResult,
   combinedTest: CombinedTestResult,
   createdAt = new Date().toISOString(),
+  e2eResult?: E2eTestResult,
 ): VerificationReport {
   const units = (state.plan?.units ?? []).map(unit => {
     const item = state.items?.[unit.id];
@@ -2139,7 +2174,7 @@ export function buildVerificationReport(
       : UNFINISHED_OUTCOMES.has(outcome.outcome) ? "failed" : "passed",
   }));
   const requestUnfinished = outcomeReport.request_outcome && UNFINISHED_OUTCOMES.has(outcomeReport.request_outcome.status);
-  const overallPassed = !requestUnfinished && combinedTest.passed && closingActionCompleted(closingResult) &&
+  const overallPassed = !requestUnfinished && combinedTest.passed && e2eResult?.passed !== false && closingActionCompleted(closingResult) &&
     units.every(unit => unit.overall_status !== "failed") && findings.every(finding => finding.overall_status !== "failed");
   return {
     contract_version: CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
@@ -2424,14 +2459,15 @@ export async function runClosePhase(
       context = await recordOutcome(terminal);
     } else {
       const inProgress = { ...intent, receipts, in_flight: inFlight,
-        ...(tagTarget ? {
-          tag_target: tagTarget, verified_state: state,
-          report_inputs: { combinedTest, e2eResult, landingGates, contractReviews },
-        } : {}),
+        verified_state: state, report_inputs: { combinedTest, e2eResult, landingGates, contractReviews },
+        ...(tagTarget ? { tag_target: tagTarget } : {}),
       };
-      await writeJsonFile(resultPath, { in_progress: { ...inProgress, sha256: contentSha256(inProgress) } });
+      const receiptSha256 = contentSha256(inProgress);
+      await writeJsonFile(resultPath, { in_progress: { ...inProgress, sha256: receiptSha256 } });
       if (inFlight !== null && receipts.at(-1)?.exit_code === null) {
-        throw new UnresolvedClosingActionError(resultPath);
+        throw new UnresolvedClosingActionError(resultPath, intent.action === "tag" ? undefined : {
+          path: join(options.artifactsDir, CLOSING_RECONCILIATION_FILENAME), receiptSha256,
+        });
       }
     }
   });
@@ -2441,6 +2477,14 @@ export async function runClosePhase(
 
 // sites-pinned: tests/remediate/phase-close.test.ts
 const CLOSING_RESULT_FILENAME = "remediation-closing-result.json";
+const CLOSING_RECONCILIATION_FILENAME = "closing_reconciliation.json";
+
+interface ClosingReconciliation {
+  receipt_sha256: string;
+  disposition: "observed" | "abandoned";
+  note: string;
+  interrupted_command: string[] | null;
+}
 
 interface CloseReportContext {
   endedAt: string;
@@ -2469,7 +2513,10 @@ function writePendingCloseReport(
 
 /** A prior close started, but no final action receipt proves its outcome. */
 export class UnresolvedClosingActionError extends Error {
-  constructor(readonly receiptPath: string) {
+  constructor(
+    readonly receiptPath: string,
+    readonly reconciliation?: { path: string; receiptSha256: string; problem?: string },
+  ) {
     super(
       "Closing action outcome is unresolved. No closing command was repeated. " +
       "Inspect the recorded command receipts and verify the actual local or destination state before further closing work.",
@@ -2514,6 +2561,58 @@ export async function assertNoUnresolvedClosingAction(artifactsDir: string): Pro
   if (saved && "in_progress" in saved) throw new UnresolvedClosingActionError(join(artifactsDir, CLOSING_RESULT_FILENAME));
 }
 
+function matchesClosingIntent(state: RemediationState, options: OrchestratorOptions, intent: ClosingIntent): boolean {
+  const { sha256, ...body } = intent;
+  return sha256 === contentSha256(body) && state.status === "closing" &&
+    intent.root === options.root && intent.action === state.closing_plan?.action &&
+    intent.plan_id === state.plan?.plan_id && intent.started_at === state.started_at &&
+    intent.review_revision_sha256 === state.plan?.review_revision_sha256;
+}
+
+async function reconcileClosingWithoutReplay(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  intent: ClosingIntent,
+  runLogger?: RunLogger,
+): Promise<RemediationState> {
+  const resultPath = join(options.artifactsDir, CLOSING_RESULT_FILENAME);
+  const verified = intent.verified_state;
+  if (!matchesClosingIntent(state, options, intent) || !verified || !intent.report_inputs ||
+      !matchesClosingIntent(verified, options, intent)) {
+    throw new UnresolvedClosingActionError(resultPath);
+  }
+  const path = join(options.artifactsDir, CLOSING_RECONCILIATION_FILENAME);
+  const blocked = (problem?: string) => new UnresolvedClosingActionError(resultPath, {
+    path, receiptSha256: intent.sha256, ...(problem ? { problem } : {}),
+  });
+  let submitted: unknown;
+  try {
+    submitted = await readOptionalJsonFile<unknown>(path);
+  } catch {
+    throw blocked("The reconciliation file could not be read as JSON.");
+  }
+  if (submitted === undefined) throw blocked();
+  if (submitted === null || typeof submitted !== "object" ||
+      !("receipt_sha256" in submitted) || submitted.receipt_sha256 !== intent.sha256 ||
+      !("disposition" in submitted) || (submitted.disposition !== "observed" && submitted.disposition !== "abandoned") ||
+      !("note" in submitted) || typeof submitted.note !== "string" ||
+      !submitted.note.trim() || submitted.note.length > 2000) {
+    throw blocked("The reconciliation is invalid or does not match the current receipt.");
+  }
+  // Even a positive operator observation does not attest the action as green.
+  const result: ClosingResult = {
+    contract_version: "remediate-code-closing-result/v1alpha1",
+    action: intent.action, status: "unresolved", commands: intent.receipts,
+    reconciliation: {
+      receipt_sha256: intent.sha256, disposition: submitted.disposition, note: submitted.note.trim(),
+      interrupted_command: intent.in_flight,
+    },
+  };
+  const context = { ...intent.report_inputs, endedAt: new Date().toISOString() };
+  await writePendingCloseReport(resultPath, result, verified, context);
+  return reportRecordedClose(verified, options, result, context, runLogger, true);
+}
+
 async function reconcileClosingTag(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -2521,13 +2620,9 @@ async function reconcileClosingTag(
   runLogger?: RunLogger,
 ): Promise<RemediationState> {
   const path = join(options.artifactsDir, CLOSING_RESULT_FILENAME);
-  const { sha256, ...body } = intent;
   // Only tool-owned evidence for this exact run, a previously absent tag and
   // an exact observed target can authorize report-only recovery.
-  if (sha256 !== contentSha256(body) || state.status !== "closing" ||
-      state.closing_plan?.action !== "tag" || intent.action !== "tag" ||
-      intent.root !== options.root || intent.plan_id !== state.plan?.plan_id || intent.started_at !== state.started_at ||
-      intent.review_revision_sha256 !== state.plan?.review_revision_sha256 || !intent.verified_state ||
+  if (!matchesClosingIntent(state, options, intent) || intent.action !== "tag" || !intent.verified_state ||
       !intent.report_inputs || !intent.tag_target ||
       JSON.stringify(intent.in_flight) !== JSON.stringify(["git", "tag", AUTO_REMEDIATION_TAG]) ||
       await readGitObjectId(options.root, AUTO_REMEDIATION_TAG_REF) !== intent.tag_target) {
@@ -2552,7 +2647,12 @@ export async function retryIncompleteCloseReport(
   runLogger?: RunLogger,
 ): Promise<RemediationState | undefined> {
   const saved = await readClosingRecord(options.artifactsDir);
-  if (saved && "in_progress" in saved) return reconcileClosingTag(state, options, saved.in_progress, runLogger);
+  if (saved && "in_progress" in saved) {
+    const intent = saved.in_progress;
+    return intent.action === "tag"
+      ? reconcileClosingTag(state, options, intent, runLogger)
+      : reconcileClosingWithoutReplay(state, options, intent, runLogger);
+  }
   if (!saved || !("pending_report" in saved)) return;
   const { pending_report: retry, ...closingResult } = saved;
   const verified = retry?.verified_state;
@@ -2645,7 +2745,7 @@ async function finishCloseReport(
     state,
     entries,
     closingResult,
-    e2eResult.ran ? e2eResult.passed : undefined,
+    e2eResult,
     outcomesReport,
     combinedTest,
     closeFeedback.reflections,
@@ -2656,18 +2756,17 @@ async function finishCloseReport(
     started_at?: string;
     ended_at: string;
     step_count: number;
-    combined_test_result: {
-      passed: boolean;
+    combined_test_result: ReturnType<typeof closeSuiteEvidence> & {
       suite_name?: string;
       duration_ms: number;
-      failure_summary?: string;
     };
-    e2e_result?: { passed: boolean };
+    e2e_result: ReturnType<typeof closeSuiteEvidence>;
     closing_result: {
       action: ClosingAction;
       status: string;
       commands: ClosingCommandResult[];
       observed_git_ref?: ClosingResult["observed_git_ref"];
+      reconciliation?: ClosingReconciliation;
       leftover_files?: string[];
     };
     plan_coverage?: OutcomeCoverageLedger;
@@ -2677,17 +2776,17 @@ async function finishCloseReport(
     ended_at: endedAt,
     step_count: state.step_count ?? 0,
     combined_test_result: {
-      passed: combinedTest.passed,
+      ...closeSuiteEvidence(combinedTest),
       ...(combinedTest.suite_name ? { suite_name: combinedTest.suite_name } : {}),
       duration_ms: combinedTest.duration_ms,
-      ...(combinedTest.output ? { failure_summary: combinedTest.output } : {}),
     },
-    ...(e2eResult.ran ? { e2e_result: { passed: e2eResult.passed } } : {}),
+    e2e_result: closeSuiteEvidence(e2eResult),
     closing_result: {
       action: closingResult.action,
       status: closingResult.status,
       commands: closingResult.commands,
       ...(closingResult.observed_git_ref ? { observed_git_ref: closingResult.observed_git_ref } : {}),
+      ...(closingResult.reconciliation ? { reconciliation: closingResult.reconciliation } : {}),
       // Untouched-user-dirt set collectStagingFiles left alone (never staged) —
       // see ClosingResult.leftover_files / ClosingActionPreviewSchema.leftover_files.
       ...(closingResult.leftover_files?.length
@@ -2709,7 +2808,7 @@ async function finishCloseReport(
   const outputDir = outputDirFor(options.artifactsDir);
 
   // 6. Write verification_report.json for the contract pipeline closing phase.
-  const verificationReport = buildVerificationReport(state, options, closingResult, combinedTest, endedAt);
+  const verificationReport = buildVerificationReport(state, options, closingResult, combinedTest, endedAt, e2eResult);
   const verificationReportPath = join(outputDir, "verification_report.json");
   const completeState: RemediationState = { ...state, status: "complete" };
 

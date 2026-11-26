@@ -459,3 +459,25 @@ describe("pending-only preflight", () => {
     expect(preflight).not.toHaveBeenCalled();
   });
 });
+
+it("persists the row before accounting and includes completed retries in an interrupted stamp", async () => {
+  const out = join(tmp(), "interrupted.jsonl");
+  let calls = 0;
+  await expect(dispatchBoundedItems({
+    items: [{ id: "retry" }],
+    outPath: out,
+    concurrency: 1,
+    callLane: async () => {
+      if (++calls === 1) throw new Error("transport unavailable");
+      return { raw: "{}", finishReason: "stop" };
+    },
+    buildRecord: (item: { id: string }) => ({ id: item.id }),
+    stampExtra: () => {
+      expect(readRows(out)).toMatchObject([{ id: "retry", retry: { attempts: 2 } }]);
+    },
+    onProgress: () => { throw new Error("interrupted after completion"); },
+  })).rejects.toThrow("interrupted after completion");
+  expect(JSON.parse(readFileSync(coverageStampPath(out), "utf8"))).toMatchObject({
+    attempted: 1, classified: 1, retried: 1, finished_at: null,
+  });
+});

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/score-audit-command.test.ts
 /**
  * A-2 — the deterministic finding-quality oracle (`score-audit`).
  *
@@ -33,35 +34,27 @@
  * always yields a byte-identical scorecard.
  */
 
+import { z } from "zod";
 import { findingIdentityKey, type Finding } from "audit-tools/shared";
 import { ratio, pct, valueRegressed } from "./scoreShared.js";
 
-/** The label a human applies to one finding of a labeled corpus run. */
-export type FindingLabel = "true_positive" | "false_positive" | "hallucinated";
+const FindingLabelSchema = z.enum(["true_positive", "false_positive", "hallucinated"]);
+export type FindingLabel = z.infer<typeof FindingLabelSchema>;
 
-/**
- * One human-applied label, keyed on a finding-identity SIGNATURE (not a finding
- * id — ids are run-local and content-addressed; the signature is the stable
- * cross-run identity). `note` is optional human context, ignored by scoring.
- */
-export interface CorpusLabel {
-  /** The `findingIdentitySignature` of the labeled finding. */
-  signature: string;
-  label: FindingLabel;
-  /** Optional human note (e.g. why it was deemed hallucinated). Not scored. */
-  note?: string;
-}
+/** Human verdict keyed by stable finding signature, not the run-local finding ID. */
+const CorpusLabelSchema = z.object({
+  signature: z.string(),
+  label: FindingLabelSchema,
+  note: z.string().optional(),
+});
 
-/**
- * A versioned corpus labels file (`corpus/<run-id>.labels.json`). Decoupled from
- * the raw run so a re-run of the auditor can be scored against the SAME labels.
- */
-export interface CorpusLabels {
-  schema_version: "score-audit-corpus-labels/v1";
-  /** The run these labels were applied to (provenance only; not scored). */
-  run_id: string;
-  labels: CorpusLabel[];
-}
+/** Versioned and separate from the run, so reruns are scored against the same labels. */
+export const CorpusLabelsSchema = z.object({
+  schema_version: z.literal("score-audit-corpus-labels/v1"),
+  run_id: z.string(),
+  labels: z.array(CorpusLabelSchema),
+});
+export type CorpusLabels = z.infer<typeof CorpusLabelsSchema>;
 
 /** Why a finding or a label could not be cleanly scored. */
 export type UnmatchedReason =

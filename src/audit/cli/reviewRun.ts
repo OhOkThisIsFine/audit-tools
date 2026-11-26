@@ -28,6 +28,7 @@ import {
 import {
   buildAuditCodeHandoff,
   writeAuditCodeHandoffArtifacts,
+  type AuditStopDisposition,
   CURRENT_TASK_FILENAME,
 } from "../supervisor/operatorHandoff.js";
 import { ActiveReviewRunSchema, type ActiveReviewRun } from "../contracts/wrapperResponse.js";
@@ -68,7 +69,7 @@ export async function writeHandoffOnly(params: {
   bundle: ArtifactBundle;
   audit_state: AuditState;
   progress_summary: string;
-  isConfigError?: boolean;
+  stop?: AuditStopDisposition;
   activeReviewRun?: ActiveReviewRun;
 }): Promise<void> {
   await writeAuditCodeHandoffArtifacts(
@@ -78,7 +79,7 @@ export async function writeHandoffOnly(params: {
       state: params.audit_state,
       bundle: params.bundle,
       progressSummary: params.progress_summary,
-      isConfigError: params.isConfigError,
+      stop: params.stop,
       activeReviewRun: params.activeReviewRun,
     }),
   );
@@ -484,7 +485,7 @@ export async function persistConfigErrorHandoff(params: {
       bundle: blockedBundle,
       audit_state: blockedState,
       progress_summary: params.progressSummary,
-      isConfigError: true,
+      stop: { kind: "blocked" },
     });
   });
 }

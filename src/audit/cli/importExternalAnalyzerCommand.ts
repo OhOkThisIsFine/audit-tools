@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/audit-cli-correctness.test.ts
 import { readJsonFile } from "audit-tools/shared";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { runAuditStep } from "./auditStep.js";
@@ -10,13 +11,13 @@ export async function cmdImportExternalAnalyzer(argv: string[]): Promise<void> {
     "--external-analyzer-results",
     `${artifactsDir}/external_analyzer_results.json`,
   ) as string;
-  const externalAnalyzerResults =
-    await readJsonFile<ExternalAnalyzerResults>(sourcePath);
-  if (!Array.isArray(externalAnalyzerResults.results)) {
+  const input = await readJsonFile<unknown>(sourcePath);
+  if (input === null || typeof input !== "object" || !("results" in input) || !Array.isArray(input.results)) {
     throw new Error(
       `External analyzer results at '${sourcePath}' must have a 'results' array, but the field is absent or not an array.`,
     );
   }
+  const externalAnalyzerResults = input as ExternalAnalyzerResults;
   // Pass the already-parsed data so runAuditStep does not read the file a second time.
   const result = await runAuditStep({
     root: getRootDir(argv),

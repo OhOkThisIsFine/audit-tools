@@ -93,7 +93,7 @@ type Register = {
   citation_validation: { quote_presence_checked: boolean };
 };
 
-async function currentStep(artifactsDir: string): Promise<{ step_kind: string; access: { write_paths: string[] } }> {
+async function currentStep(artifactsDir: string): Promise<{ step_kind: string; stop_condition: string; access: { write_paths: string[] } }> {
   return JSON.parse(await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"));
 }
 
@@ -219,6 +219,9 @@ test("a stale register whose every packet is unchanged carries all lanes with no
     // the proof that no lane was re-asked.
     const reached = await walkTo(root, artifactsDir, ["charter_extraction", "charter_comparison"], "all carried");
     expect(reached.step_kind).toBe("charter_comparison");
+    expect(reached.stop_condition).toMatch(/independent context/);
+    expect(reached.stop_condition).toMatch(/if .*available.*stop/i);
+    expect(reached.stop_condition).not.toContain("else yourself");
 
     const after = await readRegister(artifactsDir);
     expect(after.lanes.map((lane) => [lane.kind, lane.nodes[0]?.node_id, lane.packet_sha256])).toEqual(

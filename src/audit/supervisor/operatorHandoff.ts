@@ -46,7 +46,13 @@ export interface ActiveReviewRun {
   host_result_map_path: string;
 }
 
+export interface AuditStopDisposition {
+  kind: "paused" | "blocked" | "complete";
+  command?: string;
+}
+
 export interface AuditCodeHandoff {
+  disposition?: AuditStopDisposition["kind"];
   status: AuditTopLevelStatus;
   repo_root: string;
   artifacts_dir: string;
@@ -109,45 +115,6 @@ function buildSummary(
   return "Automatic deterministic work can continue. Re-run the same wrapper or inspect the listed artifacts for context.";
 }
 
-function buildSuggestedInputs(
-  artifactsDir: string,
-  status: AuditTopLevelStatus,
-  isConfigError: boolean,
-  activeReviewRun?: ActiveReviewRun,
-): AuditCodeHandoffInput[] {
-  if (status !== BLOCKED_STATUS || isConfigError || activeReviewRun) return [];
-  const inputsDir = join(artifactsDir, OPERATOR_INPUTS_DIRNAME);
-  return [
-    {
-      flag: "--external-analyzer-results",
-      suggested_path: join(inputsDir, "external-analyzer-results.json"),
-      description: "Import normalized external-analyzer results.",
-    },
-  ];
-}
-
-function buildSuggestedCommands(
-  artifactsDir: string,
-  inputs: AuditCodeHandoffInput[],
-  status: AuditTopLevelStatus,
-  activeReviewRun?: ActiveReviewRun,
-): string[] {
-  if (status !== BLOCKED_STATUS) return [];
-  if (activeReviewRun) {
-    return [renderPromptCommand(["audit-code", "next-step", "--artifacts-dir", artifactsDir])];
-  }
-  return inputs.map((input) =>
-    renderPromptCommand([
-      "audit-code",
-      "import-external-analyzer",
-      input.flag,
-      input.suggested_path,
-      "--artifacts-dir",
-      artifactsDir,
-    ]),
-  );
-}
-
 const ARTIFACT_PATH_RENDER_FIELDS: {
   readonly [K in keyof AuditCodeHandoffArtifactPaths]: {
     readonly label: string;
@@ -175,6 +142,7 @@ function renderMarkdown(handoff: AuditCodeHandoff): string {
     "# audit-code operator handoff",
     "",
     `Status: ${handoff.status}`,
+    ...(handoff.disposition ? [`Disposition: ${handoff.disposition}`] : []),
     `Repo root: ${handoff.repo_root}`,
     `Artifacts dir: ${handoff.artifacts_dir}`,
     "",
@@ -217,10 +185,9 @@ export function buildAuditCodeHandoff(params: {
   state: AuditState;
   bundle: ArtifactBundle;
   progressSummary: string;
-  isConfigError?: boolean;
+  stop?: AuditStopDisposition;
   activeReviewRun?: ActiveReviewRun;
 }): AuditCodeHandoff {
-  const isConfigError = params.isConfigError ?? false;
   const blocked = params.state.status === BLOCKED_STATUS;
   const artifactPaths: AuditCodeHandoffArtifactPaths = {
     operator_inputs_dir: join(params.artifactsDir, OPERATOR_INPUTS_DIRNAME),
@@ -245,25 +212,19 @@ export function buildAuditCodeHandoff(params: {
       : null,
     friction_record: frictionCapturePath(params.artifactsDir, AUDIT_FRICTION_RUN_ID),
   };
-  const suggestedInputs = buildSuggestedInputs(
-    params.artifactsDir,
-    params.state.status,
-    isConfigError,
-    params.activeReviewRun,
-  );
+  const reviewCommand = blocked && params.activeReviewRun
+    ? renderPromptCommand(["audit-code", "next-step", "--artifacts-dir", params.artifactsDir])
+    : undefined;
+  const command = params.stop ? params.stop.command : reviewCommand;
   const handoff: AuditCodeHandoff = {
     status: params.state.status,
+    ...(params.stop ? { disposition: params.stop.kind } : {}),
     repo_root: params.root,
     artifacts_dir: params.artifactsDir,
-    summary: buildSummary(params.state.status, params.progressSummary),
+    summary: params.stop ? params.progressSummary : buildSummary(params.state.status, params.progressSummary),
     pending_obligations: buildPendingObligations(params.state),
-    suggested_inputs: suggestedInputs,
-    suggested_commands: buildSuggestedCommands(
-      params.artifactsDir,
-      suggestedInputs,
-      params.state.status,
-      params.activeReviewRun,
-    ),
+    suggested_inputs: [],
+    suggested_commands: command ? [command] : [],
     artifact_paths: artifactPaths,
     ...(params.activeReviewRun ? { active_review_run: params.activeReviewRun } : {}),
   };

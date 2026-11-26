@@ -30,11 +30,14 @@ export async function questionWorkloadBindings(
   const lineIndex = verifiedByPath
     ? Object.fromEntries([...verifiedByPath].map(([path, file]) => [path, file.line_count]))
     : await buildLineIndexForPaths(sourceRoot, allowed);
-  const sourceFiles = allowed.flatMap(path => {
+  const sourceFiles = allowed.map(path => {
     const fingerprint = scope.files.get(path)?.hash;
     const line_count = lineIndex[path];
-    return fingerprint && Number.isInteger(line_count) && line_count! >= 0
-      ? [{ path, line_count: line_count!, fingerprint }] : [];
+    if (line_count === undefined || !Number.isInteger(line_count) || line_count < 0 || !fingerprint) {
+      throw new Error("Cannot measure admitted audit source '" + path +
+        "'. Restore readable frozen source and run next-step before dispatching reviewers.");
+    }
+    return { path, line_count, fingerprint };
   });
   const measured = new Set(sourceFiles.map(({ path }) => path));
   const includes = [...new Set(sourceFiles.map(({ path }) => path.split("/")[0]!))].sort(compareCodeUnits);

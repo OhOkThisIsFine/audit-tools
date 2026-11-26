@@ -166,8 +166,8 @@ export type GateRunner = (
   cwd: string,
   packageDir?: string,
 ) =>
-  | { status: number | null; stdout?: string; stderr?: string; ran?: boolean }
-  | Promise<{ status: number | null; stdout?: string; stderr?: string; ran?: boolean }>;
+  | { status: number | null; stdout?: string; stderr?: string; ran?: boolean; error?: Error }
+  | Promise<{ status: number | null; stdout?: string; stderr?: string; ran?: boolean; error?: Error }>;
 
 /** Existing explicit test-hermeticity controls, shared by both gate boundaries. */
 export function finalGateDisabledReason(options: { skipFinalGate?: boolean }): string | null {
@@ -282,6 +282,7 @@ export async function runToolOwnedFinalGate(
         status: result.status,
         stdout: result.stdout,
         stderr: result.stderr,
+        error: result.error,
       };
     });
 
@@ -295,10 +296,11 @@ export async function runToolOwnedFinalGate(
       spec.package_dir === undefined && spec.argv.length === terminal.argv.length &&
       spec.argv.every((arg, i) => arg === terminal.argv[i])
       ? terminal.execute : runner;
-    const { status, stdout, stderr, ran } = await execute(spec.argv, root, spec.package_dir);
-    const cmdPassed = ran !== false && status === 0;
+    const { status, stdout, stderr, ran, error } = await execute(spec.argv, root, spec.package_dir);
+    const cmdPassed = ran !== false && status === 0 && error === undefined;
     const stdoutTail = cmdPassed ? undefined : outputTail(stdout);
-    const stderrTail = cmdPassed ? undefined : outputTail(stderr);
+    const diagnostic = error ? (stderr ? `${stderr}\n${error.message}` : error.message) : stderr;
+    const stderrTail = cmdPassed ? undefined : outputTail(diagnostic);
     results.push({
       argv: spec.argv,
       layer: spec.layer,
@@ -327,7 +329,8 @@ export async function runToolOwnedFinalGate(
 const FINAL_GATE_STATE_FILENAME = "final-gate.json";
 const FINAL_GATE_OUTCOME_FILENAME = "final-gate-outcome.json";
 const FINAL_GATE_VERDICT_FILENAME = "final-gate-verdict.json";
-const FINAL_GATE_VERDICT_VERSION = "remediate-code-final-gate-verdict/v1alpha1";
+// Older verdicts treated zero root exit plus a tracked-runner error as green.
+const FINAL_GATE_VERDICT_VERSION = "remediate-code-final-gate-verdict/v1alpha2";
 
 /**
  * Where the failing gate run is recorded, relative to the artifacts dir. The
@@ -371,7 +374,7 @@ export function finalGateOutcomePath(artifactsDir: string): string {
  * describe what happened) but nothing may ever be served from it.
  */
 export interface FinalGateVerdictRecord {
-  schema_version: "remediate-code-final-gate-verdict/v1alpha1";
+  schema_version: typeof FINAL_GATE_VERDICT_VERSION;
   /** The scope the floor ran at — a phase boundary, or the all-terminal funnel. */
   scope: string;
   /** The tree content id this verdict is about; `null` when it could not be taken. */

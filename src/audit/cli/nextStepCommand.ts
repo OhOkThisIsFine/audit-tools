@@ -1072,7 +1072,7 @@ const emitCharterComparison = emissionRow<"charter_comparison">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        `Execute the comparison lane prompt (${SEPARATE_CONTEXT_OR_SELF}), write the correspondences and differences to the results path, then run next-step.`,
+        `Execute the comparison lane prompt in ${INDEPENDENT_CONTEXT}. If no independent context is available, stop without writing a result or running next-step. Otherwise write the correspondences and differences to the results path, then run next-step.`,
       repoRoot: root,
       artifactPaths: { ...fanout.artifactPaths, ...laneGraphPaths },
       prompt: [

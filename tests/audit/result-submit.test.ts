@@ -11,7 +11,7 @@ import { writeCoreArtifacts, loadArtifactBundle, type ArtifactBundle } from "../
 import { ensureRunSourceRoot } from "../../src/audit/io/runSnapshot.js";
 import { hashContent } from "../../src/shared/hash.js";
 import { cmdSubmit, submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
-import { ingestAuditQuestionResults, publishAuditQuestionWorkload } from "../../src/audit/cli/dispatch/hostHandoff.js";
+import { ingestAuditQuestionResults, publishAuditQuestionWorkload, readAuditQuestionWorkload } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 
@@ -67,6 +67,26 @@ async function issue(params: { root: string; artifactsDir: string; runId: string
   return { sourceRoot, answer: { ...submission, assignment_id: bindings[0]!.assignment.assignment_id } };
 }
 
+
+test("question dispatch refuses an unmeasured admitted file before publication", async () => {
+  await fixture(async (params) => {
+    const { sourceRoot } = await issue(params, false);
+    const bundle = await loadArtifactBundle(params.artifactsDir);
+    const path = join(sourceRoot, ref.path);
+    const saved = await readFile(path);
+    await rm(path);
+    await expect(deriveCurrentQuestionBindings(bundle, sourceRoot)).rejects.toThrow(
+      /Cannot measure admitted audit source.*src\/resume\.ts.*restore.*next-step/i,
+    );
+    await expect(readAuditQuestionWorkload(params)).rejects.toMatchObject({ code: "ENOENT" });
+    await writeFile(path, saved);
+    const { bindings } = await deriveCurrentQuestionBindings(bundle, sourceRoot);
+    await publishAuditQuestionWorkload({ ...params, sourceRoot, bindings });
+    expect((await readAuditQuestionWorkload(params)).source_files).toContainEqual(
+      expect.objectContaining({ path: ref.path, line_count: 1 }),
+    );
+  });
+});
 
 test("CLI submission durably records the answer and exact replay does not rewrite the ledger", async () => {
   await fixture(async (params) => {

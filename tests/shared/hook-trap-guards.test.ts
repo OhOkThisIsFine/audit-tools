@@ -47,6 +47,23 @@ describe('check-control-bytes: index entries deleted from the working tree', () 
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('scans tracked source names that Git normally quotes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'control-byte-quoted-path-'));
+    const file = ' élève.ts';
+    const git = (...args: string[]) => spawnSyncHidden('git', args, { cwd: root, encoding: 'utf8' });
+    try {
+      expect(git('init', '-q').status).toBe(0);
+      writeFileSync(join(root, file), Buffer.from([0]));
+      expect(git('-c', 'core.quotePath=true', 'add', '--', file).status).toBe(0);
+      const result = spawnSyncHidden(process.execPath, [CONTROL_BYTE_CHECK], { cwd: root, encoding: 'utf8' });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`${file}:1 raw control byte 0x00`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
 });
 
 /**

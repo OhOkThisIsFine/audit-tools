@@ -41,6 +41,7 @@ import {
   discardOnSchemaVersionMismatch,
   expectedSubmissionsPath,
   hashContent,
+  isFileMissingError,
   isIngestEvent,
   isRecord,
   mergeExpectedSets,
@@ -473,26 +474,27 @@ export async function recordDispatchedLanes(
 }
 
 /** What the bytes at a lane's bound path say it delivered. */
-async function observeLaneDelivery(path: string, binding?: SubmissionLedgerEvent): Promise<MeasuredOutcome> {
+async function observeLaneDelivery(path: string, binding?: SubmissionLedgerEvent): Promise<{ outcome: MeasuredOutcome; message?: string }> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
-  } catch {
-    // Dispatched, and nothing at the bound path. The five "exit 0, wrote
-    // nothing" lanes of the measured run are exactly this.
-    return "not_run";
+  } catch (error) {
+    if (isFileMissingError(error)) return { outcome: "not_run" };
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    const diagnostic = typeof code === "string" && /^[A-Z0-9_]{1,32}$/.test(code) ? ` (${code})` : "";
+    return { outcome: "degraded", message: `Could not read lane result${diagnostic}.` };
   }
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
     // Present and unusable — the lane that returned the single word "Let".
-    return "degraded";
+    return { outcome: "degraded" };
   }
   const requirement = ReviewRequirementSchema.safeParse(binding?.review_requirement ?? "ordinary");
-  if (!requirement.success) return "degraded";
+  if (!requirement.success) return { outcome: "degraded" };
   const reviewed = parseReviewSubmissionEnvelope(value, { requirement: requirement.data, promptSha256: binding?.prompt_sha256 });
-  if (!reviewed.ok) return "degraded";
+  if (!reviewed.ok) return { outcome: "degraded" };
   value = reviewed.result;
   const items = Array.isArray(value)
     ? value
@@ -501,11 +503,9 @@ async function observeLaneDelivery(path: string, binding?: SubmissionLedgerEvent
       : undefined;
   if (items === undefined) {
     // A JSON value that is not a submission shape at all.
-    return isRecord(value) && Object.keys(value).length === 0
-      ? "clean"
-      : "degraded";
+    return { outcome: isRecord(value) && Object.keys(value).length === 0 ? "clean" : "degraded" };
   }
-  return items.length > 0 ? "findings" : "clean";
+  return { outcome: items.length > 0 ? "findings" : "clean" };
 }
 
 /**
@@ -555,10 +555,10 @@ export async function closeDispatchedLaneOutcomes(
       submission_id: submissionId,
       lane,
       kind: "lane_outcome",
-      outcome: await observeLaneDelivery(
+      ...(await observeLaneDelivery(
         laneSubmissionPath(artifactsDir, lane, runId),
         lastPromptBound.get(submissionId),
-      ),
+      )),
       ...(params.roundId === undefined ? {} : { round_id: params.roundId }),
       recorded_at: new Date().toISOString(),
     });

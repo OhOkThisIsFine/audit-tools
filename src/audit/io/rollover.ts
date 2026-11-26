@@ -38,12 +38,14 @@ import { hasPendingFoldReceipt } from "./foldReceiptPath.js";
  * Retired v1 review evidence is archived, never carried as a current input.
  */
 import { existsSync } from "node:fs";
-import { readdir, rm, writeFile } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   AUDIT_FINDINGS_FILENAME,
   auditFindingsPath,
   promotedAuditFindingsPath,
+  readOptionalJsonFile,
+  writeJsonFile,
   SESSION_INTENT_RELATIVE_PATH,
 } from "audit-tools/shared";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
@@ -97,7 +99,7 @@ const runEndedPath = (artifactsDir: string): string => join(artifactsDir, "run-e
  * Written by the terminal step only after the promotion succeeded.
  */
 export async function markRunEnded(artifactsDir: string): Promise<void> {
-  await writeFile(runEndedPath(artifactsDir), "{}\n");
+  await writeJsonFile(runEndedPath(artifactsDir), {});
 }
 
 function warn(message: string): void {
@@ -107,46 +109,59 @@ function warn(message: string): void {
 /**
  * Roll an ENDED run over (see `markRunEnded`), under the artifact-tree hold:
  * archive its diagnostics again, remove its snapshot, and delete every entry
- * that is not carried. The state file and the marker go LAST, so a rollover
- * that fails part-way is retried in full on the next call and never leaves a
- * run-scoped record (consent above all) for the next run to adopt. When a
- * diagnostic does not archive, or the snapshot cannot be removed, nothing is
- * deleted: the dir then holds the only copy, or the record of what to clean.
+ * that is not carried. The run-ended marker records when custody has been
+ * verified and stays until the sweep succeeds, so a retry does not require
+ * working copies it already deleted or allow the next run to adopt old consent.
+ * If diagnostics cannot be archived or the snapshot cannot be removed, the
+ * sweep does not begin: the working dir retains what is needed to retry.
  * Returns whether it rolled the dir over.
  */
 export async function rollOverFinishedRun(artifactsDir: string, root?: string, runLogger?: RunLogger): Promise<boolean> {
   if (!existsSync(runEndedPath(artifactsDir))) return false;
-  return await withArtifactTreeHold(artifactsDir, runLogger, async () => {
-    if (await hasPendingFoldReceipt(artifactsDir) || !existsSync(runEndedPath(artifactsDir))) return false;
-    if (!(await refreshEndedQuestionReport(artifactsDir))) {
-      warn("the finished question review was not rolled over: its current report pair is not fully promoted");
-      return false;
-    }
-    // The machine contract is promoted at the terminal step, never re-copied
-    // here (an operator may have resynthesized the promoted pair). An in-place
-    // contract with no promoted copy is the only copy: keep the dir.
-    if (existsSync(auditFindingsPath(artifactsDir)) && !existsSync(promotedAuditFindingsPath(artifactsDir))) {
-      warn(`the finished audit in ${artifactsDir} was not rolled over: ${AUDIT_FINDINGS_FILENAME} has no promoted copy ` +
-        `at ${promotedAuditFindingsPath(artifactsDir)}; copy it there, or run \`audit-code cleanup --force\` to discard it`);
-      return false;
-    }
-    const { lost } = await archiveRunDiagnostics({ artifactsDir });
-    if (lost.length > 0) {
-      warn(`the finished audit in ${artifactsDir} was not rolled over: could not archive ${lost.join("; ")}`);
-      return false;
-    }
-    const problems = await removeRunSnapshot(artifactsDir, root);
-    if (problems.length > 0) {
-      warn(`the finished audit in ${artifactsDir} was not rolled over: run snapshot cleanup: ${problems.join("; ")}`);
-      return false;
+  return await withArtifactTreeHold(artifactsDir, runLogger, async (assertOwnership) => {
+    const markerPath = runEndedPath(artifactsDir);
+    if (await hasPendingFoldReceipt(artifactsDir)) return false;
+    const marker = await readOptionalJsonFile<{ sweep_ready?: boolean }>(markerPath);
+    if (marker === undefined) return false;
+    if (marker?.sweep_ready !== true) {
+      if (!(await refreshEndedQuestionReport(artifactsDir))) {
+        warn("the finished question review was not rolled over: its current report pair is not fully promoted");
+        return false;
+      }
+      // The machine contract is promoted at the terminal step, never re-copied
+      // here (an operator may have resynthesized the promoted pair). An in-place
+      // contract with no promoted copy is the only copy: keep the dir.
+      if (existsSync(auditFindingsPath(artifactsDir)) && !existsSync(promotedAuditFindingsPath(artifactsDir))) {
+        warn(`the finished audit in ${artifactsDir} was not rolled over: ${AUDIT_FINDINGS_FILENAME} has no promoted copy ` +
+          `at ${promotedAuditFindingsPath(artifactsDir)}; copy it there, or run \`audit-code cleanup --force\` to discard it`);
+        return false;
+      }
+      const { lost } = await archiveRunDiagnostics({ artifactsDir });
+      if (lost.length > 0) {
+        warn(`the finished audit in ${artifactsDir} was not rolled over: could not archive ${lost.join("; ")}`);
+        return false;
+      }
+      const problems = await removeRunSnapshot(artifactsDir, root);
+      if (problems.length > 0) {
+        warn(`the finished audit in ${artifactsDir} was not rolled over: run snapshot cleanup: ${problems.join("; ")}`);
+        return false;
+      }
+      // This is the same per-run marker, not an independent cleanup ticket.
+      // Persist it before removing any of the working promotion inputs.
+      await assertOwnership();
+      await writeJsonFile(markerPath, { sweep_ready: true });
     }
     // Lock files are never deleted: the hold this runs under owns one of them.
     const last = [STATE_FILE, basename(runEndedPath(artifactsDir))];
     for (const entry of await readdir(artifactsDir)) {
       if (CARRIED.has(entry) || entry.endsWith(".lock") || last.includes(entry)) continue;
+      await assertOwnership();
       await rm(join(artifactsDir, entry), { recursive: true, force: true });
     }
-    for (const entry of last) await rm(join(artifactsDir, entry), { force: true });
+    for (const entry of last) {
+      await assertOwnership();
+      await rm(join(artifactsDir, entry), { force: true });
+    }
     return true;
   });
 }

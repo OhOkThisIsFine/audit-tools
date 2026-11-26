@@ -1,11 +1,11 @@
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, lstat, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
 import { git, submoduleRepo } from "./helpers/submoduleRepo.mjs";
-import { hashContent } from "audit-tools/shared";
+import { hashContent, runTrackedAsync } from "audit-tools/shared";
 import { readAuditReadState } from "../../src/shared/git.js";
 import {
   ensureRunSnapshot,
@@ -17,6 +17,49 @@ import {
   runSnapshotPath,
   writeBackSnapshotEdits,
 } from "../../src/audit/io/runSnapshot.js";
+
+const snapshotFault = vi.hoisted(() => ({ path: "", operation: "", blockRollback: false, rollbackDir: "", acquiring: "" }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const rejectFault = (path: unknown, operation: string): void => {
+    if (path === snapshotFault.path && operation === snapshotFault.operation) {
+      throw Object.assign(new Error("synthetic EACCES"), { code: "EACCES" });
+    }
+  };
+  return {
+    ...actual,
+    lstat: async (...args: Parameters<typeof actual.lstat>) => {
+      rejectFault(args[0], "lstat");
+      return actual.lstat(...args);
+    },
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      if (args[1] === snapshotFault.path && snapshotFault.operation === "rename") {
+        if (snapshotFault.blockRollback) {
+          const record = JSON.parse(await actual.readFile(args[0], "utf8"));
+          snapshotFault.rollbackDir = dirname(record.pins[0].path);
+        }
+        rejectFault(args[1], "rename");
+      }
+      return actual.rename(...args);
+    },
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (args[0] === snapshotFault.rollbackDir) throw new Error("synthetic rollback interruption");
+      return actual.rm(...args);
+    },
+    symlink: async (...args: Parameters<typeof actual.symlink>) => {
+      if (String(args[1]).endsWith(snapshotFault.path)) rejectFault(snapshotFault.path, "symlink");
+      return actual.symlink(...args);
+    },
+    copyFile: async (...args: Parameters<typeof actual.copyFile>) => {
+      if (args[0] === snapshotFault.path && snapshotFault.operation === "copyFile" && snapshotFault.blockRollback) {
+        const record = JSON.parse(await actual.readFile(snapshotFault.acquiring, "utf8"));
+        snapshotFault.rollbackDir = dirname(record.pins[0].path);
+      }
+      rejectFault(args[0], "copyFile");
+      return actual.copyFile(...args);
+    },
+  };
+});
 
 async function gitOut(cwd: string, args: string[]): Promise<string> {
   return String(execFileSyncHidden("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).trim();
@@ -77,6 +120,110 @@ describe("ensureRunSnapshot — git root", () => {
     expect(await gitOut(root, ["rev-parse", "HEAD"])).toBe(headBefore);
     expect(await gitOut(root, ["status", "--porcelain"])).toBe(statusBefore);
     expect(existsSync(join(snapshot.source_root, ".audit-tools"))).toBe(false);
+  });
+
+  test.each(["lstat", "copyFile"] as const)("an admitted source %s failure refuses the snapshot and permits retry", async (operation) => {
+    const { root, artifactsDir } = await dirtyRepo();
+    const nested = join(root, "nested");
+    await mkdir(nested);
+    await git(nested, ["init", "-q"]);
+    await writeFile(join(nested, "nested.ts"), "export const nested = 1;");
+    const physicalRoot = await realpath(root);
+    const source = operation === "lstat" ? join(physicalRoot, "src", "a.ts") : join(physicalRoot, "nested", "nested.ts");
+    const sourceBefore = await readFile(source);
+    const worktreesBefore = await gitOut(root, ["worktree", "list", "--porcelain"]);
+    Object.assign(snapshotFault, { path: source, operation });
+    try {
+      await expect(ensureRunSnapshot(root, artifactsDir)).rejects.toThrow(
+        new RegExp(operation === "lstat" ? "a\\.ts.*synthetic EACCES" : "nested\\.ts.*synthetic EACCES"),
+      );
+    } finally {
+      snapshotFault.path = "";
+      snapshotFault.operation = "";
+    }
+    expect(existsSync(runSnapshotPath(artifactsDir))).toBe(false);
+    expect(await gitOut(root, ["worktree", "list", "--porcelain"])).toBe(worktreesBefore);
+    expect(await readFile(source)).toEqual(sourceBefore);
+    // A genuinely deleted tracked path is still a valid input state.
+    await rm(join(root, "src", "staged.ts"));
+    const snapshot = await ensureRunSnapshot(root, artifactsDir);
+    expect(existsSync(join(snapshot.source_root, "src", "staged.ts"))).toBe(false);
+    await expect(readFile(join(snapshot.source_root, operation === "lstat" ? "src/a.ts" : "nested/nested.ts")))
+      .resolves.toEqual(sourceBefore);
+  });
+
+  test.skipIf(process.platform === "win32")("refuses a failed admitted symlink instead of dropping it", async () => {
+    const { root, artifactsDir } = await dirtyRepo();
+    const name = "required-admitted-link.ts";
+    await symlink("a.ts", join(root, "src", name));
+    const worktrees = await gitOut(root, ["worktree", "list", "--porcelain"]);
+    Object.assign(snapshotFault, { path: name, operation: "symlink" });
+    try {
+      await expect(ensureRunSnapshot(root, artifactsDir)).rejects.toThrow(/required-admitted-link.*synthetic EACCES/);
+    } finally {
+      Object.assign(snapshotFault, { path: "", operation: "" });
+    }
+    expect(existsSync(runSnapshotPath(artifactsDir))).toBe(false);
+    expect(await gitOut(root, ["worktree", "list", "--porcelain"])).toBe(worktrees);
+    const snapshot = await ensureRunSnapshot(root, artifactsDir);
+    expect((await lstat(join(snapshot.source_root, "src", name))).isSymbolicLink()).toBe(true);
+  });
+
+  test.each([false, true])("recovers failed final snapshot publication (rollback interrupted: %s)", async blockRollback => {
+    const { root, artifactsDir } = await dirtyRepo();
+    const before = await gitOut(root, ["worktree", "list", "--porcelain"]);
+    const beforeRefs = await gitOut(root, ["for-each-ref", "refs/audit-tools/snapshots"]);
+    const pending = join(artifactsDir, "run-snapshot-acquiring.json");
+    Object.assign(snapshotFault, { path: runSnapshotPath(artifactsDir), operation: "rename", blockRollback });
+    try {
+      await expect(ensureRunSnapshot(root, artifactsDir)).rejects.toThrow(/synthetic EACCES/);
+      expect(existsSync(runSnapshotPath(artifactsDir))).toBe(false);
+      expect(existsSync(pending)).toBe(blockRollback);
+      if (!blockRollback) {
+        expect(await gitOut(root, ["worktree", "list", "--porcelain"])).toBe(before);
+        expect(await gitOut(root, ["for-each-ref", "refs/audit-tools/snapshots"])).toBe(beforeRefs);
+      }
+    } finally {
+      Object.assign(snapshotFault, { path: "", operation: "", blockRollback: false, rollbackDir: "" });
+    }
+    if (blockRollback) {
+      await expect(removeRunSnapshot(artifactsDir, root)).resolves.toEqual([]);
+      expect(existsSync(pending)).toBe(false);
+      expect(await gitOut(root, ["worktree", "list", "--porcelain"])).toBe(before);
+      expect(await gitOut(root, ["for-each-ref", "refs/audit-tools/snapshots"])).toBe(beforeRefs);
+    }
+    const snapshot = await ensureRunSnapshot(root, artifactsDir);
+    expect(existsSync(pending)).toBe(false);
+    expect(snapshot.pins).toHaveLength(1);
+  });
+
+  test("rolls back an acquisition journal with a newly staged submodule and unmerged parent index", async () => {
+    const fixture = await submoduleRepo();
+    const root = await realpath(fixture.root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    cleanups.push(async () => { await removeRunSnapshot(artifactsDir, root); await fixture.dispose(); });
+    await git(root, ["reset", "--soft", "HEAD^"]);
+    await expect(gitOut(root, ["ls-tree", "HEAD", "--", "sub"])).resolves.toBe("");
+    const oid = await gitOut(root, ["rev-parse", "HEAD:b.ts"]);
+    const conflicted = await runTrackedAsync(["git", "update-index", "--index-info"], {
+      cwd: root, input: `0 ${"0".repeat(oid.length)}\tb.ts\n100644 ${oid} 1\tb.ts\n100644 ${oid} 2\tb.ts\n`,
+    });
+    expect(conflicted.status).toBe(0);
+    expect(await gitOut(root, ["ls-files", "--unmerged"])).toContain("b.ts");
+    const nested = join(root, "sub");
+    const before = await gitOut(nested, ["worktree", "list", "--porcelain"]);
+    const acquiring = join(artifactsDir, "run-snapshot-acquiring.json");
+    Object.assign(snapshotFault, { acquiring, path: join(nested, "a.ts"), operation: "copyFile", blockRollback: true });
+    try {
+      await expect(ensureRunSnapshot(root, artifactsDir)).rejects.toThrow(/synthetic EACCES/);
+      expect(existsSync(runSnapshotPath(artifactsDir))).toBe(false);
+      expect(JSON.parse(await readFile(acquiring, "utf8")).pins).toHaveLength(2);
+    } finally {
+      Object.assign(snapshotFault, { path: "", operation: "", blockRollback: false, rollbackDir: "", acquiring: "" });
+    }
+    await expect(removeRunSnapshot(artifactsDir, root)).resolves.toEqual([]);
+    expect(await gitOut(nested, ["worktree", "list", "--porcelain"])).toBe(before);
+    expect(existsSync(acquiring)).toBe(false);
   });
 
   test("git inside the snapshot answers as the live tree did: tracked set, history and audit-read state", async () => {

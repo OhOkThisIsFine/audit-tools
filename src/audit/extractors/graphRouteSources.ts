@@ -4,6 +4,13 @@ import type { TsParser } from "./analyzers/treeSitter.js";
 import { maskCommentSpans } from "./commentDecomposition.js";
 import { pythonLogicalLines, splitPythonImportList, resolvePythonModuleSpecifier } from "./graphPythonImports.js";
 
+/** Search the original text so match indices stay in original UTF-16 offsets. */
+function closingTagOffset(content: string, name: string, cursor: number): number {
+  const closing = new RegExp("</" + name, "gi");
+  closing.lastIndex = cursor;
+  return closing.exec(content)?.index ?? -1;
+}
+
 /** Script islands only; markup, HTML comments and data scripts are not code. */
 export function routeScriptSource(path: string, content: string): string | undefined {
   if (/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i.test(path)) return maskCommentSpans(content, "source.ts");
@@ -18,7 +25,6 @@ export function routeScriptSource(path: string, content: string): string | undef
     parts.push(content.slice(content.indexOf("\n") + 1, close.index));
     cursor = end.lastIndex;
   }
-  const lower = content.toLowerCase();
   while (cursor < content.length) {
     const start = content.indexOf("<", cursor);
     if (start < 0) break;
@@ -41,13 +47,13 @@ export function routeScriptSource(path: string, content: string): string | undef
     const tag = content.slice(start + 1, end);
     const rawText = /^(style|textarea|title)(?:\s|$)/i.exec(tag);
     if (rawText) {
-      const close = lower.indexOf(`</${rawText[1]!.toLowerCase()}`, cursor);
+      const close = closingTagOffset(content, rawText[1]!, cursor);
       if (close < 0) break;
       cursor = close;
       continue;
     }
     if (!/^script(?:\s|$)/i.test(tag)) continue;
-    const close = lower.indexOf("</script", cursor);
+    const close = closingTagOffset(content, "script", cursor);
     if (close < 0) break;
     const attributes = new Map<string, string>();
     for (const attr of tag.slice(6).matchAll(/([\w-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s]+)))?/g)) {

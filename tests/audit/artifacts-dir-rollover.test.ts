@@ -1,8 +1,8 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { markRunEnded, rollOverFinishedRun } from "../../src/audit/io/rollover.js";
 import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
@@ -15,6 +15,28 @@ import {
   advanceToDispatchReady,
 } from "./helpers/completion-harness.js";
 import { presentQuestionReport, readAcceptedAnswers, readQuestionFindings, readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
+
+const interruptRollover = vi.hoisted(() => ({ after: "", before: "" }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, rm: async (...args: Parameters<typeof actual.rm>) => {
+    if (args[0] === interruptRollover.before && !existsSync(interruptRollover.after)) {
+      throw new Error("synthetic rollover interruption");
+    }
+    return actual.rm(...args);
+  }, readdir: async (...args: Parameters<typeof actual.readdir>) => {
+    const entries = await actual.readdir(...args);
+    if (args[0] !== dirname(interruptRollover.before) || !interruptRollover.before) return entries;
+    const first = [basename(interruptRollover.after), basename(interruptRollover.before)];
+    return entries.sort((a, b) => {
+      const order = (entry: unknown) => {
+        const index = first.indexOf(String(entry));
+        return index < 0 ? first.length : index;
+      };
+      return order(a) - order(b);
+    });
+  } };
+});
 
 test("a completed question audit rolls over without carrying the prior run's answers", async () => {
   await withTempRepo(async (root) => {
@@ -55,6 +77,20 @@ test("a completed question audit rolls over without carrying the prior run's ans
     const edited = join(root, "src", "lib", "session.ts");
     await writeFile(edited, (await readFile(edited, "utf8")) + "\nexport const extra = 1;\n");
 
+    const interruption = join(artifactsDir, "zzz-interruption");
+    await writeFile(interruption, "old run scratch");
+    interruptRollover.before = interruption;
+    interruptRollover.after = join(artifactsDir, "audit-findings.json");
+    try {
+      await expect(rollOverFinishedRun(artifactsDir, root)).rejects.toThrow("synthetic rollover interruption");
+      expect(existsSync(interruptRollover.after)).toBe(false);
+      expect(await readFile(reportPath)).toEqual(previousMachineReport);
+    } finally {
+      interruptRollover.before = "";
+      interruptRollover.after = "";
+    }
+
+    await expect(rollOverFinishedRun(artifactsDir, root)).resolves.toBe(true);
     const second = await readQuestionWorkload(await advanceToDispatchReady(root));
     expect(previousReport).not.toContain("late valid reflection");
     const refreshed = await readFile(promotedReportPath, "utf8");
@@ -68,6 +104,7 @@ test("a completed question audit rolls over without carrying the prior run's ans
     expect(secondConsent.run_id).not.toBe(firstConsent.run_id);
     expect(existsSync(sessionPath)).toBe(true);
     expect(existsSync(strayPath)).toBe(false);
+    expect(existsSync(interruption)).toBe(false);
     await expect(readAcceptedAnswers(artifactsDir, first.run_id)).rejects.toMatchObject({ code: "ENOENT" });
 
     const secondAnswers = await submitQuestions(root, second.work_items);

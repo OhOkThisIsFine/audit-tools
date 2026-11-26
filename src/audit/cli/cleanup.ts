@@ -3,7 +3,7 @@ import { readdir, rm, rmdir, stat } from "node:fs/promises";
 import { isArtifactTreeHoldEntry, withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { hasPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { join } from "node:path";
-import { isFileMissingError, readJsonFile } from "audit-tools/shared";
+import { hashContent, isFileMissingError, readJsonFile, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
 import { ARTIFACT_DEFINITIONS, isWorkingDirFullyPromoted, retiredRunEvidenceIsArchived } from "../io/artifacts.js";
 import { removeRunSnapshot } from "../io/runSnapshot.js";
 import type { AuditState } from "../types/auditState.js";
@@ -86,12 +86,15 @@ async function cleanupHeld(
     return { action: "skipped", status: "unknown", reason: "An incomplete fold receipt must be recovered using next-step." };
   }
 
+  const marker = ARTIFACT_DEFINITIONS.audit_state.fileName;
+  const sweepName = "cleanup-sweep.json";
+  const sweepPath = join(artifactsDir, sweepName);
   let status: AuditState["status"] | "unknown" = "unknown";
+  let stateDigest: string | undefined;
   try {
-    const state = await readJsonFile<AuditState>(
-      join(artifactsDir, ARTIFACT_DEFINITIONS.audit_state.fileName),
-    );
+    const state = await readJsonFile<AuditState>(join(artifactsDir, marker));
     status = state.status;
+    stateDigest = hashContent(JSON.stringify(state));
   } catch (error) {
     if (!isFileMissingError(error)) {
       throw error;
@@ -103,13 +106,17 @@ async function cleanupHeld(
     return { action: "skipped", status, reason: "The working audit no longer has its identity marker; refusing forced cleanup." };
   }
 
-  if (!force && status === "not_started" && !(await retiredRunEvidenceIsArchived(artifactsDir))) {
+  const sweep = !force && stateDigest && (status === "not_started" || status === "complete")
+    ? await readOptionalJsonFile<{ state_sha256?: unknown }>(sweepPath)
+    : undefined;
+  const sweepReady = stateDigest !== undefined && sweep?.state_sha256 === stateDigest;
+  if (!force && !sweepReady && status === "not_started" && !(await retiredRunEvidenceIsArchived(artifactsDir))) {
     return { action: "skipped", status, reason: "Historical audit evidence is not safely archived. The working audit was kept." };
   }
 
   const stale =
     status === "not_started" ||
-    (status === "complete" && (force || (await isWorkingDirFullyPromoted(artifactsDir))));
+    (status === "complete" && (force || sweepReady || (await isWorkingDirFullyPromoted(artifactsDir))));
   const resumable = status === "active" || status === "blocked";
 
   if (!stale && !force) {
@@ -154,11 +161,21 @@ async function cleanupHeld(
       process.stderr.write(`[audit-code] run snapshot cleanup (left behind): ${problem}\n`);
     }
   }
-  for (const entry of await readdir(artifactsDir)) {
-    const target = join(artifactsDir, entry);
-    if (isArtifactTreeHoldEntry(artifactsDir, entry)) continue;
+  if (!force && !sweepReady && stateDigest !== undefined) {
+    // Custody was verified above; do not ask a retry to reread the copy it
+    // already removed. Bind the permission to this exact working run state.
     await assertOwnership();
-    await rm(target, { recursive: true, force: true });
+    await writeJsonFile(sweepPath, { state_sha256: stateDigest });
   }
+  for (const entry of await readdir(artifactsDir)) {
+    if (entry === marker || entry === sweepName || isArtifactTreeHoldEntry(artifactsDir, entry)) continue;
+    await assertOwnership();
+    await rm(join(artifactsDir, entry), { recursive: true, force: true });
+  }
+  // Keep the identity needed for a forced retry until the sweep succeeds.
+  await assertOwnership();
+  await rm(join(artifactsDir, marker), { force: true });
+  await assertOwnership();
+  await rm(sweepPath, { force: true });
   return { action: "deleted", status };
 }

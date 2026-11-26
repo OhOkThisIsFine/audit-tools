@@ -383,25 +383,6 @@
         "src/audit/io/rollover.ts": "e14ad9ae183c298ce0760964cd8757004a416607"
       }
     },
-    "481abf3e9efbbca4": {
-      "reviewed_by": "dot-root",
-      "attester_class": "agent",
-      "checked": "Compared audit sample fresh, retry and protected-target behavior through the wrapper. Traced indexed evidence lookup position order and shared dependency identity through acceptance and reporting; checked byte-identical replay artifacts and restored the tested IO-to-dispatch dependency boundary. Verified duplicate test launches retained their distinct assertions.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "9f739e9378eb4dc2349cc5e9874922ad6be3a57b",
-        "ran_at": "2026-11-25T17:44:25.546Z"
-      },
-      "attested_at": "2026-11-25T17:45:34.196Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "07268e08d22f3fa7b85d5774cb785ecc467f9dcd",
-        "src/audit/cli/dispatch/questionReviewAcceptance.ts": "ef955a66fd36e13c1ee9eef4cabac29cf1fad58e",
-        "src/audit/cli/questionReviewCycle.ts": "3d4dd8a888b3f8c5c5f19872bc28210384ffc3ca",
-        "src/audit/cli/questionWorkloadBindings.ts": "99f811255cca0a0e95f7c4e5fded7b982aba8580"
-      }
-    },
     "491762bb82302829": {
       "reviewed_by": "independent-sonnet-reviewer-subagent",
       "attester_class": "agent",
@@ -609,6 +590,28 @@
       "attested_at": "2026-11-16T19:37:04.712Z",
       "vouches": {
         "src/audit/orchestrator/executorResult.ts": "2082605a09b679e19969b924107ec7e5b5c91dc4"
+      }
+    },
+    "aef2aac1e2d57f15": {
+      "reviewed_by": "independent audit queues 3, 4, 5, and 6",
+      "attester_class": "agent",
+      "checked": "Reviewed receipt replay and failure classification across close and validation; interrupted cleanup and worktree acquisition including unmerged gitlinks; post-promotion failure and question dispatch paths; graph-cache identity and generated-file replacement, against reviewed scoped staged bytes and focused red-before-green fixtures.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "8e58e6bd968b0081e6aa3d2ec710c304f5b5c79a",
+        "ran_at": "2026-11-26T17:00:20.979Z"
+      },
+      "attested_at": "2026-11-26T17:05:52.097Z",
+      "vouches": {
+        "src/audit/cli/laneSubmissions.ts": "0cc5b3e75d61a6424f40deea6106abcad9ae57a9",
+        "src/audit/cli/nextStepCommand.ts": "0645cbb11b6ff080d086b313708606d3c7556451",
+        "src/audit/cli/nextStepHelpers.ts": "bf6fe376bda6a69088bb47f28fbfb1a05004d26d",
+        "src/audit/cli/questionWorkloadBindings.ts": "21d2d90f395b1c3f729e593fd590e379ba4edb27",
+        "src/audit/io/rollover.ts": "32c0e1f36418f73e9657ebc5e0906988e2bb209d",
+        "src/audit/io/runSnapshot.ts": "f1fd3d469fa16a69866306d5ea16305c29ef8da7",
+        "src/remediate/steps/nextStep.ts": "765d704dbc223a55306e7965bbe1405fb98b227d"
       }
     },
     "c2fa0250dd9f5ee5": {
@@ -982,16 +985,16 @@
       "review": "3e7d0736a83209a4"
     },
     "src/audit/cli/laneSubmissions.ts": {
-      "review": "5a1d216870700235"
+      "review": "aef2aac1e2d57f15"
     },
     "src/audit/cli/laneValidators.ts": {
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "f543f1c1a24ee55d"
+      "review": "aef2aac1e2d57f15"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "f206f0a333a054a2"
+      "review": "aef2aac1e2d57f15"
     },
     "src/audit/cli/prompts.ts": {
       "review": "e36223304299f9c6"
@@ -1000,7 +1003,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/audit/cli/questionWorkloadBindings.ts": {
-      "review": "481abf3e9efbbca4"
+      "review": "aef2aac1e2d57f15"
     },
     "src/audit/cli/submitCommand.ts": {
       "review": "a1a3dd0149010098"
@@ -1009,10 +1012,10 @@
       "review": "435c17a0f11016cc"
     },
     "src/audit/io/rollover.ts": {
-      "review": "435c17a0f11016cc"
+      "review": "aef2aac1e2d57f15"
     },
     "src/audit/io/runSnapshot.ts": {
-      "review": "e36223304299f9c6"
+      "review": "aef2aac1e2d57f15"
     },
     "src/audit/orchestrator/acquisitionExecutor.ts": {
       "review": "ea151410085234cc"
@@ -1342,7 +1345,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "a1a3dd0149010098"
+      "review": "aef2aac1e2d57f15"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "e36223304299f9c6"

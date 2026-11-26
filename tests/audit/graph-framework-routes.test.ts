@@ -380,6 +380,16 @@ for (const extension of ["vue", "svelte", "astro"]) {
   });
 }
 
+test("component script offsets survive case-expanding Unicode before adjacent tags", () => {
+  const content = "<div>" + "İ".repeat(24) + "</div>" +
+    '<SCRIPT>router.get("/first", handler)</SCRIPT>' +
+    '<script>router.get("/second", handler)</script>';
+  expect(extractRegisteredRouteEvidence("src/App.vue", content, new Map()).routes).toEqual([
+    { method: "GET", path: "/first", handler: "src/App.vue" },
+    { method: "GET", path: "/second", handler: "src/App.vue" },
+  ]);
+});
+
 test("Astro frontmatter contributes registered routes", () => {
   expect(extractRegisteredRouteEvidence("src/App.astro", '---\nrouter.get("/front", handler)\n---\n<div>router.get("/fake", h)</div>', new Map()).routes)
     .toEqual([{ method: "GET", path: "/front", handler: "src/App.astro" }]);

@@ -375,8 +375,10 @@ test("status projects the verified current question handoff without ingesting or
       source_dependencies: [], evidence_dependencies: [], plan_status: "pending",
     };
     const assignment = { ...identity, assignment_id: "review-assignment", authorized_scope: { include: [], exclude: [] }, suggested_sources: [], available_evidence_ids: [] };
+    const secondQuestion = { ...question, question_id: "behavior:second" };
+    const secondAssignment = { ...assignment, question_id: secondQuestion.question_id, assignment_id: "second-assignment" };
     const boundary = { root, artifactsDir, runId };
-    const plan = { schema_version: version, snapshot_id: "s1", inventory: [], questions: [question], omissions: [], lens_decisions: [] };
+    const plan = { schema_version: version, snapshot_id: "s1", inventory: [], questions: [question, secondQuestion], omissions: [], lens_decisions: [] };
     await writeJson("audit_state.json", { status: "active" });
     await writeJson("review_session.json", { schema_version: "audit-tools/question-review-session/v1", run_id: runId });
     await writeJson("review_plan.json", plan);
@@ -384,27 +386,37 @@ test("status projects the verified current question handoff without ingesting or
     expect(await status()).toEqual({ state: "unavailable" });
 
     const { workload_path } = await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root,
-      bindings: [{ question, assignment, sourceFiles: [], evidence: [], dependencies: [] }] });
+      bindings: [
+        { question, assignment, sourceFiles: [], evidence: [], dependencies: [] },
+        { question: secondQuestion, assignment: secondAssignment, sourceFiles: [], evidence: [], dependencies: [] },
+      ] });
     const emit = (rejected: number) => writeCurrentStep({
       artifactsDir, repoRoot: root, stepKind: "dispatch_review", status: "ready", runId,
-      progress: { summary: rejected ? "Correct the saved result." : "Wait for answers.", pending_tasks: 1, rejected_tasks: rejected },
+      progress: { summary: rejected ? "Correct the saved result." : "Wait for answers.", pending_tasks: 2, rejected_tasks: rejected },
       allowedCommands: [], stopCondition: "Submit then continue.", artifactPaths: { host_workload: workload_path }, prompt: "Fixture",
     });
     const step = await emit(0);
-    expect(await status()).toMatchObject({ state: "current", action: "await_results", pending_answers: 1, workload_path: step.artifact_paths.host_workload });
+    expect(await status()).toMatchObject({ state: "current", action: "await_results", pending_answers: 2, workload_path: step.artifact_paths.host_workload });
     await emit(1);
-    expect(await status()).toMatchObject({ state: "current", action: "correct_results", pending_answers: 1 });
-    const source = JSON.stringify({ ...identity, assignment_id: assignment.assignment_id, submission_id: "answer-1",
+
+    const source = (questionId: string, assignmentId: string) => JSON.stringify({ ...identity, question_id: questionId, assignment_id: assignmentId, submission_id: "answer-" + assignmentId,
       inspected_sources: [], evidence_ids: [], limitations: ["synthetic test"],
       answer: { outcome: "inconclusive", findings: [], observations: [], parts: [{ part_id: "scope", outcome: "inconclusive", observation_ids: [] }] },
     });
     const ledger = join(artifactsDir, "runs", runId, "host-accepted-results-ledger.json");
     await expect(readFile(ledger)).rejects.toMatchObject({ code: "ENOENT" });
-    await submitAuditQuestionResult({ ...boundary, assignmentId: assignment.assignment_id, source });
+    await submitAuditQuestionResult({ ...boundary, assignmentId: assignment.assignment_id,
+      source: source(question.question_id, assignment.assignment_id) });
+    expect(await status()).toMatchObject({
+      state: "current", action: "await_results", pending_answers: 1,
+      previous_publication_rejections: 1, summary: "Waiting for 1 question answer.",
+    });
+    await submitAuditQuestionResult({ ...boundary, assignmentId: secondAssignment.assignment_id,
+      source: source(secondQuestion.question_id, secondAssignment.assignment_id) });
     const before = await readFile(ledger, "utf8");
     expect(await status()).toMatchObject({ state: "current", action: "continue", pending_answers: 0 });
     expect(await readFile(ledger, "utf8")).toBe(before);
-    await writeJson("review_plan.json", { ...plan, questions: [{ ...question, revision_id: "r2" }] });
+    await writeJson("review_plan.json", { ...plan, questions: [{ ...question, revision_id: "r2" }, secondQuestion] });
     expect(await status()).toEqual({ state: "stale" });
   });
 });

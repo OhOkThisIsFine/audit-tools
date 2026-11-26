@@ -7,6 +7,7 @@ import { errorMessage } from "../../shared/io/json.js";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
   absoluteSubmissionPath,
+  isSha256,
   readJsonFile,
   readSubmissionLedger,
   resolveWithinRoot,
@@ -168,8 +169,19 @@ function validateClosingResult(value: unknown, path: string): ValidationIssue[] 
   if (typeof value.action !== "string") {
     pushValidationIssue(issues, `${path}.action`, `${path}.action must be a string.`);
   }
-  if (!["success", "failed", "skipped"].includes(String(value.status))) {
-    pushValidationIssue(issues, `${path}.status`, `${path}.status must be success, failed, or skipped.`);
+  if (!["success", "failed", "skipped", "unresolved"].includes(String(value.status))) {
+    pushValidationIssue(issues, `${path}.status`, `${path}.status must be success, failed, skipped, or unresolved.`);
+  }
+  if (value.status === "unresolved") {
+    const reconciliation = value.reconciliation;
+    const at = `${path}.reconciliation`;
+    if (!isRecord(reconciliation) || !isSha256(reconciliation.receipt_sha256) ||
+        (reconciliation.disposition !== "observed" && reconciliation.disposition !== "abandoned") ||
+        typeof reconciliation.note !== "string" || !reconciliation.note.trim() || reconciliation.note.length > 2000) {
+      pushValidationIssue(issues, at, `${at} must contain the receipt SHA-256, a disposition, and a nonempty note.`);
+    } else if (reconciliation.interrupted_command !== null) {
+      validateStringArray(reconciliation.interrupted_command, `${at}.interrupted_command`, issues);
+    }
   }
   if (!Array.isArray(value.commands)) {
     pushValidationIssue(issues, `${path}.commands`, `${path}.commands must be an array.`);

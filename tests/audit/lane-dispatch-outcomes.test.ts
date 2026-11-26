@@ -397,3 +397,24 @@ describe("the new kinds do not corrupt the readers that already existed", () => 
   });
 });
 
+
+it("distinguishes a missing lane result from an unreadable result path", async () => {
+  const dir = await artifactsDir();
+  await materializeFanoutLanes({
+    artifactsDir: dir,
+    sourceRoot: dir,
+    runId: AUDIT_GATE_SUBMISSION_SCOPE,
+    lanes: lanes(["missing", "unreadable"]),
+  });
+  await mkdir(laneSubmissionPath(dir, "unreadable", AUDIT_GATE_SUBMISSION_SCOPE), { recursive: true });
+  const close = { lanes: ["missing", "unreadable"] };
+  await closeDispatchedLaneOutcomes(dir, close);
+  await closeDispatchedLaneOutcomes(dir, close);
+  const outcomes = rowsOf(await readSubmissionLedger(dir), "lane_outcome");
+  expect(outcomes).toHaveLength(2);
+  expect(outcomes[0]).toMatchObject({ lane: "missing", outcome: "not_run" });
+  expect(outcomes[0]?.message).toBeUndefined();
+  expect(outcomes[1]).toMatchObject({
+    lane: "unreadable", outcome: "degraded", message: expect.stringContaining("Could not read lane result"),
+  });
+});

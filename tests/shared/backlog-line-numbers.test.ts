@@ -75,3 +75,8 @@ describe("backlog line-number guard — legitimate colon-digits STAY QUIET", () 
     expect(hits("- split at nextStep.ts:210 in prose")).toBe(0);
   });
 });
+
+test("a fence closes only on a matching delimiter long enough with no info string", () => {
+  const text = ["````md", "~~~", "```", "````still-code", "- use `src/inside.ts:1`", "`````", "- use `src/outside.ts:2`"].join("\n");
+  expect(findLineNumberCitations(text).map((hit) => hit.line)).toEqual([7]);
+});
