@@ -273,3 +273,33 @@ test("correlated cycle+hub+seam family cannot alone drive risk_score to 10", () 
   expect(hubItem!.signals.includes("seam_endpoint")).toBeTruthy();
   expect(hubItem!.risk_score < 10, `correlated structural family alone must not saturate risk_score to 10 (got ${hubItem!.risk_score})`).toBeTruthy();
 });
+
+test("risk graph membership matches either exact seam endpoint and any qualifying metric row", () => {
+  const from = "src/Auth.ts";
+  const to = "src/auth.ts";
+  const signals = deriveGraphSignals({ graphs: {} });
+  signals.seams = [{ from, to }];
+  const metric = (node: string, value: number, measure: string) => ({
+    node, value, measure, reach: "js-ts-effective" as const,
+  });
+  signals.complexity = [
+    metric(from, 25, "cyclomatic-max-function"),
+    metric(from, 100, "cyclomatic-approx-file"),
+    metric(to, 100, "cyclomatic-approx-file"),
+  ];
+  signals.duplication = [
+    metric(to, 0, "duplicate-block-lines"),
+    metric(to, 2, "duplicate-block-lines"),
+  ];
+  const units = [from, to, "src/AUTH.ts"].map((file) => ({
+    unit_id: file, name: file, files: [file], required_lenses: [],
+  }));
+
+  expect(buildRiskRegister({ units }, undefined, undefined, signals).items).toEqual(
+    [
+      { unit_id: from, risk_score: 2, signals: ["seam_endpoint", "high_complexity"] },
+      { unit_id: to, risk_score: 2, signals: ["seam_endpoint", "duplicated_code"] },
+      { unit_id: "src/AUTH.ts", risk_score: 0, signals: [] },
+    ].map(item => ({ ...item, notes: ["Initial heuristic risk scoring."] })),
+  );
+});

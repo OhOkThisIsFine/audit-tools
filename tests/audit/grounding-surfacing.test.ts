@@ -340,7 +340,7 @@ test("the Summary carries a verification line beside the grounding line", () => 
   // The badge body carries it per finding too, so a reader of one finding does
   // not have to infer its status from an aggregate.
   expect(md).toMatch(/- Verification: judge-confirmed against HEAD/);
-  expect(md).toMatch(/- Verification: asserted/);
+  expect(md).toMatch(/- Verification: asserted — no defect verification recorded/);
 });
 
 test("the conceptual attribution section publishes candidate counts and narrows what `grounded` certifies", async () => {

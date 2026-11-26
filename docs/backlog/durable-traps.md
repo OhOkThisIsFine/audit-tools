@@ -340,7 +340,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   lease/marker in `.claude/hooks/.state/`.
   **A sibling's WIP can also VANISH mid-session, so a red you attribute to it is not stable
   (2026-08-27).** A full-suite run failed exactly one file; the cause was a sibling's unstaged
-  directory-hashing change to `src/remediate/utils/fileIntegrity.ts`, attributed by reading its
+  directory-hashing change to `src/remediate/utils/fileIntegrity.ts`, attributed by reading its <!-- doc-citation-exempt: historical incident refers to the retired private hash implementation -->
   diff and matching the mechanism to the assertion — not by correlation. Committing by explicit
   path excluded it correctly. Minutes later the sibling's four files were back to HEAD with no
   commit, and the test passed again. **So: attribute a foreign red by MECHANISM, exclude it by

@@ -9,13 +9,16 @@ import { join } from "node:path";
 // could have drifted its key set, its key ORDER, or its git-warning policy and
 // stayed green. These pin what the copies agreed on.
 const stepCalls: unknown[] = [];
+let waitingOnHost = false;
 vi.mock("../../src/audit/cli/auditStep.js", () => ({
   runAuditStep: (options: unknown) => {
     stepCalls.push(options);
     return Promise.resolve({
-      selected_executor: "intake_executor",
-      progress_summary: "1/9 obligations satisfied",
-      next_likely_step: "structure_artifacts",
+      selected_executor: waitingOnHost ? null : "intake_executor",
+      progress_summary: waitingOnHost ? "Waiting for reviewer results" : "1/9 obligations satisfied",
+      next_likely_step: waitingOnHost ? null : "structure_artifacts",
+      audit_state: { status: "active" },
+      progress_made: !waitingOnHost,
     });
   },
 }));
@@ -31,6 +34,7 @@ let warnSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   stepCalls.length = 0;
+  waitingOnHost = false;
   root = mkdtempSync(join(tmpdir(), "step-scaffold-"));
   logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -63,7 +67,7 @@ describe("runStepCommand", () => {
   });
 
   it("carries next_likely_step NO further than the step result", async () => {
-    // cmdPlan prints a fourth key. The scaffold deliberately does not, so a
+    // cmdPlan prints the next step. The scaffold deliberately does not, so a
     // future adopter cannot inherit a field its command never promised.
     await runStepCommand(["--root", root], {
       mode: "executor",
@@ -169,5 +173,22 @@ describe("the step-command MODE contract", () => {
     expect(stepCalls).toHaveLength(1);
     expect(stepCalls[0]).toHaveProperty("since", "HEAD~2");
     expect(stepCalls[0]).not.toHaveProperty("preferredExecutor");
+    expect(JSON.parse(printed())).toMatchObject({
+      next_likely_step: "structure_artifacts",
+      audit_status: "active",
+      progress_made: true,
+    });
+  });
+
+  it("cmdPlan preserves an active run waiting for the host without inventing a next step", async () => {
+    waitingOnHost = true;
+    await cmdPlan(["--root", root]);
+    expect(JSON.parse(printed())).toMatchObject({
+      selected_executor: null,
+      next_likely_step: null,
+      audit_status: "active",
+      progress_made: false,
+      progress_summary: "Waiting for reviewer results",
+    });
   });
 });

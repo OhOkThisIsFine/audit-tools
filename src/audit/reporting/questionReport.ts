@@ -19,6 +19,12 @@ type FindingRow = QuestionReviewReport["findings"][number];
 type Decisions = QuestionReviewReport["consolidations"];
 type Claim = { answerId: string; source: ReviewFindingClaim; actionable: boolean };
 
+function addToIndex<T>(index: Map<string, T[]>, key: string, value: T): void {
+  const entries = index.get(key);
+  if (entries) entries.push(value);
+  else index.set(key, [value]);
+}
+
 export interface QuestionReportInput {
   plan: ReviewPlan;
   accepted: readonly ReviewAcceptedAnswer[];
@@ -170,19 +176,29 @@ export function buildQuestionAuditFindingsReport(input: QuestionReportInput): Qu
     if (!prior) acceptedById.set(id, row);
   }
   const accepted = [...acceptedById.values()].sort((a, b) => compareCodeUnits(a.submission.submission_id, b.submission.submission_id));
+  const historyByQuestion = new Map<string, ReviewAcceptedAnswer[]>();
+  for (const answer of accepted) addToIndex(historyByQuestion, answer.submission.question_id, answer);
   const adjudications = [...input.adjudications ?? []];
+  const adjudicationsByQuestion = new Map<string, ReviewAdjudication[]>();
+  for (const decision of adjudications) addToIndex(adjudicationsByQuestion, decision.question_id, decision);
   const evidence = new Map(input.evidence.map(record => [record.evidence_id, record]));
   const projected = input.plan.questions.map(question => projectQuestionForReport(
-    question, accepted.filter(row => row.submission.question_id === question.question_id), adjudications,
+    question, historyByQuestion.get(question.question_id) ?? [], adjudicationsByQuestion.get(question.question_id) ?? [],
     evidence, input.dependenciesByQuestion.get(question.question_id),
   ));
   const consolidations = [...input.consolidations ?? []];
   const groups = groupClaims(projected.flatMap(item => item.claims), consolidations, acceptedById);
-  const questions = projected.map(({ row }) => ({
-    ...row, finding_ids: groups.filter(group => group.row.question_ids.includes(row.question_id)).map(group => group.row.canonical_finding_id),
-  }));
+  const findingIdsByQuestion = new Map<string, string[]>();
+  for (const { row } of groups) {
+    for (const questionId of row.question_ids) addToIndex(findingIdsByQuestion, questionId, row.canonical_finding_id);
+  }
+  const lensByQuestion = new Map<string, QuestionRow["lens"]>();
+  const questions = projected.map(({ row }) => {
+    if (!lensByQuestion.has(row.question_id)) lensByQuestion.set(row.question_id, row.lens);
+    return { ...row, finding_ids: findingIdsByQuestion.get(row.question_id)?.slice() ?? [] };
+  });
   const findings = groups.filter(group => group.row.actionable).map(({ row, answerIds }) => projectCanonicalQuestionFinding(
-    row, questions.find(question => question.question_id === row.sources[0]!.question_id)!.lens,
+    row, lensByQuestion.get(row.sources[0]!.question_id)!,
     answerIds.map(id => acceptedById.get(id)!.submission),
   ));
   const work = buildWorkBlockPartition({ findings });

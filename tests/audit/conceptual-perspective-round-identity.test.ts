@@ -324,10 +324,13 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     expect(outsideIn).toContain("[in scope]");
     expect(outsideIn).toContain("design option, not a defect");
     expect(pragmatist).not.toContain("Look outside before reading implementation details");
+    expect(pragmatist).toContain("Compare keeping the design with the viable alternatives: simplify, replace, or delete");
     const judge = await readFile(firstManifest.judge.prompt_path, "utf8");
     expect(judge).toContain("A well-grounded alternative to working code can survive on its merits");
     expect(judge).toContain("option-by-option costs and benefits versus the status quo (including what keeping it preserves and costs)");
     expect(judge).toContain("distinction between measured values, estimates, ranges, and unknowns");
+    expect(judge).toContain("judge_confirmed` is for actual defects only");
+    expect(judge).toContain("A retained option is a recommendation, not an implementation decision.");
     const evidencePath = firstStep.access.read_paths.find((path: string) => basename(path) === "design-review-shared-evidence.md");
     expect(evidencePath).toBeDefined();
     expect(await readFile(evidencePath!, "utf8")).toContain(marker);

@@ -1,5 +1,6 @@
 import { test, expect } from "vitest";
-import { nextStepCommand } from "../../src/audit/cli/prompts.js";
+import { spawnSyncHidden } from "../helpers/spawn.mjs";
+import { nextStepCommand, renderAuditCommand } from "../../src/audit/cli/prompts.js";
 
 function withInvocation(value: string | undefined, fn: () => void): void {
   const prev = process.env.AUDIT_CODE_INVOCATION;
@@ -55,5 +56,26 @@ test("malformed AUDIT_CODE_INVOCATION falls back to the audit-code bin", () => {
   });
   withInvocation("[]", () => {
     expect(nextStepCommand("/repo", "/a")).toMatch(/^audit-code /);
+  });
+});
+
+test.skipIf(process.platform === "win32")("POSIX audit command preserves literal graph paths", () => {
+  withInvocation(JSON.stringify([process.execPath]), () => {
+    const path = "/tmp/$TEAM's audit/graph\\index.json";
+    const rendered = renderAuditCommand([
+      "-e", "process.stdout.write(process.argv[1])", "--", path,
+    ], "linux");
+    const run = spawnSyncHidden("sh", ["-c", rendered], {
+      encoding: "utf8", env: { ...process.env, TEAM: "should-not-expand" },
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout).toBe(path);
+  });
+});
+
+test("PowerShell audit command uses literal tokens and calls a quoted launcher", () => {
+  withInvocation(JSON.stringify(["C:\\Audit Tools\\audit-code.cmd", "--expect-version=0.57.11"]), () => {
+    expect(renderAuditCommand(["review-graph", "--graph-index", "C:\\$TEAM's audit\\graph.json"], "win32"))
+      .toBe("& 'C:/Audit Tools/audit-code.cmd' --expect-version=0.57.11 review-graph --graph-index 'C:/$TEAM''s audit/graph.json'");
   });
 });

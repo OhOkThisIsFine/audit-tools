@@ -5,11 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkFileIntegrityRecords } from "../../src/shared/fileIntegrity.js";
 
-/**
- * Covers the generic classify-and-bucket loop behind audit-code's
- * checkFileIntegrity and remediate-code's checkAffectedFileIntegrity — both now
- * thin adapters over this shared core (Tier B extraction A).
- */
+// Exercise the record comparison used by the audit manifest check.
 
 test("checkFileIntegrityRecords: unchanged file yields no buckets and is_clean=true", async () => {
   const root = await mkdtemp(join(tmpdir(), "fi-"));

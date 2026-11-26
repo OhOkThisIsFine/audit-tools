@@ -1,5 +1,6 @@
 // sites-pinned: tests/audit/result-submit.test.ts
 import { outputJson } from "./cliHelpers.js";
+import { nextStepCommand } from "./prompts.js";
 import { submitGateResult, SUPPORTED_GATE_SUBMISSIONS } from "./submitGateResult.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -199,7 +200,7 @@ export async function cmdReopenQuestions(argv: string[]): Promise<void> {
       questions: context.bindings.map(({ question }) => question),
       dependenciesByQuestion: context.dependenciesByQuestion,
     });
-    return { run_id: runId, reopen_id: request.reopen_id, disposition, next: "Run audit-code next-step to issue replacement assignments." };
+    return { run_id: runId, reopen_id: request.reopen_id, disposition, next: nextStepCommand(root, artifactsDir) };
   });
   outputJson(receipt);
 }

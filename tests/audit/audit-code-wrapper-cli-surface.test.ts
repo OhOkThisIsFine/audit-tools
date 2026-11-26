@@ -125,6 +125,20 @@ test.concurrent("assertWorkspaceInstalled flags missing or foreign audit-tools/s
   );
 });
 
+test.concurrent("version-bound continuation refuses a different audit-tools release before touching the target", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "audit-cli-version-"));
+  try {
+    const expected = "0.0.0-test-mismatch";
+    await expect(runWrapper([`--expect-version=${expected}`, "next-step"], { cwd }))
+      .rejects.toThrow(/audit-tools version changed.*No audit state was modified/);
+    await expect(stat(join(cwd, ".audit-tools"))).rejects.toMatchObject({ code: "ENOENT" });
+    const { stdout } = await runWrapper([`--expect-version=${packageVersion}`, "--version"]);
+    expect(stdout.trim()).toBe(packageVersion);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test.concurrent("audit-code wrapper prints help text", async () => {
   const { stdout } = await runWrapper(["--help"]);
   expect(stdout.includes("Usage: node audit-code.mjs <command>")).toBeTruthy();

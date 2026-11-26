@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/grounding-surfacing.test.ts
 // Single-sourced finding display (dogfood note 2 + auditor/remediator parity).
 //
 // The auditor's findings report and the remediator's host-facing prompts both
@@ -137,7 +138,7 @@ export function findingVerificationLine(
     case "judge_confirmed":
       return "- Verification: judge-confirmed against HEAD (a judge's reading, not a tool run)";
     case "asserted":
-      return "- Verification: asserted — not checked against HEAD";
+      return "- Verification: asserted — no defect verification recorded";
     case undefined:
       return undefined;
     default:

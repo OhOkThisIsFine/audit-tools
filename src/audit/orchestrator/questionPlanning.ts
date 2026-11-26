@@ -6,7 +6,7 @@ import {
 } from "../../shared/types/reviewQuestion.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
-import { isTestPath } from "../extractors/pathPatterns.js";
+import { EXTRACTOR_HEURISTIC_NOTE, isTestPath } from "../extractors/pathPatterns.js";
 import { getExternalSignalPaths } from "./requeueUtils.js";
 import { fingerprintDiscoveredSet } from "./questionEvidence.js";
 import { REVIEW_LENS_PLAYBOOKS } from "./reviewLensPlaybooks.js";
@@ -242,6 +242,12 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       ...(refs.length ? { source_refs: refs } : {}), ...(question_id ? { question_id } : {}) });
   };
   const operationRows: Operation[] = [];
+  // Filenames in CLI/commands directories nominate source, not runnable
+  // commands. Keep the candidates and their evidence without multiplying
+  // the operation playbooks by the number of helper files.
+  const provisional = new Map<string, {
+    entries: string[]; paths: string[]; contracts: string[]; concerns: Set<string>; crossesOwners: boolean;
+  }>();
   for (const surface of entrySurfaces.sort((a, b) => compareCodeUnits(a.id, b.id))) {
     const ref = resolveRef(surface.entrypoint);
     const reason = ref ? sourceStatus(ref.path) : "The discovered surface has no unique source binding in the frozen snapshot.";
@@ -291,7 +297,23 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
         : "Establish this supported operation’s expected outcome and resulting state from its contracts and tests before claiming it is correct.";
     const op = { id: surface.id, title, entry: ref.path, refs, contract, expectation, exposure: surface.exposure,
       background: surface.kind === "background", declaredBoundary: surface.exposure === "network" };
+    // Keep the source binding for shared-state and prior-signal review even
+    // when this candidate does not earn a standalone operation assignment.
     operationRows.push(op);
+    if (!surface.registered && surface.kind === "interface" && surface.exposure === "local" &&
+        "notes" in surface && surface.notes?.includes(EXTRACTOR_HEURISTIC_NOTE) &&
+        related.every((flow) => flow.notes?.includes(EXTRACTOR_HEURISTIC_NOTE))) {
+      const directory = ref.path.slice(0, ref.path.lastIndexOf("/") + 1) || ".";
+      const group = provisional.get(directory) ?? { entries: [], paths: [], contracts: [], concerns: new Set<string>(), crossesOwners: false };
+      group.entries.push(ref.path);
+      group.paths.push(...refs.map(({ path }) => path));
+      group.contracts.push(...contract.map(({ path }) => path));
+      group.crossesOwners ||= ownership(refs).length > 1;
+      for (const flow of related) for (const concern of flow.concerns) group.concerns.add(concern);
+      if (externalPaths.has(ref.path)) group.concerns.add("security");
+      provisional.set(directory, group);
+      continue;
+    }
     const context = { start: ref, behavior: expectation };
     add("behavior", op.id, "operation", op.title, refs, contract, expectation, {
       context, ...(surface.registered ? { membership: [surface.entrypoint, ...surface.alternatives] } : {}),
@@ -314,6 +336,27 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       : "Trace this operation's supported outcome to any available tests. Identify a material regression that could escape detection if the evidence supports a gap.", { context });
   }
 
+  for (const [directory, group] of provisional) {
+    const key = `provisional-local:${directory}`;
+    const title = `Local interface candidates in ${directory}`;
+    const refs = sourceRefs(group.paths), contract = sourceRefs(group.contracts);
+    const entries = ordered(group.entries);
+    const start = source(entries[0]!);
+    const expectation = "Identify which candidate sources, if any, are invoked as entrypoints and which support a caller. Trace the supported behavior without assuming every file is independently runnable.";
+    const linked = { context: { start, behavior: expectation }, membership: entries };
+    add("behavior", key, "invariant", title, refs, contract, expectation, linked);
+    add("operability", key, "operator_transition", title, refs, contract,
+      "Trace the invocable paths to their caller-visible outcomes and diagnostics, if a caller is established.", linked);
+    add("tests", key, "invariant", title, refs, contract,
+      "Trace the candidate sources to reachable behavior and tests; identify material regression gaps only where the caller contract is established.", linked);
+    if (group.crossesOwners) add("architecture", key, "invariant", title, refs, contract,
+      "Identify the actual caller and ownership boundary, if present, before evaluating delegation or shared implementation.", linked);
+    if (group.concerns.has("security")) add("security", key, "trust_boundary", title, refs, contract,
+      "Determine whether the candidate paths carry authority decisions from an established caller, and trace its protected effect.", linked);
+    if (group.concerns.has("performance")) add("performance", key, "workload", title, refs, contract,
+      "Identify a reachable workload before quantifying or bounding the candidate paths' contribution to its cost.", linked);
+  }
+
   // Existing source discovery supplies the shared state surface; do not infer
   // an invariant merely because two routes import the same utility.
   for (const [entry, flows] of [...byEntry].sort(([left], [right]) => compareCodeUnits(left, right))) {
@@ -322,7 +365,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     if (members.length < 2) continue;
     const refs = sourceRefs([entry, ...members.map(({ entry: path }) => path), ...flows.flatMap((flow) => flow.paths.filter((path) => sourceStatus(path) === undefined))]);
     const contract = sourceRefs(members.flatMap((op) => op.contract.map(({ path }) => path)));
-    const expectation = "Establish the shared state-preservation rule and trace each registered operation that can affect it without assuming an unwritten policy.";
+    const expectation = "Establish the shared state-preservation rule and trace each bound caller path that can affect it without assuming an unwritten policy.";
     add("behavior", `shared-state:${entry}`, "invariant", `Shared invariant at ${entry}`, refs, contract, expectation,
       { context: { start: source(entry) }, membership: members.map(({ id }) => id), parts: members.map((op) => ({
         part_id: op.id, expectation: `Establish how ${op.title} preserves the shared rule.`,

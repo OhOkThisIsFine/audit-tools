@@ -164,6 +164,52 @@ test("consolidates only recorded same-repair claims and retains their separate o
   }).success).toBe(false);
 });
 
+test("indexes cross-question groups and keeps the complete accepted and decision history", () => {
+  const otherBinding = { ...binding, question_id: "other" };
+  const other = answer("a-other", [{ ...finding("other-defect"), ...otherBinding }]);
+  Object.assign(other.submission, otherBinding);
+  other.submission.answer.observations = other.submission.answer.observations.map(observation => ({ ...observation, ...otherBinding }));
+  const primary = answer("z-primary", [finding("primary-defect"), finding("separate-defect")]);
+  const refuting = accepted[0]!;
+  const orphan = answer("orphan", []);
+  orphan.submission.question_id = "absent-from-plan";
+  const resolved = {
+    ...binding, schema_version, adjudication_id: "z-resolved", reviewer: "reviewer",
+    decision: "resolved" as const, submission_ids: [refuting.submission.submission_id, primary.submission.submission_id],
+    selected_submission_ids: [primary.submission.submission_id], rationale: "Accept the supported primary findings.",
+  };
+  const decisions = [
+    { ...resolved, adjudication_id: "other-history", question_id: otherBinding.question_id },
+    { ...resolved, adjudication_id: "a-disputed", decision: "disputed" as const, selected_submission_ids: [] },
+    resolved,
+  ];
+  const report = buildQuestionAuditFindingsReport({
+    plan: { ...plan, questions: [
+      plan.questions[0]!, { ...plan.questions[0]!, ...otherBinding, lens: "architecture" },
+    ] },
+    accepted: [primary, refuting, orphan, other, primary], evidence: [], auditRead: null,
+    dependenciesByQuestion: new Map([...dependenciesByQuestion, [otherBinding.question_id, [sourceDependency]]]),
+    adjudications: decisions,
+    consolidations: [{
+      decision_id: "cross-question-repair", decided_by: "reviewer", reason: "Both findings stem from one defect.",
+      sources: [
+        { answer_id: primary.submission.submission_id, finding_id: "primary-defect" },
+        { answer_id: other.submission.submission_id, finding_id: "other-defect" },
+      ],
+    }],
+  });
+  const groups = report.question_review.findings;
+  expect(groups).toHaveLength(2);
+  const shared = groups.find(row => row.sources.length === 2)!;
+  expect(shared.question_ids).toEqual(["other", "resume"]);
+  expect(report.question_review.questions.map(row => row.finding_ids)).toEqual([
+    groups.map(row => row.canonical_finding_id), [shared.canonical_finding_id],
+  ]);
+  expect(report.findings.find(row => row.question_review_sources?.length === 2)?.lens).toBe("architecture");
+  expect(report.question_review.accepted).toEqual([other, refuting, orphan, primary]);
+  expect(report.question_review.adjudications).toEqual(decisions);
+});
+
 test("an old consolidation stays in history without suppressing a current independent defect", () => {
   const a = answer("a", [finding("old")]);
   a.dependency_bindings = [{ ...sourceDependency, fingerprint: "obsolete" }];
@@ -504,6 +550,8 @@ test("reports current grounded design opportunities separately and keeps candida
   expect(report.question_review.signal_dispositions).toEqual(workspacePlan.signal_dispositions);
   const markdown = renderAuditReportMarkdown(report);
   const priority = markdown.split("## Supported design opportunities")[1]?.split("## ")[0];
+  expect(priority).toContain("prioritized separately from confirmed defects");
+  expect(priority).toContain("listing one does not approve implementation");
   expect(priority).toContain("current-design");
   expect(priority).not.toContain("obsolete-design");
   expect(markdown.split("## Findings and leads")[1]).toContain("obsolete-design");

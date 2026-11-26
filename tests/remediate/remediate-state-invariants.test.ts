@@ -6,13 +6,11 @@ import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } 
 /**
  * INV-remediate-state-06: blockingIntakeQuestions semantics
  * INV-remediate-state-07: isAuditFindingsReport contract_version validation
- * INV-remediate-state-10: fileIntegrity TOCTOU-safe hashing + ENOENT vs io_errors
  * INV-remediate-state-11: Finding carry-forward identity strips plan-time bookkeeping
  */
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { blockingIntakeQuestions, intakePaths } from "../../src/remediate/intake.js";
 import { isAuditFindingsReport } from "../../src/remediate/phases/plan.js";
-import { hashFile } from "../../src/remediate/utils/fileIntegrity.js";
 import { existsSync } from "node:fs";
 import { readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -45,7 +43,6 @@ import {
 import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = scratchDir(".test-remediate-state-inv");
 
 /**
  * The text of the CALL STATEMENT enclosing offset `at` — from the opening token
@@ -169,47 +166,6 @@ describe("isAuditFindingsReport — INV-remediate-state-07: contract_version mus
         findings: "not-an-array",
       }),
     ).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// INV-remediate-state-10: fileIntegrity TOCTOU-safe path + ENOENT vs io_errors
-// ---------------------------------------------------------------------------
-
-describe("hashFile — INV-remediate-state-10: ENOENT returns undefined, not io_error", () => {
-  it("hashFile returns undefined for a nonexistent path (ENOENT = missing, not io_error)", async () => {
-    const missing = "/nonexistent/path/that/does/not/exist.ts";
-    const result = await hashFile(missing);
-    expect(result).toBeUndefined();
-  });
-
-  it("hashFile returns a hex string for an existing file", async () => {
-    await rm(TEST_DIR, { recursive: true, force: true });
-    await mkdir(TEST_DIR, { recursive: true });
-    const filePath = join(TEST_DIR, "test.ts");
-    await writeFile(filePath, "const x = 1;", "utf8");
-    try {
-      const hash = await hashFile(filePath);
-      expect(typeof hash).toBe("string");
-      expect(hash).toMatch(/^[0-9a-f]{64}$/);
-    } finally {
-      await rm(TEST_DIR, { recursive: true, force: true });
-    }
-  });
-
-  it("hashFile produces the same hash for the same content", async () => {
-    await rm(TEST_DIR, { recursive: true, force: true });
-    await mkdir(TEST_DIR, { recursive: true });
-    const filePath = join(TEST_DIR, "stable.ts");
-    const content = "export const VERSION = 1;";
-    await writeFile(filePath, content, "utf8");
-    try {
-      const hash1 = await hashFile(filePath);
-      const hash2 = await hashFile(filePath);
-      expect(hash1).toBe(hash2);
-    } finally {
-      await rm(TEST_DIR, { recursive: true, force: true });
-    }
   });
 });
 

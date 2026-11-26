@@ -152,6 +152,31 @@
     }
   },
   "reviews": {
+    "0279a0adf3e99489": {
+      "reviewed_by": "OpenAI Dot with independent review agents",
+      "attester_class": "agent",
+      "checked": "Independent reviews checked live consumer reachability and retired-path removal, same-snapshot analyzer proof and command binding, report-only design decisions, and stable graph and report output. Operation-evidence negative control reproduced the prior gap; literal path roundtrips and the full exact staged suite passed.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "30c574f2f788686074683436fb19b10454d7b6c7",
+        "ran_at": "2026-11-26T20:15:56.410Z"
+      },
+      "attested_at": "2026-11-26T20:15:56.468Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "374ce4a7c0d15a4e45c027797a9737bbee915402",
+        "src/audit/cli/nextStepCommand.ts": "05d2d169992de16c9486286fab789333dc50de45",
+        "src/audit/cli/prompts.ts": "a7593ff47751a59861de3dd1f2f93c0231d8e9f8",
+        "src/audit/cli/submitCommand.ts": "1f81995155ab49306470c14cc33410d77527d11b",
+        "src/audit/orchestrator/designReviewPrompt.ts": "44708235e14fc1428fef4aaa9fb51512032a4709",
+        "src/audit/orchestrator/flowPlanning.ts": "27059b6ea9ef590ae9165ed0ca6515ab1d5f8bfd",
+        "src/audit/orchestrator/questionPlanning.ts": "82bfb7776e6bab97b33cefce10b31cdd5701c0fc",
+        "src/audit/reporting/synthesisNarrativePrompt.ts": "cbf1f51ea0dd157531ae72b53b878b8b2033893e",
+        "src/remediate/steps/contractPipeline.ts": "7e5440e5a3ca40dd6a82e1e56b2a9937f0665835",
+        "src/remediate/steps/contractPipelinePrompts.ts": "caa7f6c3e69b0c48b3414ee5609e9b969afabd76"
+      }
+    },
     "0c6c1b84455cdb39": {
       "reviewed_by": "opus-subagent-p01-submission-review",
       "attester_class": "agent",
@@ -836,24 +861,6 @@
         "src/audit/orchestrator/acquisitionExecutor.ts": "4af2ecb30a5a002b62afe7b936cbfb3867cee852"
       }
     },
-    "f206f0a333a054a2": {
-      "reviewed_by": "dot",
-      "attester_class": "agent",
-      "checked": "Reviewed actual frozen handoff, retry command and sparse native fallback; full npm test on exact staged code including orchestrator prompt and legacy clipped-result regressions; native Windows synthetic symbols, call sites, admitted scope and cache checked on installed dev and current official release, and real cursor continuation checked on the current release.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "7886a802a7ab6e191dfa42bcedcb7d3ad6644ba0",
-        "ran_at": "2026-11-26T05:29:31.768Z"
-      },
-      "attested_at": "2026-11-26T05:29:49.992Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "10e0269031a3f3c5815626957e32c90fbfed5f04",
-        "src/audit/cli/nextStepCommand.ts": "0c5d8b94b91c2711ffd72c6f2c5aba4a01f6573f",
-        "src/audit/cli/nextStepHelpers.ts": "d6a5e9101c86bef1e0e238edb51f0f7670488ada"
-      }
-    },
     "f20b857654eebefb": {
       "reviewed_by": "claude-opus-5-5 session 48f746a3 (orchestrator) + four simplify reviewer subagents (reuse, simplification, efficiency, altitude)",
       "attester_class": "agent",
@@ -906,42 +913,6 @@
         "src/audit/orchestrator/structureExecutors.ts": "5dc0a0e672d564a155a86ee8540620f51c3ebbfb",
         "src/audit/orchestrator/taskAffinityGraph.ts": "259eb5c8a84f8a4e368278168aa5ab21ac4cdda6"
       }
-    },
-    "f543f1c1a24ee55d": {
-      "reviewed_by": "dot",
-      "attester_class": "agent",
-      "checked": "Reviewed outside-in option-by-option cost and benefit comparison, checked protected-main Git merge routing with native Git baseline-red cases, verified native Windows npm parent-only cancellation versus the baseline and natural completion, and ran the full suite on the exact staged tree.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "a5cecd448f8dd1afb8af38e565e75a4389aa0099",
-        "ran_at": "2026-11-26T06:18:45.217Z"
-      },
-      "attested_at": "2026-11-26T06:18:45.285Z",
-      "vouches": {
-        "src/audit/cli/nextStepCommand.ts": "a778d781bc4eb980cc4304b40c354a6c252de2b9",
-        "src/audit/orchestrator/designReviewPrompt.ts": "7764d1c6ed55cb37854adf548b222ce30aa6f1f5"
-      }
-    },
-    "f5e055f6b40aad65": {
-      "reviewed_by": "/root/implement_planner",
-      "attester_class": "agent",
-      "checked": "Independently reviewed the exact staged routing and reviewer packet boundary, scoped evidence, stale-workload and acceptance checks, file-only receipts, wrapper, and cleanup. Verified subsequent test fixture, generated artifact list and test-reference changes.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "d5ff0ba9fb3678f5e12fae2d63d7d6c7ca47f696",
-        "ran_at": "2026-11-26T02:41:10.896Z"
-      },
-      "attested_at": "2026-11-26T02:41:17.870Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "c427a903c2c0609745acda275bcb5da915d14685",
-        "src/audit/cli/nextStepCommand.ts": "381a7ef822d95c037a409b5742d7874b6376560c",
-        "src/audit/cli/nextStepHelpers.ts": "0d105d500ca7e5b364c8c01c7cbefdc982c21850",
-        "src/audit/orchestrator/questionPlanning.ts": "a65d7973bf3701d7c84e79cef4c89ee14f90232c"
-      }
     }
   },
   "entries": {
@@ -970,7 +941,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "f206f0a333a054a2"
+      "review": "0279a0adf3e99489"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -991,13 +962,13 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "aef2aac1e2d57f15"
+      "review": "0279a0adf3e99489"
     },
     "src/audit/cli/nextStepHelpers.ts": {
       "review": "aef2aac1e2d57f15"
     },
     "src/audit/cli/prompts.ts": {
-      "review": "e36223304299f9c6"
+      "review": "0279a0adf3e99489"
     },
     "src/audit/cli/questionReviewCycle.ts": {
       "review": "3e7d0736a83209a4"
@@ -1006,7 +977,7 @@
       "review": "aef2aac1e2d57f15"
     },
     "src/audit/cli/submitCommand.ts": {
-      "review": "a1a3dd0149010098"
+      "review": "0279a0adf3e99489"
     },
     "src/audit/cli/submitGateResult.ts": {
       "review": "435c17a0f11016cc"
@@ -1075,7 +1046,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "f543f1c1a24ee55d"
+      "review": "0279a0adf3e99489"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "3e7d0736a83209a4"
@@ -1102,7 +1073,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/flowPlanning.ts": {
-      "review": "e36223304299f9c6"
+      "review": "0279a0adf3e99489"
     },
     "src/audit/orchestrator/flowRequeue.ts": {
       "review": "42e42270e8c264c9"
@@ -1174,7 +1145,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "f5e055f6b40aad65"
+      "review": "0279a0adf3e99489"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"
@@ -1282,7 +1253,7 @@
       "review": "491762bb82302829"
     },
     "src/audit/reporting/synthesisNarrativePrompt.ts": {
-      "review": "e36223304299f9c6"
+      "review": "0279a0adf3e99489"
     },
     "src/audit/systemic/aggregateMetricsDigest.ts": {
       "review": "e36223304299f9c6"
@@ -1321,10 +1292,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/contractPipeline.ts": {
-      "review": "e36223304299f9c6"
+      "review": "0279a0adf3e99489"
     },
     "src/remediate/steps/contractPipelinePrompts.ts": {
-      "review": "e36223304299f9c6"
+      "review": "0279a0adf3e99489"
     },
     "src/remediate/steps/dispatch/contractConformanceReview.ts": {
       "review": "185e1a9338c25bfc"

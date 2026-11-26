@@ -142,3 +142,46 @@ test("without a dependency graph, keyword-only linking is never high confidence"
   }
   expect(manifest.fallback_required).toBe(true);
 });
+
+test("keyword fallback unions matching target buckets without widening the entry categories", () => {
+  const entry = "src/AuthPaymentWorkerDeploy.ts";
+  const targetOnly = "src/userTask.ts";
+  const paths = [
+    "src/unrelated.ts",
+    "src/userTask.ts",
+    "src/user.ts",
+    "src/task.ts",
+    "src/PaymentWorker.ts",
+    "src/paymentWorker.ts",
+    "src/auth/token.ts",
+    "src/secretToken.ts",
+    "docker/deploy.ts",
+    entry,
+  ];
+  const surfaces: SurfaceManifest = {
+    surfaces: [entry, targetOnly].map(entrypoint => ({
+      id: `surface:${entrypoint}`, kind: "background", entrypoint,
+    })),
+  };
+  const manifest = buildCriticalFlowManifest(makeRepoManifest(paths), surfaces, {
+    files: [{ path: "src/secretToken.ts", status: "excluded" }],
+  });
+
+  expect(flowFor(manifest, entry)).toMatchObject({
+    paths: [
+      "docker/deploy.ts",
+      entry,
+      "src/PaymentWorker.ts",
+      "src/auth/token.ts",
+      "src/paymentWorker.ts",
+      "src/task.ts",
+      "src/user.ts",
+      targetOnly,
+    ],
+    confidence: "low",
+  });
+  expect(flowFor(manifest, targetOnly)).toMatchObject({
+    paths: [targetOnly], confidence: "low",
+  });
+  expect(manifest.fallback_required).toBe(true);
+});

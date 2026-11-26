@@ -1722,7 +1722,7 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
     compareCodeUnits(a.canonical_finding_id, b.canonical_finding_id));
   if (opportunities.length) {
     lines.push("", "## Supported design opportunities", "",
-      "These are prioritized evidence-supported improvements with source references, not confirmed defects or automatic remediation inputs.", "");
+      "These evidence-supported improvements are prioritized separately from confirmed defects. Weigh their tradeoffs and decide which to pursue; listing one does not approve implementation.", "");
     for (const group of opportunities) {
       const source = group.sources[0]!;
       lines.push(`- ${group.canonical_finding_id} (${source.finding_id}; ${source.severity}; ${source.confidence} confidence), question ${source.question_id}: ${source.claim}`,

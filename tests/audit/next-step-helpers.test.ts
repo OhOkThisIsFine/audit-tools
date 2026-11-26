@@ -1470,6 +1470,8 @@ test("a failed indexed graph qualification tells the orchestrator to repair and 
     if (plan.via !== "current") throw new Error("Expected a review dispatch prompt");
     expect(plan.params.prompt).toMatch(/do that and rerun .*next-step.*before dispatching/u);
     expect(plan.params.prompt).toContain("If you cannot repair it, use the issued native file links and frozen source");
+    expect(plan.params.prompt).toContain("return usable results on the same frozen source");
+    expect(plan.params.prompt).toContain("Retain the query and its result");
     expect(plan.params.prompt).toContain("Record the missing indexed coverage and why");
   });
 });

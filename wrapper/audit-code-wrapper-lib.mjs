@@ -1,6 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve, win32 } from 'node:path';
 import { ensureBuilt, shouldBuildDistForPaths, assertWorkspaceInstalled } from './audit-code-wrapper-build.mjs';
 import { fileExists } from './audit-code-wrapper-io.mjs';
 import {
@@ -33,7 +33,7 @@ const packageJsonPath = join(repoRoot, 'package.json');
 const promptAssetPath = join(repoRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
 
 // Deferred (NOT a top-level await): package.json is only needed by the
-// `--version` branch, and a top-level read would fail EVERY invocation —
+// version and command branches, and a top-level read would fail EVERY invocation —
 // including `--help` — whenever package.json is unreadable (CE-006).
 async function readPackageVersion() {
   return JSON.parse(await readFile(packageJsonPath, 'utf8')).version;
@@ -129,22 +129,44 @@ function setFlag(argv, name, value) {
 
 export { hasLeadingFlag, setFlag };
 
-// When the wrapper runs from a source checkout (its package dir is NOT inside a
-// node_modules tree), generated continuation commands should re-invoke THIS
-// wrapper via `node <path>` so a dogfooded monorepo run stays pinned to local
-// code instead of silently falling back to a globally-installed `audit-code`
-// bin. Installed copies leave the hint unset so the dist CLI keeps emitting the
-// `audit-code` bin. Returned as an env fragment scoped to the spawned child so
-// it never leaks into the parent process (e.g. the test runner).
-function selfInvocationEnv() {
-  if (process.env.AUDIT_CODE_INVOCATION) {
-    return { AUDIT_CODE_INVOCATION: process.env.AUDIT_CODE_INVOCATION };
+const VERSION_PREFIX = '--expect-version=';
+const NODE_COMMAND = /^node(?:\.exe)?$/i;
+const SHELL_UNSAFE_LAUNCH_PATH = /[\u0000-\u001f\u007f"'$!%&|<>^`]/u;
+
+function concreteLauncherPath(token) {
+  return !SHELL_UNSAFE_LAUNCH_PATH.test(token)
+    && (posix.isAbsolute(token) || (win32.isAbsolute(token) && /^(?:[a-z]:|\\\\)/i.test(token)));
+}
+
+/** Accept a concrete launcher, not a PATH-dependent audit-code alias or command. */
+function invocationOverride(raw) {
+  if (!raw) return undefined;
+  try {
+    const argv = JSON.parse(raw);
+    if (!Array.isArray(argv) || !argv.every(arg => typeof arg === 'string' && arg.length > 0)) return undefined;
+    const launcher = argv.filter(arg => !arg.startsWith(VERSION_PREFIX));
+    if (launcher.length === 1 && concreteLauncherPath(launcher[0])) return launcher;
+    if (launcher.length === 2
+      && (NODE_COMMAND.test(launcher[0])
+        || (concreteLauncherPath(launcher[0]) && NODE_COMMAND.test(win32.basename(launcher[0]))))
+      && concreteLauncherPath(launcher[1]) && /\.mjs$/i.test(launcher[1])) return launcher;
+  } catch {
+    // A malformed override must not emit an unbound PATH lookup.
   }
-  if (/[\\/]node_modules[\\/]/.test(repoRoot)) {
-    return {};
-  }
+  return undefined;
+}
+
+// Bind generated commands to the current release, even when the host supplies
+// a concrete launcher. An old pin is replaced, not trusted or left duplicated.
+async function selfInvocationEnv() {
+  const raw = process.env.AUDIT_CODE_INVOCATION;
+  const override = invocationOverride(raw);
+  if (raw && !override) console.warn('[audit-code] Invalid AUDIT_CODE_INVOCATION; using this version-bound wrapper instead.');
   return {
-    AUDIT_CODE_INVOCATION: JSON.stringify(['node', join(repoRoot, 'audit-code.mjs')]),
+    AUDIT_CODE_INVOCATION: JSON.stringify([
+      ...(override ?? ['node', join(repoRoot, 'audit-code.mjs')]),
+      VERSION_PREFIX + await readPackageVersion(),
+    ]),
   };
 }
 
@@ -229,7 +251,7 @@ function printHelp({ usageName, preferredEntrypoint }) {
     'Primary usage (conversation-first):',
     '- next-step advances deterministic audit state one bounded step and writes',
     '  .audit-tools/audit/steps/current-step.json plus current-prompt.md; the host',
-    '  agent follows only the returned step prompt and calls next-step again',
+    '  agent follows only the returned step prompt and its version-bound command',
     '',
     'Helper commands:',
     '- prompt-path prints the absolute path to the canonical /audit-code prompt asset',
@@ -286,7 +308,7 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
   await ensureBuilt();
   await run(process.execPath, [distEntry, commandName, ...commandArgs], {
     ...process.env,
-    ...selfInvocationEnv(),
+    ...await selfInvocationEnv(),
   });
 }
 
@@ -296,6 +318,16 @@ export async function runAuditCodeWrapper({
   argv = process.argv.slice(2),
   preferredEntrypoint
 }) {
+  if (argv[0]?.startsWith(VERSION_PREFIX)) {
+    const expected = argv[0].slice(VERSION_PREFIX.length);
+    const actual = await readPackageVersion();
+    if (actual !== expected) {
+      throw new Error(
+        `audit-tools version changed: this continuation expects ${expected}, but this wrapper is ${actual}. No audit state was modified. To stay on the original release, run the same arguments with that release. To intentionally continue on this release, replace only the leading ${VERSION_PREFIX}${expected} with ${VERSION_PREFIX}${actual} and rerun the same command; the usual state checks still apply.`,
+      );
+    }
+    argv = argv.slice(1);
+  }
   if (hasLeadingFlag(argv, '--help') || hasLeadingFlag(argv, '-h')) {
     printHelp({ usageName, preferredEntrypoint });
     return;

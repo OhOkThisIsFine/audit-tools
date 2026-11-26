@@ -80,6 +80,8 @@ export function renderSynthesisNarrativePrompt(
     "",
     "A deterministic report was recorded; its coverage may be incomplete. Group only its findings into root-cause themes, write a short executive summary, and list the top risks. Reference every finding by its exact `id`. Do not restate unreviewed, stale, disputed, or inconclusive parts as clean.",
     "",
+    "Give consequential supported design opportunities (in the full question report) or `Design option:` entries (in the legacy findings list) a distinct mention in the executive summary when they matter; read the full report for these when there is question coverage or truncation. Preserve the choice, tradeoff, and next check. Do not count options as confirmed defects, promote them into top risks solely because they were proposed, or imply that a recommendation has been chosen for implementation.",
+    "",
     "## Summary",
     "",
     `- Findings: ${report.summary.finding_count}`,

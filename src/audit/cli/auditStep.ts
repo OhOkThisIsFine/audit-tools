@@ -27,6 +27,7 @@ import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
 import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
 import { laneSubmissionPath } from "./laneSubmissions.js";
 import { buildLineIndex } from "./lineIndex.js";
+import { nextStepCommand } from "./prompts.js";
 import type { AnalyzerSetting, SynthesisNarrative, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
@@ -149,21 +150,21 @@ async function runStandaloneSynthesis(
   const runId = await readQuestionReviewRunId(artifactsDir);
   if (!runId || !bundle.repo_manifest || !bundle.review_plan ||
       decideNextStep(bundle, { emitStaleness: false }).selected_obligation !== "audit_tasks_completed") {
-    throw new Error("No active review ready for standalone synthesis. Run audit-code next-step.");
+    throw new Error("No active review ready for standalone synthesis. Continue with: " + nextStepCommand(root, artifactsDir));
   }
   const sourceRoot = await readRunSourceRoot(root, artifactsDir);
   const scope = reviewSourceScope(bundle);
   const admitted = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])];
   if (!(await checkFileIntegrity(sourceRoot, bundle.repo_manifest, admitted)).is_clean) {
-    throw new Error("The frozen source changed. Run audit-code next-step before synthesis.");
+    throw new Error("The frozen source changed. Continue with: " + nextStepCommand(root, artifactsDir));
   }
   const question_cycle = await deriveQuestionCycleUnlocked({ root, sourceRoot, artifactsDir, bundle, readOnlyRunId: runId });
   const projected = { ...bundle, question_cycle };
   if (question_cycle.pending.length > 0) {
-    throw new Error("Question review must reach report-ready state before synthesis. Run audit-code next-step.");
+    throw new Error("Question review must reach report-ready state before synthesis. Continue with: " + nextStepCommand(root, artifactsDir));
   }
   if (decideNextStep(projected, { emitStaleness: false }).selected_obligation !== "synthesis_current") {
-    throw new Error("No deterministic synthesis is pending. Run audit-code next-step.");
+    throw new Error("No deterministic synthesis is pending. Continue with: " + nextStepCommand(root, artifactsDir));
   }
   return runAuditStepLocked(options, runLogger, sourceRoot, projected);
 }
@@ -195,11 +196,17 @@ async function executeAdvance(
   runLogger: RunLogger,
   sourceRoot: string,
 ): Promise<AdvanceAuditResult> {
-  const lineIndex = bundle.repo_manifest
-    ? await buildLineIndex(sourceRoot, bundle.repo_manifest)
+  // A forced question synthesis renders accepted evidence, not review packets
+  // or line attestations. The standalone path checks frozen-source integrity
+  // separately before reaching this dispatch.
+  const indexManifest = options.preferredExecutor === "synthesis_executor"
+    ? undefined
+    : bundle.repo_manifest;
+  const lineIndex = indexManifest
+    ? await buildLineIndex(sourceRoot, indexManifest)
     : undefined;
-  const sizeIndex = bundle.repo_manifest
-    ? sizeIndexFromManifest(bundle.repo_manifest)
+  const sizeIndex = indexManifest
+    ? sizeIndexFromManifest(indexManifest)
     : undefined;
   const externalAnalyzerResults =
     options.externalAnalyzerData ??

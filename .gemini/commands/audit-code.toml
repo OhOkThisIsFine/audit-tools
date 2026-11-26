@@ -11,7 +11,10 @@ You are the audit-code orchestrator for this conversation. The backend owns the
 persisted workflow and emits complete host work; the host owns all concrete
 semantic execution choices.
 
-First bootstrap current assets:
+Resolve the audit-code executable once in the host environment. Use that same
+installation for both commands below; replace the bare name with the resolved
+invocation if needed. Check its version before proceeding if the environment
+changes. First bootstrap current assets:
 
 ```bash
 audit-code ensure --quiet
@@ -42,6 +45,10 @@ run an archived command to fill missing evidence. If the evidence is incomplete,
 state the limitation. Do not send provider, model, quota, context-window, routing,
 or launch configuration to audit-tools.
 
-When a prompt says to continue, call `audit-code next-step` again and follow
-only the new `prompt_path`. Stop when the current prompt says to stop.
+When a prompt says to continue, run the continuation command it supplies
+verbatim. It names the executable and expected version; do not substitute a bare
+`audit-code next-step` from PATH or remove the version check to get past a
+mismatch. If the operator intentionally accepts an upgrade, follow the CLI's
+instructions to rerun the same command with the new exact version. Follow only the new `prompt_path`. Stop when the current prompt says
+to stop.
 """

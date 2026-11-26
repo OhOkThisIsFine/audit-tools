@@ -176,21 +176,17 @@ test("ownership checkpoints do not cancel or undo callback writes already in fli
 // ---------------------------------------------------------------------------
 // 5. Timeout path: acquireLock throws FileLockTimeoutError when lock is held
 // ---------------------------------------------------------------------------
-test("acquireLock throws FileLockTimeoutError when lock is held past timeout", async () => {
+test("acquireLock without a logger throws FileLockTimeoutError when the lock is held", async () => {
   await withTempDir(async (dir: string) => {
     const lockPath = tmpLockPath(dir);
-    const token = await acquireLock(lockPath); // hold the lock
+    const token = await acquireLock(lockPath);
 
     try {
-      const err = await assert.rejects(
-        () => acquireLock(lockPath, 200),
-        (e) => {
-          const thrown = e as Error;
-          expect(thrown.name, "error.name should be FileLockTimeoutError").toBe("FileLockTimeoutError");
-          return true;
-        },
-      );
-      void err; // suppress unused-var lint
+      await assert.rejects(() => acquireLock(lockPath, 200), (err) => {
+        expect(err).toBeInstanceOf(FileLockTimeoutError);
+        expect((err as Error).name).toBe("FileLockTimeoutError");
+        return true;
+      });
     } finally {
       await releaseLock(lockPath, token);
     }
@@ -304,25 +300,6 @@ test("acquireLock without a logger still acquires and releases the lock normally
     // Clean up via unlink since doesNotReject returns undefined.
     const { unlink } = await import("node:fs/promises");
     await unlink(lockPath).catch(() => {});
-  });
-});
-
-test("acquireLock without a logger still throws FileLockTimeoutError on timeout", async () => {
-  await withTempDir(async (dir: string) => {
-    const lockPath = join(dir, `no-logger-timeout-${randomUUID()}.lock`);
-    const token = await acquireLock(lockPath);
-
-    try {
-      await assert.rejects(
-        () => acquireLock(lockPath, 200),
-        (err) => {
-          expect(err instanceof FileLockTimeoutError).toBeTruthy();
-          return true;
-        },
-      );
-    } finally {
-      await releaseLock(lockPath, token);
-    }
   });
 });
 

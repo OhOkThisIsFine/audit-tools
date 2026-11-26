@@ -9,7 +9,7 @@ import {
 } from "audit-tools/shared";
 import { readRunConsentUnlocked } from "../../shared/analyzerRunConsent.js";
 import type { writeCurrentStep } from "./steps.js";
-import { renderCommand } from "./args.js";
+import { nextStepCommand } from "./prompts.js";
 
 const EvidenceSchema = z.object({ available: z.boolean(), evidence: z.string().trim().min(1) }).strict();
 export const FunctionalPreflightSchema = z.object({
@@ -75,7 +75,7 @@ export async function functionalPreflightStep(
       if (!isJsonParseError(error)) throw error;
       problem = "The functional preflight report is not valid JSON. Rewrite it using the shape below.";
     }
-    const next = renderCommand(["audit-code", "next-step", "--root", root, "--artifacts-dir", artifactsDir]);
+    const next = nextStepCommand(root, artifactsDir);
     const example = {
       contract_version: "audit-functional-preflight/v1", run_id: run.run_id, repository_root: canonicalRoot,
       source_inspection: { available: false, evidence: "Describe a source inspection actually performed, or the concrete failure." },
@@ -108,5 +108,5 @@ export async function functionalPreflightStep(
 /** Direct semantic CLI actions cannot skip the same entry requirement. */
 export async function requireFunctionalPreflight(root: string, artifactsDir: string): Promise<void> {
   const pending = await functionalPreflightStep(root, artifactsDir);
-  if (pending) throw new Error(`${pending.progress?.summary} Run audit-code next-step to complete functional preflight first.`);
+  if (pending) throw new Error(`${pending.progress?.summary} Complete functional preflight first: ${nextStepCommand(root, artifactsDir)}`);
 }

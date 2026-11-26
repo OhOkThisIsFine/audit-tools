@@ -55,6 +55,14 @@ test("normalizeRepoPath: trims, backslash→slash, strips ./, lowercases", () =>
   expect(normalizeRepoPath("./pkg/x.ts")).toBe("pkg/x.ts");
 });
 
+test("boolean quote matching handles empty and overlapping normalized spans", () => {
+  expect(quoteMatches("aaa", "aa")).toBe(true);
+  expect(quoteMatches("  a\rb\u00a0\t😀 ", "ab\n😀")).toBe(true);
+  expect(quoteMatches("a\rb", "a b")).toBe(false);
+  expect(quoteMatches("aaa", " \r\n\t")).toBe(false);
+  expect(quoteMatches("", "a")).toBe(false);
+});
+
 test("quoteMatches is whitespace/CRLF-insensitive and content-based", () => {
   const file = "function foo() {\r\n    return bar();\r\n}\n";
   expect(quoteMatches(file, "return bar();")).toBe(true);

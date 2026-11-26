@@ -318,7 +318,6 @@
     "tests/remediate/dq-2-concurrency-derivation.test.ts": 720,
     "tests/remediate/escalate-on-evidence.test.ts": 1103,
     "tests/remediate/f4-brokered-core-parity.test.ts": 878,
-    "tests/remediate/file-integrity.test.ts": 832,
     "tests/remediate/final-gate-extraction-equivalence.test.ts": 979,
     "tests/remediate/finding-filter.test.ts": 1071,
     "tests/remediate/fixture-generator-drift-guard.test.ts": 1222,

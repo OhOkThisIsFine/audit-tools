@@ -9,7 +9,6 @@
  * INV-remediate-tests-08: ESM-correct __dirname derivation (fileURLToPath(import.meta.url))
  * INV-remediate-tests-09: no vacuous/placeholder tests (expect(true).toBe(true))
  * INV-remediate-tests-10: no cross-file duplicate test bodies for the same behaviour
- * INV-remediate-tests-11: type-safe fixtures — no as-any on tested inputs
  * INV-remediate-tests-12: no vi.spyOn on the audit-tools/shared re-export barrel (vacuous-pass guard)
  */
 import { describe, it, expect } from "vitest";
@@ -92,7 +91,6 @@ describe("INV-remediate-tests-08: ESM-correct __dirname derivation in .test.ts f
   // helpers/nextStepHarness module instead of a local __dirname, so they no
   // longer belong in this list.
   const FILES_THAT_USE_DIRNAME = [
-    "file-integrity.test.ts",
     "store.test.ts",
     "working-directory-prompts.test.ts",
     "remediate-state-invariants.test.ts",
@@ -262,17 +260,6 @@ describe("INV-remediate-tests-10: no cross-file duplicate test bodies for same b
       }
     }
     expect(violations).toEqual([]);
-  });
-});
-
-// ── INV-remediate-tests-11 ─────────────────────────────────────────────────
-
-describe("INV-remediate-tests-11: no as-any on tested inputs in fixture helpers", () => {
-  it("file-integrity.test.ts mkFinding does not use 'as any' return type", () => {
-    const src = readTestFile("file-integrity.test.ts");
-    // The function signature must not end with ': any'
-    const hasAnyReturn = /function mkFinding\([^)]*\)\s*:\s*any\b/.test(src);
-    expect(hasAnyReturn).toBe(false);
   });
 });
 

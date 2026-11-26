@@ -195,7 +195,8 @@ function locateQuote(fileContent: string, quotedText: string): QuoteSpan[] {
  * file content. An empty quote never matches (an empty quote grounds nothing).
  */
 export function quoteMatches(fileContent: string, quotedText: string): boolean {
-  return locateQuote(fileContent, quotedText).length > 0;
+  const needle = normalizeForMatch(quotedText);
+  return needle.length > 0 && normalizeForMatch(fileContent).includes(needle);
 }
 
 /** Reads an admitted source file's text; injectable independently of path admission. */

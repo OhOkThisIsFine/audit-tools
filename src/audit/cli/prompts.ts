@@ -3,9 +3,11 @@ import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
   ANALYZER_SETTINGS,
   renderHostScratchNote,
+  quotePromptCommandArg,
+  shellQuote,
+  toPromptPathToken,
 } from "audit-tools/shared";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
-import { renderCommand } from "./args.js";
 
 function cliInvocationTokens(): string[] {
   const raw = process.env.AUDIT_CODE_INVOCATION;
@@ -112,9 +114,24 @@ Then continue:
 `;
 }
 
+// sites-pinned: tests/audit/prompt-invocation.test.ts, tests/audit/next-step-question-workload.test.ts
+export function renderAuditCommand(argv: string[], platform: NodeJS.Platform = process.platform): string {
+  const powerShell = platform === "win32";
+  const tokens = [...cliInvocationTokens(), ...argv].map((value) => {
+    const token = powerShell || /^(?:[A-Za-z]:\\|\\\\)/u.test(value)
+      ? toPromptPathToken(value)
+      : value;
+    if (token && !token.includes("\\") && quotePromptCommandArg(token) === token) return token;
+    // Unlike a generic double-quote hint, native shell literals never expand
+    // a dollar sign in a concrete launcher, checkout, or graph path.
+    return powerShell ? "'" + token.replaceAll("'", "''") + "'" : shellQuote(token, platform);
+  });
+  const command = tokens.join(" ");
+  return powerShell && tokens[0]?.startsWith("'") ? "& " + command : command;
+}
+
 export function nextStepCommand(root: string, artifactsDir: string): string {
-  return renderCommand([
-    ...cliInvocationTokens(),
+  return renderAuditCommand([
     "next-step",
     "--root",
     root,

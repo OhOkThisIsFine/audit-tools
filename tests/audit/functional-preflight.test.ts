@@ -16,13 +16,14 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "audit-preflight-")); roots.push(root);
   return { root, artifactsDir: join(root, ".audit-tools", "audit") };
 }
-afterEach(async () => { vi.restoreAllMocks(); process.exitCode = 0; await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); process.exitCode = 0; await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 it("the public next-step emits capability work before semantic or deterministic audit work", async () => {
   const { root, artifactsDir } = await fixture();
   await writeFile(join(root, "sample.ts"), "export const sample = 1;\n");
   await persistAnalyzerSettings(root, { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" });
   await prepareFixtureRun(root, { declinedAnalyzerIds: EXTERNAL_ANALYZER_CANDIDATES.map(candidate => candidate.id), preflight: false });
+  vi.stubEnv("AUDIT_CODE_INVOCATION", JSON.stringify(["node", "path with spaces/audit-code.mjs", "--expect-version=0.0.0-test"]));
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   await cmdNextStep(["--root", root]);
   const step = JSON.parse(await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"));
@@ -31,6 +32,9 @@ it("the public next-step emits capability work before semantic or deterministic 
   expect(step.artifact_paths.functional_preflight).toBe(toPromptPathToken(functionalPreflightPath(artifactsDir)));
   expect(await readdir(artifactsDir)).not.toContain("repo_manifest.json");
   const prompt = await readFile(step.prompt_path, "utf8");
+  expect(step.allowed_commands).toHaveLength(1);
+  expect(step.allowed_commands[0]).toMatch(/^node 'path with spaces\/audit-code\.mjs' --expect-version=0\.0\.0-test next-step /u);
+  expect(prompt).toContain(step.allowed_commands[0]);
   expect(prompt).toContain("Actor: the host");
   expect(prompt).toContain("operator_approved_degraded");
   expect(prompt).not.toContain("check:tests");

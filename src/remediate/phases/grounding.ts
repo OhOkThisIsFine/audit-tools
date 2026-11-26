@@ -11,6 +11,7 @@
  * integrity check's replan concern, not a grounding concern.
  */
 import { existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import {
   checkCitations,
   enumerateTrackedFilePaths,
@@ -19,7 +20,19 @@ import {
   resolveBasenameToTrackedPath,
 } from "audit-tools/shared";
 import type { Finding } from "../state/types.js";
-import { resolveAffectedPath } from "../utils/fileIntegrity.js";
+// sites-pinned: tests/remediate/grounding.test.ts
+/**
+ * Resolve a cited path against the repository root. A RELATIVE citation is read
+ * in either separator spelling: a Windows host writes `src\a.ts`, and on a POSIX
+ * host `join` would otherwise treat the backslash as a filename character, so
+ * the same citation grounded on Windows and un-grounded on Linux CI (the
+ * OS-agnostic rule: identical code, identical verdict). An absolute path is
+ * taken as spelled — it is already the host's own form.
+ */
+function resolveAffectedPath(root: string, affectedPath: string): string {
+  if (isAbsolute(affectedPath)) return affectedPath;
+  return join(root, affectedPath.replace(/\\/g, "/"));
+}
 
 // ── Affected-file grounding (WS1) ─────────────────────────────────────────────
 

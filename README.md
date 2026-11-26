@@ -242,7 +242,8 @@ For targeted review, `next-step` provides a `review_routing` artifact listing on
 the pending assignment IDs, issued workload fingerprint and bound command arguments. The dispatch
 host runs `audit-code prepare-review --work-item <assignment_id> --workload-sha256
 <workload_sha256>` for each selected assignment, using the same root and artifacts
-directory. Use the routing artifact's `prepare_review_argv_prefix`, then append
+directory. Start with the executable and version pin from the current continuation command,
+then use the routing artifact's `prepare_review_argv_prefix` and append
 `--work-item` and the assignment ID. The command returns a `prompt_path` and
 `read_paths`, not reviewer content. Hand those files and the frozen workspace
 to the reviewer harness, or send a reviewer in that workspace only the packet

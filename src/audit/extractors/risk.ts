@@ -96,8 +96,21 @@ export function buildRiskRegister(
     }
   }
 
+  const seamEndpoints = new Set<string>();
+  for (const { from, to } of graphSignals?.seams ?? []) {
+    seamEndpoints.add(from);
+    seamEndpoints.add(to);
+  }
+  const complexityHotspots = new Set<string>();
+  for (const metric of graphSignals?.complexity ?? []) {
+    if (isComplexityHotspot(metric)) complexityHotspots.add(metric.node);
+  }
+  const duplicatedPaths = new Set<string>();
+  for (const metric of graphSignals?.duplication ?? []) {
+    if (hasDuplicatedBlock(metric)) duplicatedPaths.add(metric.node);
+  }
+
   const items: RiskItem[] = unitManifest.units.map((unit) => {
-    const unitFiles = new Set(unit.files);
     const signals: string[] = [];
     if ((unit.risk_score ?? 0) >= 5) signals.push("high_bucket_density");
     if (unit.required_lenses.includes("security"))
@@ -144,11 +157,7 @@ export function buildRiskRegister(
       graphSignals != null &&
       unit.files.some((path) => graphSignals.hubs.has(path));
     if (isHub) signals.push("is_hub");
-    const isSeamEndpoint =
-      graphSignals != null &&
-      graphSignals.seams.some(
-        (seam) => unitFiles.has(seam.from) || unitFiles.has(seam.to),
-      );
+    const isSeamEndpoint = unit.files.some((path) => seamEndpoints.has(path));
     if (isSeamEndpoint) signals.push("seam_endpoint");
     const deletionCandidate =
       graphSignals != null &&
@@ -158,17 +167,9 @@ export function buildRiskRegister(
     // Per-node structural metrics (read from node_metrics, single-sourced in
     // graphSignals). High complexity / duplication on any of the unit's files
     // raises maintainability risk by a bounded +1 each.
-    const hasHighComplexity =
-      graphSignals != null &&
-      graphSignals.complexity.some(
-        (m) => unitFiles.has(m.node) && isComplexityHotspot(m),
-      );
+    const hasHighComplexity = unit.files.some((path) => complexityHotspots.has(path));
     if (hasHighComplexity) signals.push("high_complexity");
-    const hasDuplication =
-      graphSignals != null &&
-      graphSignals.duplication.some(
-        (m) => unitFiles.has(m.node) && hasDuplicatedBlock(m),
-      );
+    const hasDuplication = unit.files.some((path) => duplicatedPaths.has(path));
     if (hasDuplication) signals.push("duplicated_code");
 
     // The correlated structural family (member_of_cycle + is_hub + seam_endpoint)

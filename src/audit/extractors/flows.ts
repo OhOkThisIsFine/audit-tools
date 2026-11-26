@@ -90,7 +90,7 @@ interface FlowPathEvidence {
  */
 function flowPathEvidence(
   entry: string,
-  availablePaths: string[],
+  getKeywordPaths: (entry: string) => string[],
   adjacency: Map<string, Set<string>> | undefined,
 ): FlowPathEvidence {
   const neighbors = adjacency?.get(entry);
@@ -98,37 +98,16 @@ function flowPathEvidence(
     const paths = [entry, ...neighbors].sort(compareCodeUnits);
     return { paths, confidence: "high" };
   }
-  return { paths: keywordRelatedPaths(entry, availablePaths), confidence: "low" };
+  return { paths: getKeywordPaths(entry), confidence: "low" };
 }
 
-function keywordRelatedPaths(entry: string, availablePaths: string[]): string[] {
-  const normalized = normalizeExtractorPath(entry);
-  // The entry's own categories are fixed for the whole scan.
-  const entryIsSecurity = isSecuritySensitivePath(normalized);
-  const entryIsBilling = isBillingPath(normalized);
-  const entryIsConcurrency = isConcurrencyPath(normalized);
-  const entryIsDeployment = isDeploymentConfigPath(normalized);
-  const linked = new Set<string>([entry]);
-
-  for (const path of availablePaths) {
-    if (path === entry) continue;
-    const lower = normalizeExtractorPath(path);
-    if (
-      // Auth / session flows: link sibling auth, session, token, user paths
-      (entryIsSecurity && isIdentityPath(lower)) ||
-      // Billing / payment flows: link ledger and subscription paths
-      (entryIsBilling && isBillingPath(lower)) ||
-      // Async / queue flows: link worker, job, retry, and task paths
-      (entryIsConcurrency && isAsyncTaskPath(lower)) ||
-      // Deployment / infra flows: link docker, k8s, terraform, workflow paths
-      (entryIsDeployment && isDeploymentConfigPath(lower))
-    ) {
-      linked.add(path);
-    }
-  }
-
-  return uniqueSorted(linked);
-}
+// Entrypoints and their related paths do not always use the same predicate.
+const KEYWORD_FLOW_CATEGORIES = [
+  [isSecuritySensitivePath, isIdentityPath],
+  [isBillingPath, isBillingPath],
+  [isConcurrencyPath, isAsyncTaskPath],
+  [isDeploymentConfigPath, isDeploymentConfigPath],
+] as const;
 
 /** A surface id or path as a flow-id segment: each character outside `[a-zA-Z0-9:_-]` becomes `-`. */
 function flowIdSegment(value: string): string {
@@ -171,11 +150,29 @@ export function buildCriticalFlowManifest(
     ? buildStructuralAdjacency(options.graphBundle, new Set(availablePaths))
     : undefined;
 
+  const keywordBuckets = new Map<(path: string) => boolean, string[]>();
+  let normalizedPaths: string[] | undefined;
+  const getKeywordPaths = (entry: string) => {
+    const normalized = normalizeExtractorPath(entry);
+    const linked = new Set([entry]);
+    for (const [matchesEntry, matchesPath] of KEYWORD_FLOW_CATEGORIES) {
+      if (!matchesEntry(normalized)) continue;
+      let paths = keywordBuckets.get(matchesPath);
+      if (!paths) {
+        const names = normalizedPaths ??= availablePaths.map(normalizeExtractorPath);
+        paths = availablePaths.filter((_, index) => matchesPath(names[index]));
+        keywordBuckets.set(matchesPath, paths);
+      }
+      for (const path of paths) linked.add(path);
+    }
+    return uniqueSorted(linked);
+  };
+
   const flows: CriticalFlow[] = [];
 
   for (const surface of surfaceManifest.surfaces) {
     const entry = surface.entrypoint;
-    const { paths, confidence } = flowPathEvidence(entry, availablePaths, adjacency);
+    const { paths, confidence } = flowPathEvidence(entry, getKeywordPaths, adjacency);
     flows.push({
       id: `flow:${flowIdSegment(surface.id)}`,
       name: `${surface.kind} flow for ${entry}`,
@@ -194,7 +191,7 @@ export function buildCriticalFlowManifest(
       !isSchemaContractPath(normalized) &&
       !isSupportArtifactPath(normalized)
     ) {
-      const { paths, confidence } = flowPathEvidence(path, availablePaths, adjacency);
+      const { paths, confidence } = flowPathEvidence(path, getKeywordPaths, adjacency);
       flows.push({
         id: `flow:data:${flowIdSegment(path)}`,
         name: `data evolution flow for ${path}`,

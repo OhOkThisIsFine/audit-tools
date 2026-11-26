@@ -1,14 +1,8 @@
 /**
- * Generic file-integrity check loop — the common core of audit-code's
- * `checkFileIntegrity` (flat repo-manifest scope) and remediate-code's
- * `checkAffectedFileIntegrity` (finding-affected-files scope). Both iterate a
- * list of records carrying a stored/expected hash, resolve each to an absolute
- * path, classify it as unchanged / changed / missing / an I/O error, and derive
- * `is_clean` from the three buckets. What genuinely differs per side — the
- * record shape, path resolution, how a file/directory is actually hashed, and
- * the I/O-error reporting format — stays with the caller via the injected
- * `resolveAbsolute` / `exists` / `hash` hooks; this module owns only the shared
- * classify-and-bucket loop.
+ * Compare records with stored hashes, as used by audit-code's
+ * `checkFileIntegrity` for repo manifests. The caller owns path resolution,
+ * hashing, and I/O diagnostics; this loop classifies the result as unchanged,
+ * changed, missing, or an I/O error.
  */
 
 export interface FileIntegrityBuckets {

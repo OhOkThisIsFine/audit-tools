@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { packageVersion } from "./helpers/wrapper-harness.js";
 import { runBounded } from "../helpers/spawn.mjs";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
 import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questionReviewReport.js";
@@ -64,7 +65,13 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       expect(handoff).not.toContain(item.binding.question.question_id);
       expect(prompt).not.toContain(step.artifact_paths.host_workload);
       expect(prompt).toContain("Answer only the bound question");
+      expect(prompt).toMatch(/audit-code\.mjs["']? --expect-version=\S+ review-graph --graph-index /u);
+      expect(prompt).toContain("--expect-version=" + packageVersion + " review-graph");
+      expect(prompt).toContain("--graph-sha256 " + handle.read_paths.graph_sha256 + " --path REPO_RELATIVE_PATH");
+      expect(prompt).not.toContain("audit-code review-graph");
       expect(prompt).toContain("limitations field is an array of strings");
+      expect(prompt).toContain("report it as a design_opportunity, not a confirmed_defect or an unsupported lead");
+      expect(prompt).toContain("compare keeping it with the viable options (simplify, replace, or delete)");
       const packet = JSON.parse(prompt.slice(prompt.indexOf("\n\n{") + 2));
       expect(packet.binding).toEqual(item.binding);
       expect(packet.result_path).toBe(item.result_path);
@@ -87,7 +94,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     expect(second.packet.graph_index).toBe(selected.packet.graph_index);
     expect(second.packet.graph_sha256).toBe(selected.packet.graph_sha256);
     expect(selected.packet.edges).toBeUndefined();
-    const graph = await runWrapper(["review-graph", "--graph-index", selected.packet.graph_index,
+    const graph = await runWrapper(["--expect-version=" + packageVersion, "review-graph", "--graph-index", selected.packet.graph_index,
       "--graph-sha256", selected.packet.graph_sha256, "--path", neighbor], { cwd: selected.packet.source_root });
     expect(JSON.parse(graph.stdout)).toMatchObject({ path: neighbor, edges: expect.arrayContaining([
       expect.objectContaining({ relation: "imports", from: neighbor, to: "src/neighbor/helper.ts" }),
@@ -95,6 +102,18 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     expect(JSON.parse(await readFile(selected.packet.source_index, "utf8")))
       .toEqual({ source_root: selected.packet.source_root, source_files: sourceFiles });
     expect(JSON.parse((await prepare(first.binding.assignment.assignment_id)).stdout)).toEqual(selected.handle);
+    const prepareArgs = [...routing.prepare_review_argv_prefix, "--work-item", first.binding.assignment.assignment_id];
+    for (const invalid of ["{ malformed", JSON.stringify(["audit-code", "--expect-version=old"])]) {
+      const fallback = await runWrapper(prepareArgs, { cwd: root, env: { AUDIT_CODE_INVOCATION: invalid } });
+      expect(fallback.stderr).toContain("Invalid AUDIT_CODE_INVOCATION");
+      expect(JSON.parse(fallback.stdout)).toEqual(selected.handle);
+    }
+    const windowsLauncher = String.raw`C:\Program Files\Dev Tools\audit-code.cmd`;
+    const overridden = await runWrapper(prepareArgs, { cwd: root,
+      env: { AUDIT_CODE_INVOCATION: JSON.stringify([windowsLauncher]) } });
+    const windowsPrompt = await readFile(JSON.parse(overridden.stdout).prompt_path, "utf8");
+    expect(windowsPrompt).toContain((process.platform === "win32" ? "& " : "")
+      + "'C:/Program Files/Dev Tools/audit-code.cmd' --expect-version=" + packageVersion + " review-graph");
     await expect(prepare("unissued")).rejects.toThrow(/not in the current issued workload/);
     await expect(prepare(first.binding.assignment.assignment_id, "0".repeat(64))).rejects.toThrow(/fingerprint is not current/);
     expect(sourceFiles).toContainEqual(expect.objectContaining({ path: neighbor }));

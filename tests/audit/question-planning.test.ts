@@ -249,6 +249,72 @@ describe("question-led audit planning", () => {
     ]));
   });
 
+  it("keeps path-only CLI files provisional without erasing registered or unknown entrypoints", () => {
+    const contents = {
+      "package.json": JSON.stringify({ name: "fixture", bin: { resume: "./src/cli/main.ts" } }),
+      "src/cli/main.ts": "import { args } from './args'; console.log(args());",
+      "src/cli/args.ts": "import { parse } from './argumentContract'; import { store } from '../models/state'; export const args = () => store(parse());",
+      "src/cli/argumentContract.ts": "import { store } from '../models/state'; export const parse = () => store('ok');",
+      "src/models/state.ts": "export const store = (value: string) => value;",
+      "legacy/commands/export.py": "print('report')",
+    };
+    const bundle = fixture();
+    bundle.repo_manifest!.files = Object.entries(contents).map(([path, text]) => ({
+      path, language: "text", size_bytes: text.length, hash: path,
+    }));
+    bundle.file_disposition!.files = bundle.repo_manifest!.files.map(({ path }) => ({ path, status: "included" }));
+    bundle.graph_bundle = buildGraphBundle(bundle.repo_manifest!, bundle.file_disposition, { fileContents: contents });
+    bundle.surface_manifest = buildSurfaceManifest(bundle.repo_manifest!, bundle.file_disposition, { graphBundle: bundle.graph_bundle });
+    bundle.critical_flows = buildCriticalFlowManifest(bundle.repo_manifest!, bundle.surface_manifest, bundle.file_disposition, { graphBundle: bundle.graph_bundle });
+    const lead = "args-duplication";
+    bundle.design_assessment = {
+      generated_at: "x", findings: [{
+        id: lead, title: "Possible duplicated parser", category: "code_duplication",
+        lens: "architecture", severity: "medium", confidence: "high",
+        summary: "Verify whether the parser duplicates argument validation.",
+        affected_files: [{ path: "src/cli/args.ts" }],
+      }],
+    };
+    const plan = buildReviewQuestionPlan(bundle, { snapshotId: "provisional" });
+    expect(ReviewPlanSchema.safeParse(plan).success).toBe(true);
+    const operations = plan.inventory.filter(({ kind, scope }) => kind === "operation" && scope === "in_scope");
+    expect(operations.map(({ title }) => title)).toEqual(["package:package.json:bin.resume"]);
+    for (const [directory, candidates] of [
+      ["src/cli/", ["src/cli/args.ts", "src/cli/argumentContract.ts"]],
+      ["legacy/commands/", ["legacy/commands/export.py"]],
+    ] as const) {
+      const title = `Local interface candidates in ${directory}`;
+      const items = plan.inventory.filter((item) => item.title === title);
+      expect(items.find(({ kind }) => kind === "invariant")?.source_refs).toEqual(
+        expect.arrayContaining(candidates.map((path) => ({ path }))),
+      );
+      const questionIds = items.map(({ inventory_item_id }) => inventory_item_id);
+      const questions = plan.questions.filter(({ inventory_item_ids }) => questionIds.includes(inventory_item_ids[0]!));
+      expect(questions.map(({ lens }) => lens).sort()).toEqual(["behavior", "operability", "tests"]);
+      expect(questions.every((q) => q.source_dependencies.some(({ kind }) => kind === "membership"))).toBe(true);
+    }
+
+    // Grouping the generic assignments must not discard their more specific
+    // bindings: the two candidates still share state, and a directly bound
+    // structural lead still gets independent verification.
+    const shared = plan.questions.find(({ expected_outcome }) =>
+      expected_outcome.includes("Shared invariant at src/models/state.ts"));
+    expect(shared?.requested_parts.map(({ part_id }) => part_id)).toEqual([
+      "surface:src/cli/args.ts", "surface:src/cli/argumentContract.ts",
+    ]);
+    expect(plan.signal_dispositions).toContainEqual(expect.objectContaining({
+      signal_id: `design-lead:${lead}`, outcome: "promoted", question_id: expect.any(String),
+    }));
+
+    // A host-supplied workflow is independent evidence, even if its entry was
+    // also nominated by filenames in an ecosystem without native extraction.
+    bundle.critical_flows!.flows.push({ id: "known-export", name: "Operator exports report",
+      entrypoints: ["legacy/commands/export.py"], paths: ["legacy/commands/export.py"], concerns: [] });
+    const corroborated = buildReviewQuestionPlan(bundle, { snapshotId: "corroborated" });
+    expect(corroborated.inventory.find(({ kind, title }) => kind === "operation" && title.includes("export.py"))).toBeDefined();
+    expect(corroborated.inventory.some(({ title }) => title === "Local interface candidates in legacy/commands/")).toBe(false);
+  });
+
   it("keeps context, source, scope exclusions and declared custom questions distinct", () => {
     const bundle = fixture();
     bundle.intent_checkpoint!.excluded_scope = [{ path: "src/scheduled.ts", reason: "schedule is not part of this review" }];

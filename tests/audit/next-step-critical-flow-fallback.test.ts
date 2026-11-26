@@ -3,6 +3,7 @@ import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { packageVersion, repoRoot } from "./helpers/wrapper-harness.js";
 import { writeFixtureRepo } from "./helpers/fixture.mjs";
 import type { CriticalFlow } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -21,6 +22,7 @@ interface CriticalFlowFallbackStep {
   step_kind: string;
   status: string;
   prompt_path: string;
+  allowed_commands: string[];
   artifact_paths: Record<string, string>;
   access?: {
     write_paths?: string[];
@@ -100,7 +102,7 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     const paused: CriticalFlowFallbackStep = JSON.parse(
       (await runWrapper(
         ["next-step"],
-        { cwd: root },
+        { cwd: root, env: { AUDIT_CODE_INVOCATION: JSON.stringify(["node", join(repoRoot, "audit-code.mjs"), "--expect-version=old", "--expect-version=older"]) } },
       )).stdout,
     );
     expect(paused.step_kind).toBe("critical_flow_fallback");
@@ -129,6 +131,11 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     expect(stepPrompt).toContain("semgrep (unknown version; scan)");
     expect(stepPrompt).not.toMatch(/(?:eslint|knip) \(unknown version/);
     expect(stepPrompt).toContain("apply a targeted fix");
+    expect(stepPrompt).toContain("Verify that the previously missed rules or queries actually ran on the affected scope.");
+    expect(stepPrompt).toContain("A syntax check alone does not recover the analyzer's missed rules.");
+    expect(stepPrompt).toContain("Before starting the next step or dispatching any work");
+    expect(paused.allowed_commands.join(" ")).toContain("--expect-version=" + packageVersion + " next-step");
+    expect(paused.allowed_commands.join(" ")).not.toContain("--expect-version=old");
     expect(stepPrompt).toContain("do not repeat an unchanged attempt");
     expect(stepPrompt).toContain("applicable repo-declared command");
     expect(stepPrompt).toContain("not an allowlist");
@@ -157,11 +164,20 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
       JSON.stringify({ flows: [HOST_FLOW] }, null, 2) + "\n",
     );
 
+    // Simulate an old generated pin without mutating the release under test.
+    // The mismatch must not consume the saved host submission. Intentionally
+    // rebind only the leading pin and resume using the same explicit paths.
+    const resume = ["next-step", "--root", root, "--artifacts-dir", artifactsDir];
+    await expect(runWrapper(["--expect-version=0.0.0-previous", ...resume], { cwd: root }))
+      .rejects.toThrow("replace only the leading --expect-version=0.0.0-previous with --expect-version=" + packageVersion);
+    const markerPath = join(artifactsDir, "critical-flow-fallback.json");
+    await expect(readFile(markerPath)).rejects.toMatchObject({ code: "ENOENT" });
+
     // Re-run: the submission is consumed + persisted and the obligation is
     // satisfied (the run advances past the gate, never re-asking).
     const advanced: CriticalFlowFallbackStep = JSON.parse(
       (await runWrapper(
-        ["next-step"],
+        ["--expect-version=" + packageVersion, ...resume],
         { cwd: root },
       )).stdout,
     );
