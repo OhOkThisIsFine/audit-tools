@@ -1537,6 +1537,24 @@ describe('tool-input-guard: Agent worktree isolation on a dispatch node', () => 
     expect(runInputGuard(payload).code).toBe(0);
   });
 
+
+  it.each([
+    'Review audit-code and remediate-code behavior in their own worktree.',
+    'Refactor the node_id and node_worktree documentation.',
+    'Implement node validation for a graph input.',
+  ])('allows a regular code task that says %s', (prompt) => {
+    expect(runInputGuard({ tool_name: 'Agent', tool_input: { isolation: 'worktree', prompt } }).code).toBe(0);
+  });
+
+  it.each([
+    'Read .audit-tools/audit/runs/run/reviewer-packets/' + 'a'.repeat(64) + '.md',
+    'Read C:\\repo\\.audit-tools\\audit\\lanes\\prompts\\' + 'b'.repeat(64) + '\\charter-extraction-revealed-prompt.md',
+    'Submit work_item_id: B1 to .audit-tools/remediation/runs/run/implement/host-results/' + 'c'.repeat(64) + '.json',
+  ])('protects an issued handoff even without a readable state file: %s', (prompt) => {
+    const r = runInputGuard({ tool_name: 'Agent', tool_input: { isolation: 'worktree', prompt } });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('bound result ingestion');
+  });
   it('allows a dispatch prompt with no isolation flag', () => {
     const payload = {
       tool_name: 'Agent',

@@ -58,12 +58,18 @@ function inProject(p) {
 // so result ingestion sees no change in the bound checkout.
 if (toolName === 'Agent') {
   const prompt = String(input?.prompt ?? '');
-  const dispatchShaped =
-    /\b(remediate-code|audit-code)\b/i.test(prompt) ||
-    // `(?!\.?js)` — "Implement Node.js streams" is ordinary work, not a
-    // dispatch node.
-    /\b(implement|dispatch)\s+node\b(?!\.?js)/i.test(prompt) ||
-    /\bnode[_-]?(id|worktree)\b/i.test(prompt);
+  // Use the identity of an issued packet or bound result. Recognition is
+  // syntactic so missing run state cannot hide an unambiguous dispatch.
+  // Ordinary parallel work routinely mentions the tools and "node".
+  const reference = prompt.replace(/\\/g, '/');
+  const issuedPacket = /\/(?:reviewer-packets|lanes\/prompts)\/[a-f0-9]{64}(?:\.md|\/[\w-]+-prompt\.md)\b/i;
+  const boundResult = /\/(?:host-results|submissions)\/[a-f0-9]{64}\.json\b/i;
+  const workItemBinding = /\b(?:work_item_id|prompt_sha256|assignment_id)\b\s*["']?\s*:/i;
+  // Preserve the old explicitly assigned node + preallocated workdir form.
+  const legacy = /\b(?:implement|dispatch)\s+node\s+N-\d+\b/i.test(prompt) &&
+    /\bdispatch plan names the workdir\b/i.test(prompt);
+  const dispatchShaped = issuedPacket.test(reference) ||
+    (boundResult.test(reference) && workItemBinding.test(prompt)) || legacy;
   if (input?.isolation === 'worktree' && dispatchShaped) {
     block(
       'tool-input guard: never pass `isolation: "worktree"` when dispatching an audit-code / remediate-code ' +

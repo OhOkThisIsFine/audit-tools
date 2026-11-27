@@ -66,11 +66,19 @@ test("source npm lifecycle keeps existing host config and assets untouched even 
     const opencodePath = join(homeDir, ".config", "opencode", "opencode.json");
     await mkdir(dirname(codexPath), { recursive: true });
     await mkdir(dirname(opencodePath), { recursive: true });
-    await writeFile(codexPath, CODEX_SEED);
-    await writeFile(opencodePath, '{ "mcp": { "mine": { "type": "local", "command": ["mine"] } } }');
+    const regularLaunch = Object.fromEntries(TOOLS.map((tool) => [tool, [process.execPath, join(homeDir, "regular-install", tool + ".mjs"), "mcp"]]));
+    const registeredCodex = CODEX_SEED + Object.entries(regularLaunch).map(([tool, [command, ...args]]) =>
+      `
+[mcp_servers.${tool}]
+command = ${JSON.stringify(command)}
+args = ${JSON.stringify(args)}
+`).join("");
+    await writeFile(codexPath, registeredCodex);
+    await writeFile(opencodePath, JSON.stringify({ mcp: Object.fromEntries(Object.entries(regularLaunch)
+      .map(([tool, command]) => [tool, { type: "local", command }])) }));
     const opencodeBefore = await readFile(opencodePath);
     await runPostinstall(homeDir, { npmLifecycle: true });
-    expect(await readFile(codexPath, "utf8")).toBe(CODEX_SEED);
+    expect(await readFile(codexPath, "utf8")).toBe(registeredCodex);
     expect(await readFile(opencodePath)).toEqual(opencodeBefore);
     expect((await readdir(homeDir)).sort()).toEqual([".codex", ".config"]);
   } finally {
