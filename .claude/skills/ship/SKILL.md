@@ -13,6 +13,18 @@ before. Resolve it at runtime (`remote=$(git remote | head -n 1)`, the same rule
 **ONE package** (`audit-tools`), shipping both bins `audit-code` + `remediate-code`. Imports use the
 `audit-tools/shared` subpath export — never a separate `@audit-tools/shared` workspace dep.
 
+## Preferred: prepare the version in the fixes' pull request
+
+From the fix branch, commit the reviewed fixes and run `node scripts/release-and-publish.mjs patch --prepare`.
+Commit the staged package and lockfile with the exact subject `release: prepare vX.Y.Z`, using the printed version.
+Run `npm test` on that tip and land it through `npm run land`. On that same, clean, landed tip, run
+`node scripts/release-and-publish.mjs patch --publish-prepared X.Y.Z`. Use the same bump kind in both commands.
+Do not bump or open a second version pull request. The prepared command requires exact protected default-branch CI
+evidence before tagging. Publication still uses the trusted workflow, validates the exact tarball, and verifies the
+npm registry before reinstalling. See [release documentation](../../../docs/audit-pkg/release.md).
+
+The flow below remains for an already landed, unbumped branch.
+
 ## 1. Preflight gate (fast local fast-fail — CI is the authoritative full gate)
 
 Run the small contract suite locally. CI reruns it against the actual release runtime and is authoritative.

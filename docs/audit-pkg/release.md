@@ -12,6 +12,34 @@ builds and publishes on its single pinned line (`RELEASE_NODE_VERSION`).
 This page keeps what the skill does not carry: manual host validation, manual
 workflow dispatch, trusted-publisher configuration, and troubleshooting.
 
+## One pull request for fixes and a release
+
+When fixes are ready to ship together, add the version change to the same
+protected pull request rather than landing the fixes and opening a second pull
+request for just the version. From the fix branch, with its code changes committed:
+
+```bash
+node scripts/release-and-publish.mjs patch --prepare
+git commit -m 'release: prepare vX.Y.Z'
+npm test
+npm run land
+node scripts/release-and-publish.mjs patch --publish-prepared X.Y.Z
+```
+
+Replace `X.Y.Z` with the version printed by `--prepare`. Use the same bump kind
+(`patch`, `minor`, or `major`) in both commands. Preparation changes only the
+package manifest and lockfile; it does not tag, push, or publish anything.
+The final commit's exact subject identifies the candidate to protected
+default-branch CI. Don't prepare a second bump after the protected merge.
+
+Prepared publishing waits for the named CI checks on the exact landed commit.
+It does not accept a pull-request merge checkout, an unrelated green run, or a
+skipped check as evidence. The publish workflow may reuse that commit's
+smoke-qualified tarball when it can verify where the bytes came from and their
+digest. Otherwise it qualifies a fresh tarball before uploading; it never
+publishes an unverified package. The existing commands for releasing an already
+landed, unbumped branch remain available.
+
 ## Host validation — the manual half of the release gate
 
 The automated half of multi-host validation lives in `npm run verify:hosts`
