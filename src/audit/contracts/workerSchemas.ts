@@ -1,7 +1,7 @@
 // Worker-facing contract schemas derived from the canonical zod sources.
 
 //
-// sites-pinned: tests/shared/contract-construction-sites.test.ts, tests/audit/schema-contracts.test.ts
+// sites-pinned: tests/checked-in-artifacts.test.mjs
 //   Each site of this file is pinned by the named tests; `npm run check:sites-pinned`
 //   derives the sites from the staged diff and refuses an unbound one.
 
@@ -19,22 +19,6 @@ import {
   AuditVerificationSchema,
 } from "../types.js";
 import { AuditCodeResponseSchema } from "./wrapperResponse.js";
-
-/**
- * The location fields the per-file projection omits, with the sentence ingestion
- * refuses each with — the location-level twin of
- * {@link WORKER_REFUSED_FINDING_VERDICTS}, and one fact for the same reason.
- *
- * Line numbers are TOOL-OWNED: `groundFinding` writes them from where the
- * entry's `quoted_text` occurs. A reviewer-typed number was never compared with
- * its quote, so it could point anywhere in the file and still pass every check.
- */
-export const WORKER_REFUSED_LOCATION_FIELDS = {
-  line_start:
-    "line_start is derived at ingest from where quoted_text occurs and must not be supplied",
-  line_end:
-    "line_end is derived at ingest from where quoted_text occurs and must not be supplied",
-} as const;
 
 const NONBLANK_LOCATION_TEXT = /\S/;
 const LOCATION_EVIDENCE_FIELDS = ["quoted_text", "no_quotable_span"] as const;
@@ -64,7 +48,7 @@ export const WorkerFindingLocationSchema = FindingLocationObjectSchema.omit({
 // `grounding`, `verification_status`, `severity_downgraded_from`,
 // `evidence_lane` and `lead_lineage` are OMITTED, not merely left un-extended:
 // each is a TOOL-owned verdict — the re-check of the worker's quote (computed at
-// ingest by `ingestAuditHostResults`), the defect-presence claim derived at
+// ingest by the retired audit adapter's ingestAuditHostResults), the defect-presence claim derived at
 // conceptual ingest, the severity bar synthesis applies, the lane synthesis
 // reads to decide whether a finding was ever asked for an `evidence` array, and
 // the deterministic-producer lineage that is what makes a lead a LEAD — so the
@@ -80,7 +64,7 @@ export const WorkerFindingLocationSchema = FindingLocationObjectSchema.omit({
  *
  * The omission makes a supplied key fail (`.strict()` → `additionalProperties:
  * false`), which reports a verdict as an UNRECOGNIZED KEY; the refusal in
- * `parseFindings` (which walks this same table) is what tells the worker the
+ * the retired audit adapter's parseFindings (which walks this same table) is what tells the worker the
  * field is not its to send, and why. Two lists would let a field be omitted from
  * the schema and never refused, or refused with the wrong reason; the table and
  * the `.omit` below are the same set, and legacy tests/audit/schema-contracts.test.ts
@@ -120,9 +104,6 @@ export const WorkerFindingSchema = FindingSchema.omit(workerFindingOmitMask)
     related_findings: z.array(z.string()).min(1).optional(),
   })
   .strict();
-
-/** One finding as the strict projection parses it (ingestion's parse output). */
-export type WorkerFinding = z.infer<typeof WorkerFindingSchema>;
 
 export const WorkerAuditTaskSchema = AuditTaskSchema.extend({
   lens: LensSchema,

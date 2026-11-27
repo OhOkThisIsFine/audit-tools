@@ -21,7 +21,7 @@ function createFindingIdGenerator(): () => string {
  * EXACT signal it iterated (after its own sort, before any cap), and its
  * unstamped findings. A detector cannot return a bare finding, so it cannot
  * emit one without lineage — `buildDesignAssessment` stamps every emission in
- * one place, and `mergeFindings` keeps a stamped row out of the report until a
+ * one place, and the former whole-file result merger keeps a stamped row out of the report until a
  * semantic pass confirms it (backlog property 2026-08-03: deterministic output
  * is a lead, not an approved finding).
  */
@@ -41,6 +41,7 @@ function stampEmission(emission: LeadEmission): Finding[] {
   // two runs whose signals agree carry the same source hash however the repo
   // moved around them.
   const sourceHash = leadSourceHash(emission.signal);
+  // construction-site: Finding
   return emission.findings.map((finding) =>
     stampLeadLineage(finding, emission.producer, sourceHash),
   );

@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/lens-steward-surface.test.ts, tests/audit/host-handoff.test.ts, tests/audit/orchestrator-remediation.test.ts, tests/audit/schema-contracts.test.ts, tests/audit/review-packet-sizing.test.ts
+// sites-pinned: tests/checked-in-artifacts.test.mjs
 import { z } from "zod";
 import type { Finding as SharedFinding } from "audit-tools/shared";
 import { FindingSchema } from "audit-tools/shared";
@@ -122,11 +122,6 @@ export const LENS_REGISTRY: readonly LensDefinition[] = Object.entries(LENS_META
   .map(([id, metadata]) => ({ id: id as Lens, ...metadata }))
   .sort((left, right) => left.order_weight - right.order_weight);
 
-/** The registry record for `lens`, or undefined for an operator-added custom lens. */
-export function lensDefinition(lens: string): LensDefinition | undefined {
-  return LENS_REGISTRY.find((definition) => definition.id === lens);
-}
-
 export const FileRecordSchema = z.object({
   path: z.string(),
   language: z.string(),
@@ -183,20 +178,12 @@ export const UnitManifestSchema = z.object({
 });
 export type UnitManifest = z.infer<typeof UnitManifestSchema>;
 
-export interface FileCoverageRecord {
-  path: string;
-  total_lines: number;
-  pass_id: string;
-  lens?: string;
-  agent_role?: string;
-}
-
 /** Single source of truth for coverage-matrix classification statuses (mirrors
  * the LENS_REGISTRY-derives-Lens pattern above). The value set is
  * {unclassified, classified} plus the audit-excluded subset of
  * FileDispositionStatus (excluded | generated | vendor | binary | doc_only)
- * plus the scope/trivial-audit statuses written by scope.ts
- * (out_of_scope_delta, out_of_scope_intent) and trivialAudit.ts
+ * plus the persisted legacy scope/trivial-audit statuses
+ * (out_of_scope_delta, out_of_scope_intent)
  * (excluded_trivial). The coverage_matrix JSON schema is GENERATED from
  * {@link CoverageMatrixSchema}, so it can never drift from this enum. */
 export const ClassificationStatusSchema = z.enum([
@@ -212,8 +199,8 @@ export const ClassificationStatusSchema = z.enum([
   "out_of_scope_intent",
 ]);
 
-export type ClassificationStatus = z.infer<typeof ClassificationStatusSchema>;
 
+// contract-construction-sites: exempt — CoverageFileRecord is retained for archived whole-file coverage reads; current runs report question state.
 export const CoverageFileRecordSchema = z.object({
   path: z.string(),
   unit_ids: z.array(z.string()),
@@ -222,13 +209,13 @@ export const CoverageFileRecordSchema = z.object({
   required_lenses: z.array(z.string()),
   completed_lenses: z.array(z.string()),
 });
-export type CoverageFileRecord = z.infer<typeof CoverageFileRecordSchema>;
 
 export const CoverageMatrixSchema = z.object({
   files: z.array(CoverageFileRecordSchema),
 });
 export type CoverageMatrix = z.infer<typeof CoverageMatrixSchema>;
 
+// contract-construction-sites: exempt — AuditTask is a saved whole-file plan/schema input. The current planner emits ReviewQuestion records.
 export const AuditTaskSchema = z.object({
   task_id: z.string(),
   unit_id: z.string(),
@@ -318,7 +305,7 @@ export type Finding = SharedFinding;
 
 // contract-construction-sites: exempt — AuditVerification is authored by the HOST:
 // it answers the verification work item, and the tool only VALIDATES what arrives
-// (`validateOneAuditResult`). No producer in this repo constructs one, so there is
+// (`validateAuditResults`). No producer in this repo constructs one, so there is
 // no site to mark — the absence is the design, not an oversight. The schema's own
 // required fields are still reconciled against the rendered worker schema.
 export const AuditVerificationSchema = z.object({
@@ -334,7 +321,7 @@ export const AuditVerificationSchema = z.object({
    * its lens was applied to and picks what to review, so the CHOICE is half of
    * its answer: without it, a one-file coverage over a 300-file surface arrives
    * with nothing to judge it by. The host door enforces it as REQUIRED and
-   * non-empty (`verificationContractFailure`); it is optional here for the same
+   * non-empty (the retired audit adapter's verificationContractFailure); it is optional here for the same
    * reason every other field of this schema is — the follow-up builder reads a
    * partial object, and this schema is the tolerant reader, not the gate.
    */
@@ -343,6 +330,7 @@ export const AuditVerificationSchema = z.object({
   followup_tasks: z.array(AuditTaskSchema).optional(),
 });
 
+// contract-construction-sites: exempt — AuditResult is a saved whole-file result/schema input. Current workers submit ReviewSubmission records.
 export const AuditResultSchema = z.object({
   task_id: z.string(),
   unit_id: z.string(),
@@ -391,8 +379,8 @@ export const AuditResultSchema = z.object({
   // recorded baseline is re-keyed `emit_source: 'redispatch'` with a 1-based
   // `attempt`, giving it a DISTINCT idempotency_key so the append-only ledger
   // accepts the fresh findings (a same-coordinate replay would otherwise no-op
-  // on the signature-stable base key). `emitSourceFor` reads `emit_source` first;
-  // supersession (`selectCurrentResults`) keeps only the highest attempt per
+  // on the signature-stable base key). the former emitSourceFor helper read `emit_source` first;
+  // the former supersession projection kept only the highest attempt per
   // base lineage so a superseded result's stale findings never reach synthesis.
   emit_source: z.enum(["base", "deepening", "steward", "redispatch"]).optional(),
   attempt: z.number().int().min(1).optional(),

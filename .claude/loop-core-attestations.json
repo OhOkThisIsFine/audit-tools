@@ -631,44 +631,6 @@
         "src/shared/submission/submissionLedger.ts": "545a2b34d94254b6c5e1eb7a1b6ade0b12f44cba"
       }
     },
-    "9ae8f3b83f558bae": {
-      "reviewed_by": "claude-session:7e4d0c11 (author self-review; owner chose the wording)",
-      "attester_class": "agent",
-      "checked": "remediate template lead and no-edit line equal owner-approved option A; workerPromptPath moved verbatim to shared core, both draws import it; registry declared-gap row; lane test caps removed except STUCK; 4 tests red on old text; full suite 656 passed",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "00c80004e5278e185ca1a91b5c27e23418f790f0",
-        "ran_at": "2026-11-07T02:57:51.168Z"
-      },
-      "attested_at": "2026-11-07T02:58:03.705Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "8c85ada46e0d40418ffd33e49f47da294d092e05",
-        "src/remediate/steps/dispatch/hostHandoff.ts": "c7feaad2952372f10ecba83e6df9df9ae28fa371",
-        "src/shared/submission/hostHandoffCore.ts": "acc2336b1fa419dc1539a90d74b95b8531eb0bf8"
-      }
-    },
-    "a1a3dd0149010098": {
-      "reviewed_by": "dot-independent-integration",
-      "attester_class": "agent",
-      "checked": "Reviewed exact integrated code changes and independently compared charter prompt behavior, command authority and freshness, Windows spawn wrapping, synthesis provenance and plan activation. Confirmed the staged packet-schema regression and full suite.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "2b64b75411dfce30124be4191129110e105de43c",
-        "ran_at": "2026-11-26T04:32:29.668Z"
-      },
-      "attested_at": "2026-11-26T04:32:39.985Z",
-      "vouches": {
-        "src/audit/cli/conceptualDispatch.ts": "2930f10731fd9c1c6734916a5db698283dd18402",
-        "src/audit/cli/submitCommand.ts": "13e09ac2ccf03cc0a92551bdd780675a7ff2c7c0",
-        "src/audit/orchestrator/runtimeCommand.ts": "a3eeb19e13eecc26d0c2446d4870e33e442bf09c",
-        "src/audit/orchestrator/synthesisExecutors.ts": "5d4fb848fe6d41dc19aa1e1a243250b3824a9266",
-        "src/remediate/steps/nextStep.ts": "1fbc283026eae08b2d76ba833cc9ec02c8e86070"
-      }
-    },
     "a6bf59c41c6e9e97": {
       "reviewed_by": "codex-design-review",
       "attester_class": "agent",
@@ -686,6 +648,44 @@
         "src/audit/orchestrator/configDeploymentSources.ts": "dc5fb712358416d19a61520029624df64ee8ace0",
         "src/audit/orchestrator/executorRunners.ts": "28f2078dd91a45a06060658254750557bb1b7844",
         "src/audit/orchestrator/questionPlanning.ts": "afe3f0fe02b3b347767042f5f3b330e6ee959a26"
+      }
+    },
+    "aca87556da5ba611": {
+      "reviewed_by": "independent Audit Tools integration and schema reviewers",
+      "attester_class": "agent",
+      "checked": "Independent review traced live question publish, bind, accept and locking, retained archive readers, analyzer import and v2 JSON and Markdown reports. Exact final code review checked narrow schema generator input, census and schema byte witnesses. The only post-review change is the mechanically checked CI path list. Exact staged content passed all contracts.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "a0b5a54c115a8781dfd83c8a539d4e9a61f0ba58",
+        "ran_at": "2026-11-27T21:07:54.337Z"
+      },
+      "attested_at": "2026-11-27T21:07:54.654Z",
+      "vouches": {
+        ".claude/hooks/loop-core-patterns.mjs": "2736cbee5a6adc6fe5e9e2f22a43488f82e883d5",
+        "src/audit/cli/dispatch/hostHandoff.ts": "bb836d17a158b6f51cd6d03f0f59625a4a85af1c",
+        "src/audit/cli/dispatch/questionReviewAcceptance.ts": "a86fa72fec3b09078c67e3af370dcc111c2829db",
+        "src/audit/cli/nextStepHelpers.ts": "d335ad2b91c7fa82efb7bd5a01d9b677ade653c5",
+        "src/audit/orchestrator/advanceTypes.ts": "fbfdc9567755e03bbcec21ac74a2cca8b24ea143",
+        "src/audit/orchestrator/auditTaskUtils.ts": "b262a792c77c1ec0e7396042783658f43df444df",
+        "src/audit/orchestrator/charterPackets.ts": "c6b032352e5ba83a2fdfe3684af9708843d1febb",
+        "src/audit/orchestrator/designReviewProjection.ts": "f72e8e8143d94d516241336fe9b910ba3d85a685",
+        "src/audit/orchestrator/designReviewPrompt.ts": "ed6523dca5217f7edcfa03f0b8402bef3b122d6a",
+        "src/audit/orchestrator/ingestionExecutors.ts": "e8accc8d748ae077d01a1447d62084d1800f6d7a",
+        "src/audit/orchestrator/intentInterpreter.ts": "a4bf5faa112022d856eb414ab489ed24261ead1c",
+        "src/audit/orchestrator/questionEvidence.ts": "201e7a2c7059dea6411628148d6258d489c6e5a0",
+        "src/audit/orchestrator/requeueUtils.ts": "43e980638063b2610e839d02ce9a0b1044e2186a",
+        "src/audit/orchestrator/resultBaseline.ts": "9773197262486c7095f802be0241c7355336c1b0",
+        "src/audit/orchestrator/reviewPacketGraphEdges.ts": "0345db55d41f1e9f840625aa05ed3388440a9378",
+        "src/audit/orchestrator/reviewPacketSizing.ts": "5223487f7bb1c164bf7323a171d0621132b83d8f",
+        "src/audit/orchestrator/scope.ts": "972243904f51900b620229652fdbf3d2d47636c9",
+        "src/audit/orchestrator/selectiveDeepening/shared.ts": "b25b439edbf382c209fd4af882fd261ed55458c6",
+        "src/audit/orchestrator/state.ts": "c74f786521469772d4db28d995f2e7ca1b2a8e28",
+        "src/audit/orchestrator/taskAffinityGraph.ts": "26aa3463b3c1354f9ebb4e2a654a8c103597632c",
+        "src/shared/loopCorePaths.ts": "f52e7fc223a5c7845ab18dc34e0b661cf0b5eda9",
+        "src/shared/submission/hostHandoffCore.ts": "7db61449e06a9f5fb9ba30226b61c48cd41bbd13",
+        "src/shared/submission/hostResultOutcomes.ts": "08565ade8332eb3d2c1551a4e65f3fb3b47e9773"
       }
     },
     "ad938761f1a24d50": {
@@ -1053,7 +1053,7 @@
   },
   "entries": {
     ".claude/hooks/loop-core-patterns.mjs": {
-      "review": "eadba2ff8958aa32"
+      "review": "aca87556da5ba611"
     },
     "scripts/check-loop-core-attestations.mjs": {
       "review": "4318b8e7432c3e06"
@@ -1077,13 +1077,10 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "eadba2ff8958aa32"
-    },
-    "src/audit/cli/dispatch/packetFilter.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "aca87556da5ba611"
     },
     "src/audit/cli/dispatch/questionReviewAcceptance.ts": {
-      "review": "03331f0554645b37"
+      "review": "aca87556da5ba611"
     },
     "src/audit/cli/fanoutLanes.ts": {
       "review": "d9632808536dd1ea"
@@ -1101,7 +1098,7 @@
       "review": "03331f0554645b37"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "03331f0554645b37"
+      "review": "aca87556da5ba611"
     },
     "src/audit/cli/prompts.ts": {
       "review": "3ac795cb6300b0c0"
@@ -1131,7 +1128,7 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
-      "review": "392554939aa89e3b"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/analyzerCalibration.ts": {
       "review": "3ac795cb6300b0c0"
@@ -1139,14 +1136,11 @@
     "src/audit/orchestrator/analyzerSelection.ts": {
       "review": "3ac795cb6300b0c0"
     },
-    "src/audit/orchestrator/architectureDiscovery.ts": {
-      "review": "d9632808536dd1ea"
-    },
     "src/audit/orchestrator/artifactMetadata.ts": {
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/auditTaskUtils.ts": {
-      "review": "03331f0554645b37"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/autoFixExecutor.ts": {
       "review": "f20b857654eebefb"
@@ -1170,7 +1164,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/charterPackets.ts": {
-      "review": "f20b857654eebefb"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/configDeploymentSources.ts": {
       "review": "a6bf59c41c6e9e97"
@@ -1185,10 +1179,10 @@
       "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/designReviewProjection.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "3ac795cb6300b0c0"
@@ -1211,15 +1205,6 @@
     "src/audit/orchestrator/fileIntegrity.ts": {
       "review": "42e42270e8c264c9"
     },
-    "src/audit/orchestrator/flowCoverage.ts": {
-      "baseline": "7b79934e86baf378"
-    },
-    "src/audit/orchestrator/flowPlanning.ts": {
-      "review": "0279a0adf3e99489"
-    },
-    "src/audit/orchestrator/flowRequeue.ts": {
-      "review": "42e42270e8c264c9"
-    },
     "src/audit/orchestrator/gitHistoryBaseline.ts": {
       "baseline": "7b79934e86baf378"
     },
@@ -1233,7 +1218,7 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/ingestionExecutors.ts": {
-      "review": "d9632808536dd1ea"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/intakeExecutors.ts": {
       "review": "392554939aa89e3b"
@@ -1248,19 +1233,13 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/intentInterpreter.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/intentScopeDisposition.ts": {
       "review": "cfe244114db006a2"
     },
-    "src/audit/orchestrator/ledger.ts": {
-      "baseline": "7b79934e86baf378"
-    },
     "src/audit/orchestrator/lensSelection.ts": {
       "review": "e36223304299f9c6"
-    },
-    "src/audit/orchestrator/lineCounts.ts": {
-      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/localCommands.ts": {
       "review": "6e3589038042a318"
@@ -1274,17 +1253,11 @@
     "src/audit/orchestrator/obligationPolicy.ts": {
       "review": "3e7d0736a83209a4"
     },
-    "src/audit/orchestrator/partitionTaskGraph.ts": {
-      "baseline": "7b79934e86baf378"
-    },
-    "src/audit/orchestrator/pendingTasks.ts": {
-      "review": "42e42270e8c264c9"
-    },
     "src/audit/orchestrator/projectRuleEvidence.ts": {
       "review": "eadba2ff8958aa32"
     },
     "src/audit/orchestrator/questionEvidence.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/questionPlanExecutor.ts": {
       "review": "e36223304299f9c6"
@@ -1292,89 +1265,35 @@
     "src/audit/orchestrator/questionPlanning.ts": {
       "review": "d9632808536dd1ea"
     },
-    "src/audit/orchestrator/requeue.ts": {
-      "review": "42e42270e8c264c9"
-    },
-    "src/audit/orchestrator/requeueCommand.ts": {
-      "review": "42e42270e8c264c9"
-    },
-    "src/audit/orchestrator/requeueFold.ts": {
-      "baseline": "7b79934e86baf378"
-    },
     "src/audit/orchestrator/requeueUtils.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/resultBaseline.ts": {
-      "baseline": "7b79934e86baf378"
-    },
-    "src/audit/orchestrator/resultIngestion.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/reviewLensPlaybooks.ts": {
       "review": "e36223304299f9c6"
     },
-    "src/audit/orchestrator/reviewPacketGraphContext.ts": {
-      "review": "cfe244114db006a2"
-    },
     "src/audit/orchestrator/reviewPacketGraphEdges.ts": {
-      "review": "f20b857654eebefb"
-    },
-    "src/audit/orchestrator/reviewPacketMetrics.ts": {
-      "review": "74f5fdb4c95e9366"
-    },
-    "src/audit/orchestrator/reviewPacketShared.ts": {
-      "review": "f20b857654eebefb"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/reviewPacketSizing.ts": {
-      "review": "03331f0554645b37"
-    },
-    "src/audit/orchestrator/reviewPackets.ts": {
-      "review": "74f5fdb4c95e9366"
-    },
-    "src/audit/orchestrator/runtimeCommand.ts": {
-      "review": "a1a3dd0149010098"
-    },
-    "src/audit/orchestrator/runtimeValidation.ts": {
-      "review": "e36223304299f9c6"
-    },
-    "src/audit/orchestrator/runtimeValidationUpdate.ts": {
-      "review": "d9632808536dd1ea"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/scope.ts": {
-      "review": "f20b857654eebefb"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/scopeIndexBaseline.ts": {
       "review": "42e42270e8c264c9"
     },
-    "src/audit/orchestrator/selectiveDeepening/conflict.ts": {
-      "review": "e36223304299f9c6"
-    },
-    "src/audit/orchestrator/selectiveDeepening/findingFollowup.ts": {
-      "review": "f20b857654eebefb"
-    },
-    "src/audit/orchestrator/selectiveDeepening/highRiskClean.ts": {
-      "review": "f20b857654eebefb"
-    },
-    "src/audit/orchestrator/selectiveDeepening/index.ts": {
-      "review": "e36223304299f9c6"
-    },
-    "src/audit/orchestrator/selectiveDeepening/lensVerification.ts": {
-      "review": "f20b857654eebefb"
-    },
-    "src/audit/orchestrator/selectiveDeepening/runtimeValidation.ts": {
-      "review": "f20b857654eebefb"
-    },
     "src/audit/orchestrator/selectiveDeepening/shared.ts": {
-      "review": "f20b857654eebefb"
-    },
-    "src/audit/orchestrator/selectiveDeepening/stewardFollowup.ts": {
-      "review": "f20b857654eebefb"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/staleness.ts": {
       "review": "58a44ca3a3caea9d"
     },
     "src/audit/orchestrator/state.ts": {
-      "review": "d9632808536dd1ea"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/structureExecutors.ts": {
       "review": "d9632808536dd1ea"
@@ -1389,7 +1308,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/audit/orchestrator/taskAffinityGraph.ts": {
-      "review": "f20b857654eebefb"
+      "review": "aca87556da5ba611"
     },
     "src/audit/orchestrator/testSuiteSubjects.ts": {
       "review": "3ac795cb6300b0c0"
@@ -1411,9 +1330,6 @@
     },
     "src/audit/systemic/secondOrderAdversaryPrompt.ts": {
       "review": "380a3e547fdf760b"
-    },
-    "src/audit/validation/ingestIssueCodes.ts": {
-      "review": "e36223304299f9c6"
     },
     "src/remediate/contractPipeline/runtimePlanAuthority.ts": {
       "review": "74f5fdb4c95e9366"
@@ -1482,7 +1398,7 @@
       "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/loopCorePaths.ts": {
-      "review": "585db4eb811349ff"
+      "review": "aca87556da5ba611"
     },
     "src/shared/observability/rootLogObservations.ts": {
       "review": "d46e8dfc8b0eeb7e"
@@ -1497,10 +1413,10 @@
       "review": "0c6c1b84455cdb39"
     },
     "src/shared/submission/hostHandoffCore.ts": {
-      "review": "9ae8f3b83f558bae"
+      "review": "aca87556da5ba611"
     },
     "src/shared/submission/hostResultOutcomes.ts": {
-      "review": "d9632808536dd1ea"
+      "review": "aca87556da5ba611"
     },
     "src/shared/submission/ingestReport.ts": {
       "review": "e36223304299f9c6"

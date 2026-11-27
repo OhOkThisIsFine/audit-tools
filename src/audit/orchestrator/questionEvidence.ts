@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/question-evidence.test.ts
+// sites-pinned: tests/review-evidence.test.mjs, tests/audit-smoke.test.mjs
 import { readFile, realpath } from "node:fs/promises";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import { resolveWithinRoot } from "../../shared/io/pathContainment.js";
@@ -52,7 +52,6 @@ export function evidenceApplicability(
   return { status: changed.length ? "changed" : unknown.length ? "unknown" : "applicable", changed, unknown };
 }
 
-type NamedEvidence = NonNullable<ReviewEvidence["observations"]>[number];
 type ExecutionConditions = Pick<NonNullable<ReviewEvidence["execution"]>,
   "tool" | "tool_version" | "config_fingerprint" | "input_fingerprint" | "environment_fingerprint" | "exclusions">;
 
@@ -90,50 +89,6 @@ export function buildCommandEvidence(
     ...(execution === undefined ? {} : { execution }),
     ...(observations === undefined ? {} : { observations }),
   };
-}
-
-/** Command metadata/exit is not a task-specific observation. Only the matching
- * named receipt from an observed, actually executed command can supply one. */
-export function resolveEvidenceReference(
-  record: ReviewEvidence, ref: { evidence_id: string; observation_id?: string },
-): NamedEvidence | undefined {
-  if (record.evidence_id !== ref.evidence_id || record.status !== "observed" || ref.observation_id === undefined ||
-      (record.kind === "command" && record.execution?.executed !== true)) return undefined;
-  const matches = record.observations?.filter((result) => result.observation_id === ref.observation_id);
-  return matches?.length === 1 ? matches[0] : undefined;
-}
-
-interface AnalyzerCalibrationInputs {
-  tool: string;
-  tool_version: string;
-  config_fingerprint: string;
-  selected_paths: readonly string[];
-  exclusions: readonly string[];
-}
-
-/** Invoke under the existing run consent policy; this record describes observed
- * settings only. Never spread input, because a grant is not calibration data. */
-export function makeAnalyzerCalibration(input: AnalyzerCalibrationInputs) {
-  const value = {
-    schema_version: "audit-tools/analyzer-calibration/v1",
-    tool: input.tool,
-    tool_version: input.tool_version,
-    config_fingerprint: input.config_fingerprint,
-    selected_paths: sortedUnique(input.selected_paths),
-    exclusions: sortedUnique(input.exclusions),
-  } as const;
-  return { ...value, fingerprint: hashContent(JSON.stringify(value)) };
-}
-
-/** Compare portable analyzer settings, never authorization or run coverage. */
-export function reuseAnalyzerCalibration(
-  stored: ReturnType<typeof makeAnalyzerCalibration> | undefined,
-  current: AnalyzerCalibrationInputs,
-): ReturnType<typeof makeAnalyzerCalibration> | undefined {
-  const expected = makeAnalyzerCalibration(current);
-  return stored?.schema_version === expected.schema_version &&
-    stored.fingerprint === expected.fingerprint &&
-    makeAnalyzerCalibration(stored).fingerprint === expected.fingerprint ? expected : undefined;
 }
 
 interface RuntimeReceipt {

@@ -1,21 +1,11 @@
 import { z } from "zod";
-import { GraphEdgeSchema } from "audit-tools/shared";
 
-const PrioritySchema = z.enum(["high", "medium", "low"]);
 const PrimaryGapSchema = z.enum([
   "missing_internal_edges",
   "unexplained_files",
   "partial_cohesion",
 ]);
 
-export const ReviewPacketGraphEdgeSchema = GraphEdgeSchema.pick({
-  from: true,
-  to: true,
-  kind: true,
-  confidence: true,
-  reason: true,
-});
-export type ReviewPacketGraphEdge = z.infer<typeof ReviewPacketGraphEdgeSchema>;
 
 export const ReviewPacketQualitySchema = z.object({
   cohesion_score: z.number(),
@@ -23,7 +13,6 @@ export const ReviewPacketQualitySchema = z.object({
   boundary_edge_count: z.number(),
   unexplained_file_count: z.number(),
 });
-export type ReviewPacketQuality = z.infer<typeof ReviewPacketQualitySchema>;
 
 // sites-pinned: tests/audit/review-packets.test.ts
 export const WeaklyExplainedPacketSampleSchema = z.object({
@@ -33,31 +22,7 @@ export const WeaklyExplainedPacketSampleSchema = z.object({
   sample_file_paths: z.array(z.string()),
   ...ReviewPacketQualitySchema.shape,
 });
-export type WeaklyExplainedPacketSample = z.infer<
-  typeof WeaklyExplainedPacketSampleSchema
->;
 
-export const ReviewPacketSchema = z.object({
-  packet_id: z.string(),
-  task_ids: z.array(z.string()),
-  unit_ids: z.array(z.string()),
-  pass_ids: z.array(z.string()),
-  lenses: z.array(z.string()),
-  file_paths: z.array(z.string()),
-  file_line_counts: z.record(z.string(), z.number()),
-  total_lines: z.number(),
-  priority: PrioritySchema,
-  tags: z.array(z.string()).optional(),
-  entrypoints: z.array(z.string()).optional(),
-  key_edges: z.array(ReviewPacketGraphEdgeSchema).optional(),
-  boundary_files: z.array(z.string()).optional(),
-  quality: ReviewPacketQualitySchema,
-  rationale: z.string(),
-  estimated_tokens: z.number(),
-  /** Max member risk (in [0,1]) within this coherence group. */
-  risk_score: z.number().optional(),
-});
-export type ReviewPacket = z.infer<typeof ReviewPacketSchema>;
 
 /**
  * Aggregate quality signals for a planned set of review packets — cohesion,

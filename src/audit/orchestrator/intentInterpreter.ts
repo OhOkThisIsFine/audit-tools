@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/free-form-intent-escalation.test.ts
+// sites-pinned: tests/audit-smoke.test.mjs
 /**
  * audit-code free_form_intent interpreter consumer.
  *
@@ -13,79 +13,8 @@
  * worker-facing prompt surface, not every derived field.
  */
 
-import {
-  interpretIntent,
-  unresolvedFromClauses,
-  constraintClausesFromIntent,
-  FREE_FORM_INTENT_INTERPRETATION_VERSION,
-} from "audit-tools/shared";
-import type {
-  ConstraintClauseRecord,
-  FreeFormIntentInterpretation,
-  EncodedClause,
-  IntentCheckpoint,
-} from "audit-tools/shared";
-import type { Lens } from "audit-tools/shared";
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-const LENS_DETAIL_RE = /Matches lens\(es\): ([^,]+(?:, [^,]+)*)/;
-
-/** Extract the first lens name from a "Matches lens(es): ..." detail string. */
-function extractLens(detail: string): Lens | undefined {
-  const m = LENS_DETAIL_RE.exec(detail);
-  if (!m || !m[1]) return undefined;
-  // Only take the first lens if multiple are listed; callers iterate encoded_clauses.
-  const first = m[1].split(",")[0]?.trim();
-  return first as Lens | undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/**
- * Interpret a free-form intent string into the versioned seam contract shape.
- *
- * Delegates to interpretIntent (clause-aware) from audit-tools/shared and
- * maps the output onto FreeFormIntentInterpretation.
- *
- * @param freeFormIntent - Raw free_form_intent from IntentCheckpoint (may be empty).
- */
-export function interpretFreeFormIntentForAudit(
-  freeFormIntent: string,
-): FreeFormIntentInterpretation {
-  const result = interpretIntent(freeFormIntent);
-
-  const encoded_clauses: EncodedClause[] = [];
-
-  for (const clause of result.clauses) {
-    if (!clause.encodable || !clause.encoded_as) continue;
-    const entry: EncodedClause = {
-      text: clause.text,
-      kind: clause.encoded_as.kind,
-      detail: clause.encoded_as.detail,
-    };
-    if (entry.kind === "lens_weight") {
-      const lens = extractLens(entry.detail);
-      if (lens) entry.lens = lens;
-    }
-    encoded_clauses.push(entry);
-  }
-
-  return {
-    schema_version: FREE_FORM_INTENT_INTERPRETATION_VERSION,
-    encoded_clauses,
-    checkpoint_questions: result.checkpoint_questions,
-    has_unencodable: result.has_unencodable,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Blocking-escalation gate
-// ---------------------------------------------------------------------------
+import { interpretIntent, unresolvedFromClauses, constraintClausesFromIntent } from "audit-tools/shared";
+import type { ConstraintClauseRecord, IntentCheckpoint } from "audit-tools/shared";
 
 /**
  * Compute the blocking checkpoint questions raised by an intent checkpoint's
@@ -104,8 +33,7 @@ export function interpretFreeFormIntentForAudit(
  * planning time.
  *
  * Deterministic — delegates clause decomposition + encodability + identity to the
- * single shared authority (`interpretFreeFormIntentForAudit` → shared
- * `interpretIntent`).
+ * single shared authority (`interpretIntent`).
  */
 export function unresolvedConstraintClauses(
   checkpoint: IntentCheckpoint | undefined,

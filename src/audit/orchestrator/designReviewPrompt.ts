@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/intent-checkpoint-extended.test.ts, tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
+// sites-pinned: tests/audit-smoke.test.mjs
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
 import { compareCodeUnits, confidenceRank, severityRank, uniqueSorted } from "audit-tools/shared";
@@ -46,7 +46,7 @@ const JUDGE_RESULT_PLACEMENTS = JUDGE_RESULT_KEYS
  * The category a CONFIRMED structural lead keeps, rendered beside every pass's
  * own category list from `DesignLeadCategorySchema` — the same set the lead
  * producers are typed against. The lead list tells a reader to retain a
- * confirmed lead's category so `mergeFindings` can match the confirmation; a
+ * confirmed lead's category so the former whole-file result merger can match the confirmation; a
  * permitted list without these categories made that instruction unobeyable.
  */
 const LEAD_CATEGORY_RULE =
@@ -516,7 +516,7 @@ function conceptualCritiqueInstructions(): string[] {
  * field value — `"severity": "one of: critical, high, medium, low, info"` — so a
  * host that copied it wrote a string no code recognises. The judge door refused
  * it; the contract and shallow-conceptual doors did not, and the finding was
- * stamped `grounded` with a severity `SEVERITY_RANK` cannot rank. The vocabulary
+ * stamped `grounded` with a severity the ranking code cannot rank. The vocabulary
  * now sits BESIDE the example, where it reads as a list of permitted values
  * rather than as one.
  */
@@ -837,10 +837,6 @@ export function prepareDesignReviewRecon(
     },
     fileMap,
   };
-}
-
-export function renderSharedStructuralContext(bundle: ArtifactBundle, maxUnits: number): string {
-  return prepareDesignReviewRecon(bundle, { max_units: maxUnits }).structuralContext;
 }
 
 function renderStructuralContext(bundle: ArtifactBundle, startingPoints: StartingPoints, fileMap: ReviewFileMapContext, lenses: readonly string[] | undefined) {

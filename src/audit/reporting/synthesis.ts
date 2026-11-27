@@ -1,63 +1,39 @@
-// sites-pinned: tests/audit/audit-read-synthesis.test.ts, tests/audit/lens-coverage-real-report.test.ts, tests/audit/lens-coverage-reports-unexercised.test.ts
-import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../types.js";
+// sites-pinned: tests/audit-smoke.test.mjs
+import type { Finding } from "../types.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type {
   CharterPacketCoverage,
   IntentCheckpoint,
   SubmissionLedgerEvent,
 } from "audit-tools/shared";
-import type { DesignAssessment } from "../types/designAssessment.js";
-import type { DesignReviewSnapshotBundle } from "../orchestrator/designReviewSnapshot.js";
 import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
-import type { StructureDecomposition } from "../types/structureDecomposition.js";
-import type { CharterRegister } from "../types/charterRegister.js";
 import {
   degradedAnalyzerEntries,
   type AnalyzerCapabilityRecord,
 } from "../types/analyzerCapability.js";
 import type { CharterPacketArchiveRow } from "../orchestrator/charterPacketArchive.js";
-import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
-import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type {
   AuditFindingsReport,
-  AuditRead,
-  ContentCoherenceTrace,
-  CriticalFlowManifest,
   Finding as SharedFinding,
   FindingTheme,
-  GraphBundle,
   SynthesisNarrative,
   WorkBlockSeam,
 } from "audit-tools/shared";
 import {
-  AUDIT_FINDINGS_CONTRACT_VERSION as SHARED_AUDIT_FINDINGS_CONTRACT_VERSION,
   AUDITOR_REPORT_MARKER,
-  auditReadOf,
   renderProcessFeedbackSection,
   renderFindingBlockLines,
   compareCodeUnits,
   countBy,
-  deriveLensCoverage,
   isIngestEvent,
-  reprojectLensCoverage,
   SEVERITIES,
   uniqueSorted,
   type AgentReflection,
   type LensCoverageEntry,
   type MeasuredOutcome,
 } from "audit-tools/shared";
-import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
-import type {
-  RuntimeValidationReport,
-  RuntimeValidationTaskManifest,
-} from "../types/runtimeValidation.js";
-import { buildWorkBlockPartition, type WorkBlock } from "./workBlocks.js";
-import { mergeFindings } from "./mergeFindings.js";
-import { selectCurrentResults } from "../orchestrator/ledger.js";
-import { assignStableFindingIds } from "./findingIdentity.js";
+import type { WorkBlock } from "./workBlocks.js";
 import {
-  QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION,
-  QuestionAuditFindingsReportSchema,
   type QuestionReviewReport,
   canonicalQuestionFindingId, questionClaimKey, questionPartHasSupport,
 } from "../../shared/types/questionReviewReport.js";
@@ -65,16 +41,11 @@ import {
 import { severityRank, confidenceRank } from "../../shared/types/lens.js";
 
 const CONCEPTUAL_ATTRIBUTION_IDS = Symbol("conceptual-attribution-ids");
-const CONCEPTUAL_ID_MARKER_PREFIX = "\u0000audit-tools:conceptual-final-id:";
 
 type ConceptualAttributionIdMap = ReadonlyMap<string, string>;
 type ConceptualAttributionCarrier = {
   [CONCEPTUAL_ATTRIBUTION_IDS]?: ConceptualAttributionIdMap;
 };
-type AttributionAwareReport = AuditFindingsReport &
-  ConceptualAttributionCarrier &
-  CriticalBarCarrier;
-
 /**
  * The findings {@link applyCriticalEvidenceBar} ran over on THIS report object,
  * so the renderer's disclosure line states that the bar ran rather than
@@ -91,31 +62,16 @@ type AttributionAwareReport = AuditFindingsReport &
  * indistinguishable from one where the bar never ran, which is the confusion
  * this exists to end.
  */
+const CRITICAL_EVIDENCE_BAR = "substantive-evidence" as const;
 const CRITICAL_EVIDENCE_BAR_APPLIED = Symbol("critical-evidence-bar-applied");
 type CriticalBarCarrier = {
   [CRITICAL_EVIDENCE_BAR_APPLIED]?: readonly Finding[];
 };
 
-/**
- * Contract version stamped onto the canonical `audit-findings.json`.
- * Single-sourced from `audit-tools/shared` so the auditor's output and the
- * remediator's validator can never drift (guarded by the
- * `seam-artifact-ipc-envelope` test).
- */
-export const AUDIT_FINDINGS_CONTRACT_VERSION =
-  SHARED_AUDIT_FINDINGS_CONTRACT_VERSION;
-
-/**
- * Anything renderable as the deterministic audit report. Both `AuditReportModel`
- * (no narrative) and the canonical `AuditFindingsReport` (optionally carrying
- * themes/executive_summary/top_risks) satisfy this shape, so the same renderer
- * produces the base report and the narrative-enriched report.
- */
+/** Fields consumed by the canonical and legacy Markdown report renderers. */
 export interface RenderableAuditReport {
   question_review?: QuestionReviewReport;
   summary: AuditReportSummary;
-  // Widened to the shared Finding (lens: string) so both AuditReportModel (lens
-  // narrowed to Lens) and the canonical AuditFindingsReport render unchanged.
   findings: SharedFinding[];
   work_blocks: WorkBlock[];
   work_block_seams: WorkBlockSeam[];
@@ -154,257 +110,6 @@ export interface AuditReportSummary {
   lens_coverage?: LensCoverageEntry[];
 }
 
-export interface AuditReportModel {
-  summary: AuditReportSummary;
-  findings: Finding[];
-  coherence_trace: ContentCoherenceTrace;
-  work_blocks: WorkBlock[];
-  work_block_seams: WorkBlockSeam[];
-  /** Tool-REFUTED findings (S7 tier-2 disproof) excluded from the admitted set. */
-  quarantined_findings?: Finding[];
-}
-
-type AttributionAwareModel = AuditReportModel &
-  ConceptualAttributionCarrier &
-  CriticalBarCarrier;
-
-function markConceptualFindingIds(designAssessment: DesignAssessment | undefined): {
-  designAssessment: DesignAssessment | undefined;
-  findingIdByMarker: ReadonlyMap<string, string>;
-} {
-  const conceptualFindings = designAssessment?.conceptual_findings ?? [];
-  if (conceptualFindings.length === 0) {
-    return { designAssessment, findingIdByMarker: new Map() };
-  }
-
-  const findingIdByMarker = new Map<string, string>();
-  const markedFindings = conceptualFindings.map((finding, index) => {
-    const marker = `${CONCEPTUAL_ID_MARKER_PREFIX}${index}:${finding.id}\u0000`;
-    findingIdByMarker.set(marker, finding.id);
-    return {
-      ...finding,
-      evidence: [...(finding.evidence ?? []), marker],
-    };
-  });
-
-  return {
-    designAssessment: { ...designAssessment!, conceptual_findings: markedFindings },
-    findingIdByMarker,
-  };
-}
-
-function extractConceptualAttributionIds(
-  mergedFindings: Finding[],
-  findingIdByMarker: ReadonlyMap<string, string>,
-): string[][] {
-  if (findingIdByMarker.size === 0) return mergedFindings.map(() => []);
-
-  let recoveredMarkerCount = 0;
-  const localIdsByFinding = mergedFindings.map((finding) => {
-    const localIds: string[] = [];
-    const evidence = (finding.evidence ?? []).filter((entry) => {
-      const localId = findingIdByMarker.get(entry);
-      if (localId === undefined) return true;
-      localIds.push(localId);
-      recoveredMarkerCount += 1;
-      return false;
-    });
-    finding.evidence = evidence;
-    return localIds;
-  });
-
-  if (recoveredMarkerCount !== findingIdByMarker.size) {
-    throw new Error(
-      "Conceptual attribution identity markers were not conserved through finding merge.",
-    );
-  }
-  return localIdsByFinding;
-}
-
-/**
- * The `critical` severity bar — the DECISION, stated once.
- *
- * The open question this answers (backlog, 2026-08-06): *should synthesis demand
- * mechanism-grounded — not flow-existence — evidence for `critical`?* That run
- * produced 9 self-audit criticals of which 0 survived mechanism verification
- * (3 refuted, 6 downgraded), which is a real calibration problem and looks like
- * it wants exactly such a gate.
- *
- * It does not get one, and the reason is architectural rather than a scope cut.
- * Severity is tier-3 judgment: the project's own determinism spec
- * (`spec/contract-authoring-determinism-design.md`, S7) classes "severity,
- * prioritization, is this important" as **not deterministically checkable** —
- * "no anchor proves a taste call" — and tiers it accordingly: the adversarial
- * cross-check plus traceability, never a tool verdict. A `mechanism vs
- * flow-existence` test is not mechanically decidable: both are prose, and a
- * checker that pattern-matched them would grade the WORDING of evidence, which
- * a weak auditor games by writing the word "mechanism" and a strong one is
- * punished by for citing a flow. That is the opposite of the bar's intent, and
- * it would be a gate guessing at a boundary owned by the judge — precisely what
- * the authority rule forbids.
- *
- * So the bar is DECIDED as: the tool enforces the one leg it can actually
- * decide — a `critical` must carry SUBSTANTIVE evidence, i.e. at least one
- * entry with real content — and the mechanism-versus-flow question stays judge
- * territory, carried by the adversarial cross-check and named to the reader in
- * the report. A `critical` whose evidence is absent or blank is downgraded to
- * `high` (it makes no claim the tool can even find), recorded in
- * `severity_downgraded_from`, and that downgrade is visible in the severity
- * breakdown the report prints.
- *
- * The bar is scoped to the lane whose contract CARRIES `evidence` (see
- * `criticalEvidenceBarApplies`): the design-review lanes have no such field, so
- * applying it there graded a claim they were never asked to make.
- *
- * Recorded here, at the boundary that mints the summary, so the next run that
- * reads "0 of 9 criticals survived" finds the answer instead of re-asking.
- */
-export const CRITICAL_EVIDENCE_BAR = "substantive-evidence" as const;
-
-/**
- * Whether a finding carries the evidence {@link CRITICAL_EVIDENCE_BAR} demands:
- * at least one entry with non-whitespace content.
- *
- * Deliberately a content test and not a shape test. The per-file contract
- * already requires a non-empty `evidence` array, so an array-length check would
- * be dead code — what it does not catch is the array that exists to satisfy the
- * schema: a single `""` or `" "`. That is the value with no claim in it, and it
- * is the only thing here the tool can decide without grading prose.
- */
-export function hasSubstantiveEvidence(finding: {
-  evidence?: readonly string[];
-}): boolean {
-  return (finding.evidence ?? []).some((entry) => entry.trim().length > 0);
-}
-
-/**
- * Whether {@link CRITICAL_EVIDENCE_BAR} is this finding's to answer at all.
- *
- * The bar tests `evidence`, and only the per-file worker contract carries that
- * field (`WorkerFindingSchema` requires `min(1)`). The design-review lanes never
- * list one — their contract has no `evidence` key (`findingsEnvelopeExample`)
- * and their evidence channel is `affected_files`, certified by
- * `groundDesignFinding` — so testing them for it graded a claim they were never
- * asked to make. The same critical rendered `critical` through the per-file lane
- * and `high` through the design-review lane; worse, a design finding that
- * happened to carry a marker-only `evidence` array was downgraded on the
- * strength of a field its own prompt never mentioned.
- *
- * Scoped by the RECORDED lane, never by inspecting the finding's content: by
- * synthesis the producer is not recoverable from the payload, and a heuristic
- * over "does this look like a design finding" would be inference wearing
- * provenance's clothes. An absent lane is a per-file result — the only lane
- * whose contract makes `evidence` mandatory — which is also what keeps a bundle
- * written before this field existed grading exactly as it did before.
- *
- * The lane is TOOL-STAMPED at both ingests (`toAuditResult` writes
- * `per-file-lane`, the conceptual submission schemas transform to
- * `design-review-lane`) and every host-facing contract OMITS it, so the value
- * this reads cannot have been chosen by the producer being graded — which is
- * what makes it provenance rather than one more field a finding may assert
- * about itself. A finding that could stamp its own lane could exempt itself
- * from the bar.
- */
-function criticalEvidenceBarApplies(finding: Finding): boolean {
-  return finding.evidence_lane !== "design-review-lane";
-}
-
-/**
- * Apply {@link CRITICAL_EVIDENCE_BAR}, returning the findings with any
- * `critical` it refuses downgraded, each carrying `severity_downgraded_from`.
- *
- * A downgrade, never a drop: the finding is still a finding, its severity is
- * still the judge's initial claim, and the report's severity breakdown shows the
- * result — so the claim is qualified, not erased. The ORDER of the two
- * severities is the canonical one (`FindingSeveritySchema`, most-severe-first),
- * so `high` is the adjacent step rather than a re-grade.
- *
- * The move is RECORDED, not silent: `severity_downgraded_from` keeps the
- * severity the judge claimed. Overwriting `severity` in place made a
- * tool-moved `high` byte-identical to a born-`high` one, so `audit-findings.json`
- * — and every `work_blocks.max_severity` computed from it — could not tell a
- * claim the tool refused to let stand from one the judge never made.
- *
- * TOTAL and idempotent, so it has exactly ONE behaviour wherever it runs: a
- * finding already carrying `severity_downgraded_from` was re-graded on an
- * earlier pass, and re-grading is neither repeated nor compounded. That is what
- * lets the two draws over it — the model builder and the promoted-record
- * normalization — share one implementation instead of diverging, which is the
- * only reason a re-synthesized report can be trusted to agree with its own
- * disclosure line.
- */
-export function applyCriticalEvidenceBar(findings: Finding[]): Finding[] {
-  return findings.map((finding) => {
-    if (
-      finding.severity !== "critical" ||
-      finding.severity_downgraded_from !== undefined ||
-      !criticalEvidenceBarApplies(finding) ||
-      hasSubstantiveEvidence(finding)
-    ) {
-      return finding;
-    }
-    return {
-      ...finding,
-      severity: "high" as const,
-      severity_downgraded_from: "critical" as const,
-    };
-  });
-}
-
-function severityBreakdown(findings: Finding[]): Record<string, number> {
-  return countBy(findings, (finding) => finding.severity);
-}
-
-function lensBreakdown(findings: Finding[]): Record<string, number> {
-  return countBy(findings, (finding) => finding.lens);
-}
-
-/**
- * Per-status counts of the S7 grounding pass over the findings. Findings with no
- * grounding verdict (the pass did not run on them) are skipped by `countBy`, so
- * an empty result means "no finding was graded" and the caller omits the field.
- */
-function groundingStatusBreakdown(findings: Finding[]): Record<string, number> {
-  return countBy(findings, (finding) => finding.grounding?.status);
-}
-
-/**
- * Per-status counts of the judge's defect-presence claim. Findings with no
- * status (every deterministic finding — the conceptual pass is the only
- * producer) are skipped by `countBy`, so an empty result means "no finding
- * carried a claim" and the caller omits the field, exactly as for grounding.
- */
-function verificationStatusBreakdown(
-  findings: Finding[],
-): Record<string, number> {
-  return countBy(findings, (finding) => finding.verification_status);
-}
-
-function runtimeStatusBreakdown(
-  report?: RuntimeValidationReport,
-  taskManifest?: RuntimeValidationTaskManifest,
-): Record<string, number> {
-  const breakdown = countBy(report?.results ?? [], (result) => result.status);
-  const resultTaskIds = new Set((report?.results ?? []).map((result) => result.task_id));
-  for (const task of taskManifest?.tasks ?? []) {
-    if (!resultTaskIds.has(task.id)) {
-      breakdown.pending = (breakdown.pending ?? 0) + 1;
-    }
-  }
-  return breakdown;
-}
-
-function coverageSummary(coverage?: CoverageMatrix): {
-  audited_file_count: number;
-  excluded_file_count: number;
-} {
-  const files = coverage?.files ?? [];
-  return {
-    audited_file_count: files.filter((file) => file.audit_status === "complete").length,
-    excluded_file_count: files.filter((file) => file.audit_status === "excluded").length,
-  };
-}
-
 function formatSeverityList(summary: Record<string, number>): string {
   const parts = SEVERITIES
     .filter((severity) => (summary[severity] ?? 0) > 0)
@@ -418,228 +123,6 @@ function formatCountList(summary: Record<string, number>): string {
     .sort(([left], [right]) => compareCodeUnits(left, right))
     .map(([key, count]) => `${key}: ${count}`);
   return parts.length > 0 ? parts.join(", ") : "none";
-}
-
-/** Qualifying work is lens-specific; a completed but empty-scope review is not inspection. */
-function exercisedReviewLenses(
-  results: readonly AuditResult[],
-  assessment: DesignAssessment | undefined,
-  snapshots: DesignReviewSnapshotBundle | undefined,
-): ReadonlySet<string> {
-  const lenses = new Set(results
-    .filter((result) => result.file_coverage.length > 0)
-    .map((result) => result.lens));
-  for (const snapshot of Object.values(snapshots ?? {})) {
-    if (!snapshot || assessment?.[`${snapshot.pass}_reviewed`] !== true) continue;
-    const units = snapshot.reviewed_inputs.unit_manifest;
-    const hasScope = Array.isArray(units) && units.some((unit: unknown) =>
-      typeof unit === "object" && unit !== null &&
-      "scope" in unit && unit.scope === "in_scope" &&
-      "files" in unit && Array.isArray(unit.files) && unit.files.length > 0,
-    );
-    if (hasScope) {
-      for (const lens of snapshot.reviewed_task.lenses ?? []) lenses.add(lens);
-    }
-  }
-  return lenses;
-}
-
-export function buildAuditReportModel(params: {
-  results: AuditResult[];
-  unitManifest?: UnitManifest;
-  graphBundle?: GraphBundle;
-  criticalFlows?: CriticalFlowManifest;
-  coverageMatrix?: CoverageMatrix;
-  runtimeValidationReport?: RuntimeValidationReport;
-  runtimeValidationTaskManifest?: RuntimeValidationTaskManifest;
-  externalAnalyzerResults?: ExternalAnalyzerResults[];
-  designAssessment?: DesignAssessment;
-  /** Existing accepted review snapshots bind the reviewed lenses and unit scope. */
-  designReviewSnapshots?: DesignReviewSnapshotBundle;
-  architectureSourceSample?: { status: NonNullable<LensCoverageEntry["source_sample"]>; taskId?: string };
-  structureDecomposition?: StructureDecomposition;
-  charterRegister?: CharterRegister;
-  systemicChallenge?: SystemicChallengeRegister;
-  /** Intake manifest byte sizes used to estimate remediation source context. */
-  sizeIndex?: Readonly<Record<string, number>>;
-  /**
-   * The accepted intent checkpoint. Read for its `lens_selection`, which is the
-   * ONLY statement of what the operator asked to be reviewed — and which used
-   * to reach synthesis's RENDER options while the model builder, the one site
-   * that mints the summary, was never passed it at all.
-   */
-  intentCheckpoint?: IntentCheckpoint;
-}): AuditReportModel {
-  const markedConceptual = markConceptualFindingIds(params.designAssessment);
-  // Re-key the finalized findings with globally-unique, content-addressed ids
-  // before anything addresses them by id. mergeFindings emits exactly one
-  // finding per file-independent identity (exact normalized lens|category|
-  // title) across files, units, and passes, and assignStableFindingIds hashes
-  // only stable identity signals — never line numbers, pass ids, or the merged
-  // file list — so the same logical finding keeps one id across passes and
-  // re-syntheses. Work partition coverage and seam identities key on finding.id,
-  // so locally-scoped, collision-prone packet ids must be replaced here or
-  // unrelated findings become indistinguishable in the partition contract.
-  // O3 supersession: resolve the ledger to its CURRENT record per task lineage
-  // before merging, so a re-dispatched result's fresh findings replace the stale
-  // base record they superseded — including findings the re-audit dropped, which
-  // a finding-id upsert alone would leave behind.
-  const currentResults = selectCurrentResults(params.results);
-  // sites-pinned: tests/audit/reporting-remediation.test.ts
-  const mergedFindings = mergeFindings(
-    currentResults,
-    params.runtimeValidationReport,
-    params.externalAnalyzerResults,
-    markedConceptual.designAssessment,
-    params.structureDecomposition,
-    params.charterRegister,
-    params.systemicChallenge,
-    params.runtimeValidationTaskManifest,
-  );
-  const conceptualIdsByFinding = extractConceptualAttributionIds(
-    mergedFindings,
-    markedConceptual.findingIdByMarker,
-  );
-  const allFindings = assignStableFindingIds(mergedFindings);
-  const conceptualAttributionIds = new Map<string, string>();
-  for (const [index, localIds] of conceptualIdsByFinding.entries()) {
-    const canonicalId = allFindings[index]!.id;
-    for (const localId of localIds) {
-      const existing = conceptualAttributionIds.get(localId);
-      if (existing !== undefined && existing !== canonicalId) {
-        throw new Error(
-          `Conceptual finding id "${localId}" resolved to multiple canonical findings.`,
-        );
-      }
-      conceptualAttributionIds.set(localId, canonicalId);
-    }
-  }
-  // B4: a tool-executable anchor that REFUTED a claim (status `refuted`, distinct
-  // from `ungrounded`) is quarantined-EXCLUDED — kept out of the admitted findings
-  // AND the work blocks so a disproven claim never merges as actionable fact. The
-  // refuted findings are preserved in `quarantined_findings` (quarantine, not
-  // delete) and rendered in their own report section. The exclusion happens AFTER
-  // merge so a finding grounded on another pass (grounded-wins in mergeGrounding)
-  // is never quarantined.
-  const admitted = allFindings.filter((f) => f.grounding?.status !== "refuted");
-  const quarantinedRefuted = allFindings.filter((f) => f.grounding?.status === "refuted");
-  // The one severity leg the tool can decide (see {@link CRITICAL_EVIDENCE_BAR}),
-  // applied BEFORE the partition so `max_severity`, the summary breakdown and the
-  // rendered lines all describe the same finding set — a downgrade applied after
-  // any of them would leave the deliverable disagreeing with itself.
-  const findings = applyCriticalEvidenceBar(admitted);
-  const workBlocks = buildWorkBlockPartition({
-    findings,
-    unitManifest: params.unitManifest,
-    graphBundle: params.graphBundle,
-    criticalFlows: params.criticalFlows,
-    sizeIndex: params.sizeIndex,
-  });
-  const coverage = coverageSummary(params.coverageMatrix);
-  // Per-file results credit only their own lens. A design pass credits the
-  // lenses in its accepted snapshot only if its reviewed scope was nonempty.
-  // This is exercised-lens evidence, not a claim of full per-file coverage.
-  const exercisedLenses = exercisedReviewLenses(
-    currentResults.filter((result) => result.task_id !== params.architectureSourceSample?.taskId),
-    params.designAssessment, params.designReviewSnapshots,
-  );
-  const selectedLenses = resolveIntentLensSelection(
-    params.intentCheckpoint?.lens_selection,
-  );
-  // Count grounding over ALL findings (incl. quarantined-refuted) so the `refuted`
-  // tally reflects findings dropped from the admitted set.
-  const groundingBreakdown = groundingStatusBreakdown(allFindings);
-  const verificationBreakdown = verificationStatusBreakdown(allFindings);
-  const model: AttributionAwareModel = {
-    summary: {
-      finding_count: findings.length,
-      work_block_count: workBlocks.blocks.length,
-      severity_breakdown: severityBreakdown(findings),
-      lens_breakdown: lensBreakdown(findings),
-      // Presence is guaranteed HERE, at the one boundary that holds both the
-      // operator's selection and the produced findings. Absent — deliberately —
-      // when no selection resolved: "no limit" and "every lens" are different
-      // answers, and inventing a map would be a claim nobody made.
-      ...(selectedLenses === undefined
-        ? {}
-        : {
-            lens_coverage: deriveLensCoverage({
-              selectedLenses,
-              findings,
-              exercisedLenses,
-            }).map((entry) => entry.lens === "architecture" && params.architectureSourceSample !== undefined
-              ? { ...entry, source_sample: params.architectureSourceSample.status }
-              : entry),
-          }),
-      audited_file_count: coverage.audited_file_count,
-      excluded_file_count: coverage.excluded_file_count,
-      ...(Object.keys(groundingBreakdown).length > 0
-        ? { grounding_status_breakdown: groundingBreakdown }
-        : {}),
-      ...(Object.keys(verificationBreakdown).length > 0
-        ? { verification_status_breakdown: verificationBreakdown }
-        : {}),
-      runtime_validation_status_breakdown: runtimeStatusBreakdown(
-        params.runtimeValidationReport,
-        params.runtimeValidationTaskManifest,
-      ),
-    },
-    findings,
-    coherence_trace: workBlocks.coherence_trace,
-    work_blocks: workBlocks.blocks,
-    work_block_seams: workBlocks.seams,
-    ...(quarantinedRefuted.length > 0 ? { quarantined_findings: quarantinedRefuted } : {}),
-  };
-  if (conceptualAttributionIds.size > 0) {
-    model[CONCEPTUAL_ATTRIBUTION_IDS] = conceptualAttributionIds;
-  }
-  // The bar's apply-set, carried on the object the renderer receives. Recorded
-  // at the same boundary that APPLIED it, so the two cannot drift: a render can
-  // only claim the bar ran over findings it was actually run over.
-  model[CRITICAL_EVIDENCE_BAR_APPLIED] = findings;
-  return model;
-}
-
-/**
- * Wrap the deterministic report model in the canonical `audit-findings.json`
- * contract — the machine hand-off consumed by the remediator. Narrative fields
- * are absent here; they are layered on later by {@link applyNarrative}.
- *
- * `auditRead` is what the audit read (`AuditRead`), supplied by the caller that
- * owns IO — this builder stays pure. Required so no call site can omit it by
- * accident: `null` is a statement ("no commit is known"), absence is not.
- */
-export function buildAuditFindingsReport(
-  model: AuditReportModel,
-  auditRead: AuditRead | null,
-): AuditFindingsReport {
-  const report: AttributionAwareReport = {
-    contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
-    audit_read: auditRead,
-    summary: { ...model.summary },
-    findings: model.findings,
-    coherence_trace: model.coherence_trace,
-    work_blocks: model.work_blocks,
-    work_block_seams: model.work_block_seams,
-    ...(model.quarantined_findings && model.quarantined_findings.length > 0
-      ? { quarantined_findings: model.quarantined_findings }
-      : {}),
-  };
-  const conceptualAttributionIds = (model as AttributionAwareModel)[
-    CONCEPTUAL_ATTRIBUTION_IDS
-  ];
-  if (conceptualAttributionIds) {
-    report[CONCEPTUAL_ATTRIBUTION_IDS] = conceptualAttributionIds;
-  }
-  // The bar's apply-set travels with the findings it was applied to, so the
-  // renderer of THIS report can state the bar ran rather than infer it. Absent
-  // when the report did not come from the model builder (a normalized promoted
-  // record) — which is the honest answer, not a false "the bar ran".
-  const barApplied = (model as AttributionAwareModel)[CRITICAL_EVIDENCE_BAR_APPLIED];
-  if (barApplied) {
-    report[CRITICAL_EVIDENCE_BAR_APPLIED] = barApplied;
-  }
-  return report;
 }
 
 /**
@@ -1833,83 +1316,4 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
     lines.push("", ...renderCharterCoverageSection(options.charter_evidence_coverage ?? [], options.charter_packet_archive ?? [], true));
   }
   return escapeControlCharacters(lines.join("\n").trimEnd() + "\n");
-}
-
-/**
- * Re-derive the summary fields that can be computed from the existing findings
- * and work_blocks, bump the contract_version to the current constant, and leave
- * upstream-derived fields that cannot be reconstructed (audited/excluded counts,
- * runtime validation breakdown) untouched.
- *
- * The `critical` evidence bar runs HERE as well as in the model builder, and
- * that second call is the F2 fix rather than a duplicate: a promoted
- * `audit-findings.json` can have been written by an older contract version, so
- * `cmdResynthesize` — which reads that record and renders it WITHOUT the model
- * builder — was the one path where a critical could reach the deliverable
- * un-barred while the render's disclosure line claimed the bar was enforced.
- * One implementation at the boundary both draws share means a re-synthesized
- * report and a freshly-built one state the same thing about the same finding;
- * the function is idempotent, so re-normalizing an already-barred record is a
- * no-op rather than a second downgrade.
- *
- * Safe to call on already-promoted `audit-findings.json` files without access to
- * the pruned `.audit-tools/audit` working-bundle intermediates.
- */
-export function normalizeExistingFindingsReport(
-  report: AuditFindingsReport,
-): AuditFindingsReport {
-  if (report.contract_version === QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION) {
-    return QuestionAuditFindingsReportSchema.parse(report);
-  }
-  const findings = applyCriticalEvidenceBar(report.findings as Finding[]);
-  // Counts read the SAME array the bar produced, not the input: a downgrade
-  // moves a finding between severity buckets, so a breakdown derived from the
-  // pre-bar array would contradict the severity the record now carries.
-  const groundingBreakdown = groundingStatusBreakdown(findings);
-  const verificationBreakdown = verificationStatusBreakdown(findings);
-  // CARRIED, never computed. This function upgrades a record an EARLIER run
-  // wrote, so the commit current now is not what those findings were read
-  // against; stamping it would hand the remediator a false `B`. A record from
-  // before the field existed states `null` — "no commit is known" — and a
-  // malformed value is answered the same way rather than passed through.
-  const normalized: AttributionAwareReport = {
-    ...report,
-    findings,
-    contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
-    audit_read: auditReadOf(report),
-    work_block_seams: report.work_block_seams ?? [],
-    summary: {
-      ...report.summary,
-      finding_count: findings.length,
-      work_block_count: report.work_blocks.length,
-      severity_breakdown: severityBreakdown(findings),
-      lens_breakdown: lensBreakdown(findings),
-      // The SELECTION is carried through — this function has no checkpoint and
-      // must not invent one — while the counts and outcomes are re-derived over
-      // the same findings `lens_breakdown` is re-counted from. Copying the map
-      // untouched beside a re-derived breakdown is how the two come to
-      // contradict each other, and the contradiction is refused downstream by
-      // `projectApprovedFindings`, which throws.
-      ...(report.summary.lens_coverage === undefined
-        ? {}
-        : {
-            lens_coverage: reprojectLensCoverage(
-              report.summary.lens_coverage,
-              findings,
-            ),
-          }),
-      ...(Object.keys(groundingBreakdown).length > 0
-        ? { grounding_status_breakdown: groundingBreakdown }
-        : {}),
-      ...(Object.keys(verificationBreakdown).length > 0
-        ? { verification_status_breakdown: verificationBreakdown }
-        : {}),
-    },
-  };
-  // The bar ran over THESE findings, so the renderer of this record may say so.
-  // Carried on the returned object exactly as the model builder carries it — one
-  // marker, both draws — so the disclosure's gate means the same thing wherever
-  // the report came from.
-  normalized[CRITICAL_EVIDENCE_BAR_APPLIED] = findings;
-  return normalized;
 }

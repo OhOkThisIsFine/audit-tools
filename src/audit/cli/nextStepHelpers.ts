@@ -165,7 +165,7 @@ import { runExternalAnalyzerAcquisitionExecutor, type ExternalAcquisitionAdvance
 import {
   writeHandoffOnly,
 } from "./reviewRun.js";
-import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
+import { sizeIndexFromManifest } from "../orchestrator/reviewPacketSizing.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { buildLineIndex } from "./lineIndex.js";
 import { errorMessage } from "../../shared/io/json.js";
@@ -376,43 +376,6 @@ export type NextStepResult = (
    * drain produced.
    */
   Partial<CarriedAdvisoryNotice>;
-
-/**
- * The return-kind set as RUNTIME data, so a drift guard can IMPORT the real set
- * instead of transcribing it into a literal that silently agrees with a second
- * literal on the other side of the seam.
- *
- * A TypeScript union is erased at runtime, so the bridge is a table typed TOTAL
- * over `NextStepResult["kind"]`: a kind added to the union above with no row
- * here is a compile error (missing property), and a row naming a kind the union
- * does not carry is one too (excess property). The exported array is
- * `Object.keys` of that table — derived, never a second hand-listed copy that
- * could disagree with the table it describes.
- */
-const NEXT_STEP_RETURN_KIND_TABLE: Readonly<
-  Record<NextStepResult["kind"], true>
-> = {
-  question_review: true,
-  design_review_parallel: true,
-  design_review_contract: true,
-  design_review_conceptual: true,
-  charter_extraction: true,
-  charter_comparison: true,
-  charter_fidelity: true,
-  charter_clarification: true,
-  systemic_challenge: true,
-  confirm_intent: true,
-  intent_equivalence: true,
-  analyzer_install: true,
-  analyzer_consent: true,
-  analyzer_selection: true,
-  analyzer_calibration: true,
-  edge_reasoning: true,
-  critical_flow_fallback: true,
-  synthesis_narrative: true,
-  complete: true,
-  blocked: true,
-};
 
 /**
  * Finalization thrashing tolerance (ARC-b8fed771 / the finalization-cycle guard).

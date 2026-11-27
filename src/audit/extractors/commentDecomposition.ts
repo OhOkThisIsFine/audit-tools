@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/charter-packets.test.ts, tests/audit/structure-decomposition.test.ts, tests/audit/graph-framework-routes.test.ts
+// sites-pinned: tests/audit-smoke.test.mjs, tests/functional-regressions.test.mjs
 // Comment-decomposition extractor (Phase B intent-declared source; design of
 // record spec/conceptual-design-review-design.md §"Structure decomposition
 // sources" rule 2: "Comments are their own delta — comments are stated intent
@@ -91,10 +91,7 @@ interface CommentSpan {
  * normal → string → line-comment → block-comment. Degrades gracefully (an
  * unterminated block just consumes to EOF).
  *
- * The ONE home of the comment grammar walk: `extractCommentText` (the stated
- * channel's evidence) and `stripCommentText` (the revealed channel's feed) are
- * both thin consumers of these spans, so extract and strip can never disagree on
- * what a comment is.
+ * The source-mask and comment-evidence views use these same spans.
  */
 function scanCommentSpans(source: string, path: string): CommentSpan[] {
   const syntax = syntaxFor(path);
@@ -186,23 +183,12 @@ export function extractCommentText(source: string, path: string): string {
 
 /**
  * Mask every comment span with spaces, preserving newlines — so the result has
- * EXACTLY the same number of lines as the source and every surviving character
- * sits at its original line.
- *
- * This is the substrate of the line-true packet channels, and it is a
- * REIMPLEMENTATION rather than a wrapper over {@link stripCommentText} on
- * purpose. `stripCommentText` REMOVES span text and then collapses blank-line
- * runs, so its output's line indices have no relation to the source's; deriving a
- * line number from it would emit confidently wrong provenance, which is the exact
- * failure the packet contract exists to close. `stripCommentText` keeps its
- * signature and its collapse for its own consumers.
+ * the same number of lines as the source and every surviving character
+ * stays at its original source position.
  */
 export function maskCommentSpans(source: string, path: string): string {
   const spans = scanCommentSpans(source, path);
   if (spans.length === 0) return source;
-  // SLICE-based, exactly like `stripCommentText` — so the mask and the strip
-  // partition the file identically and cannot disagree about a span boundary.
-  //
   // ⚠ Every offset `scanCommentSpans` emits is a UTF-16 CODE UNIT index: it
   // walks with `source[i]` and `String.prototype.indexOf`. Indexing the mask by
   // code POINT (`[...source]`) drifts one position left per astral character
@@ -269,7 +255,7 @@ export function extractCommentLines(
 
 /**
  * The comment-stripped source of a file, each surviving line carrying its TRUE
- * 1-based source line number. The line-true twin of {@link stripCommentText}.
+ * 1-based source line number.
  *
  * A line whose content was entirely comment disappears, which leaves a GAP in the
  * numbering. That gap discloses where comment blocks are and how large they are —
@@ -312,30 +298,6 @@ function lineNumberAt(lineStarts: readonly number[], offset: number): number {
     else hi = mid - 1;
   }
   return lo + 1;
-}
-
-/**
- * The complement of `extractCommentText`: the source with every comment span
- * removed (markers included) — the revealed channel's comment-blind feed. Shares
- * the span scanner, so the two views partition the file identically. Blank-line
- * runs left behind by removed comments are collapsed to one so the stripped view
- * doesn't leak comment POSITIONS as blank-line negative space.
- */
-export function stripCommentText(source: string, path: string): string {
-  const spans = scanCommentSpans(source, path);
-  if (spans.length === 0) return source;
-  const parts: string[] = [];
-  let cursor = 0;
-  for (const span of spans) {
-    parts.push(source.slice(cursor, span.outerStart));
-    cursor = span.outerEnd;
-  }
-  parts.push(source.slice(cursor));
-  return parts
-    .join("")
-    .split("\n")
-    .filter((line, idx, all) => line.trim().length > 0 || (idx > 0 && all[idx - 1]!.trim().length > 0))
-    .join("\n");
 }
 
 const GENERIC_STEMS = new Set([

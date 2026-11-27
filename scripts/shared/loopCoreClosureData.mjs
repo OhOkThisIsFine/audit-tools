@@ -52,8 +52,6 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   { module: "src/audit/clarification/dials.ts", claim: "reads-only", reason: "clarification dial arithmetic; voiQueue reaches the runtime shared barrel and its I/O modules, but this module persists no state" },
   { module: "src/audit/clarification/partition.ts", claim: "reads-only", reason: "clarification partitioning; runtime shared helpers reach I/O modules through the barrel, but this module persists no state" },
   { module: "src/audit/clarification/riskGate.ts", claim: "reads-only", reason: "clarification risk thresholding; runtime riskGateClarification reaches I/O modules through the shared barrel, but this module persists no state" },
-  { module: "src/audit/contracts/findingContractPrompt.ts", claim: "reads-only", reason: "prompt text for the finding contract; the prompt builder reads templates and returns text — no state, no write boundary" },
-  { module: "src/audit/coverage.ts", claim: "pure", reason: "coverage arithmetic over an already-loaded bundle" },
   { module: "src/audit/extractors/analyzers/registry.ts", claim: "reads-only", reason: "re-export of the shared analyzer candidate registry; the installed-binary probe reads the disk, and the registry itself persists nothing" },
   { module: "src/audit/extractors/bucketing.ts", claim: "pure", reason: "unit bucketing; content-derived, no persisted state" },
   { module: "src/audit/extractors/designAssessment.ts", claim: "reads-only", reason: "design-assessment extraction; runtime shared helpers reach I/O modules through the barrel, while the executor owns the write" },

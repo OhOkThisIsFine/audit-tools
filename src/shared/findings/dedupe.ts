@@ -599,7 +599,7 @@ export interface CrossLensDedupePolicy {
    *   evidence-conservation check.
    * - `local` (audit report merge): ids are packet-scoped (`MNT-001` collides
    *   across units by construction) and only become unique AFTER this pass, at
-   *   `assignStableFindingIds`. Id-keyed provenance is meaningless here, so no
+   *   the legacy stable-ID pass. Id-keyed provenance is meaningless here, so no
    *   refusal, no `dispositionById`, and a chain cycle from a reused id breaks
    *   tolerantly instead of throwing (`mergeMap` is unused by this caller).
    */

@@ -1,24 +1,5 @@
-// sites-pinned: tests/audit/review-packet-sizing.test.ts, tests/audit/review-packets.test.ts
-import type { AuditTask } from "../types.js";
-import {
-  estimateTokensFromBytes,
-  ESTIMATED_TOKENS_PER_LINE,
-  ESTIMATED_PROMPT_OVERHEAD_TOKENS,
-} from "audit-tools/shared";
-import { lineCountForPath } from "./lineCounts.js";
-
-// Per-packet sizing / token-budget arithmetic for review packetization,
-// extracted from reviewPackets.ts. Estimates derive from manifest byte counts
-// (recorded at intake) with a line-count fallback for manually built tasks.
-
-/** A packet's fixed prompt overhead: the shared ESTIMATED_PROMPT_OVERHEAD_TOKENS. */
-export const ESTIMATED_PACKET_PROMPT_TOKENS = ESTIMATED_PROMPT_OVERHEAD_TOKENS;
-
-/**
- * Build a path → size_bytes index from a repo manifest. Byte counts are
- * recorded during intake, so this never reads files. Review packet token
- * estimates are derived from these bytes (Phase 2) instead of counted lines.
- */
+// sites-pinned: tests/audit-smoke.test.mjs
+/** Build the manifest's path-to-byte-count index without rereading files. */
 export function sizeIndexFromManifest(
   repoManifest?: { files: ReadonlyArray<{ path: string; size_bytes: number }> },
 ): Record<string, number> {
@@ -26,42 +7,4 @@ export function sizeIndexFromManifest(
   return Object.fromEntries(
     repoManifest.files.map((file) => [file.path, file.size_bytes]),
   );
-}
-
-/**
- * Estimated content tokens for a single file. Prefers a byte-based estimate
- * from `sizeIndex` (sourced from the repo manifest); falls back to the legacy
- * line-based estimate when no positive byte count is available (e.g. manually
- * built tasks in tests, or paths absent from the manifest).
- */
-function pathContentTokens(
-  owner: AuditTask | undefined,
-  path: string,
-  sizeIndex?: Record<string, number>,
-  lineIndex?: Record<string, number>,
-): number {
-  const bytes = sizeIndex?.[path];
-  if (typeof bytes === "number" && bytes > 0) {
-    return estimateTokensFromBytes(bytes);
-  }
-  return lineCountForPath(path, { task: owner, lineIndex }) * ESTIMATED_TOKENS_PER_LINE;
-}
-
-/**
- * Estimated content tokens across file paths using their first owning tasks
- * for the line fallback. Each iterable occurrence contributes; packet callers
- * provide unique paths so shared files are counted once.
- */
-export function fileGroupContentTokens(
-  filePaths: Iterable<string>,
-  firstOwnerByPath: ReadonlyMap<string, AuditTask>,
-  sizeIndex?: Record<string, number>,
-  lineIndex?: Record<string, number>,
-): number {
-  let total = 0;
-  for (const path of filePaths) {
-    const owner = firstOwnerByPath.get(path);
-    total += pathContentTokens(owner, path, sizeIndex, lineIndex);
-  }
-  return total;
 }

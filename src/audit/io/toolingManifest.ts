@@ -200,9 +200,7 @@ async function hashFileIfPresent(
  * race are reachable from a test against a temp directory: the regression this
  * guards is a listed file that is gone by read time, which no test of the
  * fixed-root `buildToolingManifest` can produce deterministically — and a
- * guard whose failure branch no test can reach is not a guard. Same reason
- * `readPackageVersion` takes a root and `killRuntimeCommandTree` takes a
- * platform.
+ * guard whose failure branch no test can reach is not a guard. The package-version reader takes a root for the same reason.
  */
 export async function hashToolingInputs(
   packageRoot: string,

@@ -53,7 +53,7 @@ export const VALID_CONFIDENCES: ReadonlySet<string> = new Set(CONFIDENCES);
 
 // ── Severity / confidence ranking ─────────────────────────────────────────────
 // Single source of truth for "how severe / how confident is this, numerically".
-// Both orchestrators previously hand-copied a `SEVERITY_RANK`/`CONFIDENCE_RANK`
+// Both orchestrators previously hand-copied a separate severity/confidence
 // table (audit findingRanks.ts, selectiveDeepening, dispatch, crossLensDedup,
 // intake, agentReflections), and the copies drifted: some were 0-based, some
 // 1-based, and intake's ordering was inverted. These functions are DERIVED from

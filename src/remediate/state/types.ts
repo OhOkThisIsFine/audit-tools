@@ -2,7 +2,7 @@ import type { AcceptedConformanceReview } from "../../shared/types/reviewIndepen
 import { ExecutableChangePlanSchema, ExecutionRequestSchema } from "../../shared/types/executionPlan.js";
 import { PlanCounterexampleSchema } from "../contractPipeline/executionPlan.js";
 export type { ExecutionRequirement, ExecutionUnit, ExecutionRequest } from "../../shared/types/executionPlan.js";
-// sites-pinned: tests/remediate/audit-read-plan-stamp.test.ts
+// sites-pinned: tests/plan-authority.test.mjs, tests/self-remediation-gate.test.mjs
 import { z } from "zod";
 import { CLOSING_ACTIONS } from "audit-tools/shared";
 import type { RemediationItemStatus } from "./itemStatus.js";
@@ -24,7 +24,7 @@ import { PER_FINDING_DISPOSITIONS } from "./disposition.js";
 /** A full-length lowercase hex SHA-256 digest. */
 const Sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
 
-// sites-pinned: tests/remediate/execution-unit-runtime.test.ts, tests/remediate/wave-simplification.test.ts
+// sites-pinned: tests/plan-authority.test.mjs, tests/self-remediation-gate.test.mjs
 const sha = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
 const key = z.string().regex(/^[a-f0-9]{64}$/);
 const note = z.string().trim().min(1).max(2000);
@@ -81,8 +81,6 @@ export interface FindingDisposition {
  * rewritten prompt/baseline self-consistent. Persisting this digest in the
  * normal remediation state gives ingestion an independent value to verify.
  */
-export const REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1 =
-  "remediation-host-handoff-record/v1alpha1" as const;
 export const REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2 =
   "remediation-host-handoff-record/v1alpha2" as const;
 export const REMEDIATION_HOST_SCOPE_SEMANTICS =

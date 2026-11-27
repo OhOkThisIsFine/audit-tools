@@ -413,7 +413,7 @@ export interface ResultMapEntry {
 /**
  * RESULT-MAP IDENTITY: the map names exactly the workload's items, once each,
  * with each item's own prompt digest and derived bound path. This was the
- * second half of the audit twin's `validateHandoffBinding`, hand-inlined there;
+ * second half of the audit twin's the retired audit adapter's validateHandoffBinding, hand-inlined there;
  * the remediate draw pins the same facts through its whole-document digest
  * instead — but the CHECK itself is the draw-independent statement of "the map
  * and the workload agree", so it lives here for whichever draw parses a map.

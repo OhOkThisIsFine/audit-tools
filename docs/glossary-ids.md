@@ -29,7 +29,7 @@ is deleted too.
 | INV-ISC-EVIDENCE-EMITTED | A `verified_already_fixed`/`refuted` terminal disposition requires a complete verification-evidence triple (method, mechanism, and confirmation) before the writer may emit it; incomplete or mechanism-contradicting evidence is refused to a non-terminal `blocked` outcome instead. | `src/shared/types/remediationOutcome.ts`; `src/remediate/phases/close.ts`; `src/remediate/state/itemStatus.ts` |
 | INV-O1 | Best-effort, deduplicated, lock-safe friction capture at workflow step boundaries. | `src/shared/friction/captureFrictionEvent.ts`; `src/shared/friction/stepBoundaryCapture.ts` |
 | INV-O2 | Immutable audit-result ledger records plus versioned intent/result baselines. | `src/audit/orchestrator/resultBaseline.ts`; `src/audit/orchestrator/intentCheckpointGate.ts`; `src/audit/types/artifactMetadata.ts` |
-| INV-PENDING-SINGLE-SOURCE | One pending-task partition feeds both audit workload emission and completion state. | `src/audit/orchestrator/pendingTasks.ts`; `src/audit/orchestrator/state.ts` |
+| INV-PENDING-SINGLE-SOURCE | Historical whole-file planner invariant; retired with the pending-task partition. Current review completion is defined over question state. | `src/audit/reporting/questionReport.ts` |
 | INV-PHASE | Lower remediation phases complete before higher phases become ready. | `src/remediate/steps/nextStep.ts` |
 | INV-PLAN-FROZEN-ESTIMATES | Historical per-file planner invariant; retired when questions replaced file tasks. | Retired |
 | INV-PLAN-PERSIST-COMPLETE | Audit planning persists the complete, snapshot-bound question plan before later workload emission. | `src/audit/orchestrator/questionPlanExecutor.ts`; `src/audit/cli/questionWorkloadBindings.ts` |

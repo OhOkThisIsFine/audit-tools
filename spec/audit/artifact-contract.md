@@ -154,8 +154,8 @@ Three rules hold for every writer:
 
 1. **The owner of IO computes it; pure builders are handed it.** The synthesis
    runner calls `readAuditReadState` (`src/shared/git.ts`) and passes the value
-   in; `buildAuditFindingsReport` and `buildAuditFindingsDeliverable` take it as a
-   required argument.
+   in; `buildQuestionAuditFindingsReport` takes it as a required input and the
+   report projection preserves the recorded value.
 2. **A later writer carries it and never re-stamps it.** The narrative pass, the
    `resynthesize` normalizer and the remediator's leftover re-emit re-state
    findings an earlier audit read, so they carry the recorded value, or state

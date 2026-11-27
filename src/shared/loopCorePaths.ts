@@ -88,7 +88,6 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/audit/systemic/aggregateMetricsDigest.ts",
   "src/audit/systemic/reviewFileMap.ts",
   "src/audit/systemic/secondOrderAdversaryPrompt.ts",
-  "src/audit/validation/ingestIssueCodes.ts",
   // Dispatch, result acceptance and closing share this reviewed-authority boundary.
   "src/remediate/contractPipeline/runtimePlanAuthority.ts",
   // Imported ONLY by nextStep.ts, so the closure rule claims it: a module every

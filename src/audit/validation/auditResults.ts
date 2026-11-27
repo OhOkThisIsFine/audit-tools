@@ -1,19 +1,15 @@
-// sites-pinned: tests/audit/host-handoff.test.ts
+// sites-pinned: tests/checked-in-artifacts.test.mjs
 // (the LENS_VERIFICATION_TAG import in `validateVerification`, and
 // `verificationAllowedPaths` — the one containment rule the host door also builds
 // its allowed set through)
 import type { AuditTask, Finding } from "../types.js";
 import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
-// The lane token is single-sourced where the steward lane is MINTED. A local
-// literal here would be a second spelling of a token this validator gates on
-// and `isLensVerificationTask` filters on — two copies that agree only until
-// one is renamed.
+// Use the same historical steward lane token as the saved-work reader.
 import { LENS_VERIFICATION_TAG } from "../orchestrator/selectiveDeepening/shared.js";
 import {
   AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
   describeValue,
   findingLocationLineIssues,
-  formatValidationIssues,
   isRecord,
   normalizeGraphPath,
   VALID_LENSES,
@@ -29,7 +25,7 @@ export type IssueSeverity = "error" | "warning";
  * per-finding zod refinement — it needs cross-record context (the declared
  * coverage, the zero/positive finding count) or the assigned task. The dispatch
  * prompt's contract block renders every `statement` verbatim
- * (`findingContractPromptLines`), and each validator site below emits its issue
+ * (the retired audit adapter's findingContractPromptLines), and each validator site below emits its issue
  * message FROM its registry entry, so the prompt the tool generates states
  * exactly what the validator enforces: one source, not two.
  *
@@ -37,7 +33,7 @@ export type IssueSeverity = "error" | "warning";
  * enforced (the finding/location contracts in `audit-tools/shared`, which the
  * prompt renders from `WorkerFindingSchema`).
  */
-export const AUDIT_RESULT_RULES = [
+const AUDIT_RESULT_RULES = [
   {
     id: "affected_span_within_coverage",
     statement:
@@ -121,7 +117,7 @@ export function normalizeCoveragePath(path: string): string {
  * set, built from the path sources BOTH doors have.
  *
  * Two doors judge this property: the host-result boundary admits a steward
- * submission's `verification` (`verificationContractFailure`,
+ * submission's `verification` (the retired audit adapter's verificationContractFailure,
  * `src/audit/cli/dispatch/hostHandoff.ts`) and the batch validator rejects a
  * result that reaches `validateAuditResults` (`validateVerification` here). They
  * were built separately — one from the binding's `file_line_counts` keys plus
@@ -681,7 +677,7 @@ function validateVerification(
   // against a stated reason. Keyed on the TASK's policy rather than on the tag,
   // because the policy is the field that made an unopened file legal. With no
   // task in hand the policy is unknown, so no claim is made — the host door
-  // (`verificationContractFailure`) is the boundary that always has the binding.
+  // (the retired audit adapter's verificationContractFailure) is the boundary that always has the binding.
   if (task?.coverage_policy === "selective") {
     validateRequiredStringField(
       value.selection_rationale,
@@ -1120,44 +1116,6 @@ function normalizeValidationInputs(
 }
 
 /**
- * The PER-RESULT half of {@link validateAuditResults}, exported for callers
- * that must apply exactly the same rules to ONE result before admitting it —
- * the host-handoff ingest validates each converted result BEFORE writing it to
- * the accepted pair, so a result the batch gate would later reject is never
- * accepted in the first place. One rule body: this delegates to the same
- * internal `validateSingleAuditResult` the batch walk uses, so the two cannot
- * drift.
- *
- * Returns the issues (possibly empty); it never throws and never writes the
- * batch summary to stderr — a single-result caller surfaces outcomes in its own
- * vocabulary.
- */
-export function validateOneAuditResult(
-  result: unknown,
-  tasks: AuditTask[],
-  options: ValidateAuditResultOptions = {},
-): AuditResultIssue[] {
-  const { taskMap, normLineIndex, normBoundary } = normalizeValidationInputs(
-    tasks,
-    options,
-  );
-  const issues: AuditResultIssue[] = [];
-  // Per-result LABEL MODE: there is no enclosing batch, so field paths carry no
-  // synthetic `results[0]` index — the task id disambiguates.
-  validateSingleAuditResult(
-    result,
-    0,
-    "result",
-    taskMap,
-    tasks,
-    normLineIndex,
-    normBoundary,
-    issues,
-  );
-  return issues;
-}
-
-/**
  * Validate a single result record; push issues into `issues`.
  *
  * `rootLabel` is the field-path prefix for errors about the record ITSELF:
@@ -1187,10 +1145,7 @@ function validateSingleAuditResult(
   const taskId = issueTaskId(result, rootLabel);
   const task = taskMap.get(taskId);
 
-  // The assigned set enters the join already normalized — an un-normalized
-  // `file_paths` entry (the shape `selectiveDeepening`'s `pathsForFinding`
-  // produces by copying a worker string verbatim into a followup task) is a
-  // surface difference, never a different file.
+  // Normalize the assigned set before matching result paths.
   const taskAssignedPaths = new Set<string>();
   if (task) {
     for (const fp of task.file_paths) {
@@ -1248,14 +1203,4 @@ export function validateAuditResults(
   }
 
   return issues;
-}
-
-export function formatAuditResultIssues(issues: AuditResultIssue[]): string {
-  return formatValidationIssues(
-    issues.map((issue) => ({
-      path: `${issue.task_id} / ${issue.field}`,
-      message: issue.message,
-      severity: issue.severity,
-    })),
-  );
 }

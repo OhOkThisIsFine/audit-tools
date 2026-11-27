@@ -1,12 +1,5 @@
 // sites-pinned: tests/audit/task-affinity-graph.test.ts, tests/audit/partition-task-graph.test.ts
 import { z } from "zod";
-import type { AuditTask } from "../types.js";
-import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { toPosixPath } from "audit-tools/shared";
-import {
-  canonicalizeAuditTasks,
-  canonicalizeTaskAffinityGraph,
-} from "../../shared/affinityArtifacts.js";
 
 // ---------------------------------------------------------------------------
 // Task-affinity graph for semantic workload coherence.
@@ -29,7 +22,6 @@ export const TaskAffinityEdgeKindSchema = z.enum([
   "call_adjacent",
   "same_dir",
 ]);
-export type TaskAffinityEdgeKind = z.infer<typeof TaskAffinityEdgeKindSchema>;
 
 export const TaskAffinityNodeSchema = z
   .object({
@@ -43,7 +35,6 @@ export const TaskAffinityNodeSchema = z
     risk_estimate: z.number(),
   })
   .strict();
-export type TaskAffinityNode = z.infer<typeof TaskAffinityNodeSchema>;
 
 export const TaskAffinityEdgeSchema = z
   .object({
@@ -58,7 +49,6 @@ export const TaskAffinityEdgeSchema = z
     reason: z.string().optional(),
   })
   .strict();
-export type TaskAffinityEdge = z.infer<typeof TaskAffinityEdgeSchema>;
 
 export const TaskAffinityGraphSchema = z
   .object({
@@ -97,166 +87,3 @@ export const TaskAffinityGraphSchema = z
     }
   });
 export type TaskAffinityGraph = z.infer<typeof TaskAffinityGraphSchema>;
-
-// Per-kind base weights. Tuned so stronger structural coupling packs first.
-const KIND_WEIGHT: Record<TaskAffinityEdgeKind, number> = {
-  shared_file: 0.9,
-  cross_lens_same_file: 0.85,
-  same_flow: 0.6,
-  same_unit: 0.55,
-  call_adjacent: 0.4,
-  same_dir: 0.35,
-};
-// Small additive nudge when two related tasks also share a lens (a single agent
-// reviewing one lens benefits from shared mental model). Never a standalone edge.
-const SAME_LENS_BONUS = 0.05;
-
-/** The directory of an already-POSIX path; `""` for a root-level file. */
-function dirOf(path: string): string {
-  const idx = path.lastIndexOf("/");
-  return idx === -1 ? "" : path.slice(0, idx);
-}
-
-function flowIdsOf(task: AuditTask): Set<string> {
-  const out = new Set<string>();
-  for (const tag of task.tags ?? []) {
-    if (tag.startsWith("critical_flow:")) out.add(tag.slice("critical_flow:".length));
-  }
-  return out;
-}
-
-function looksLikePath(value: string): boolean {
-  return value.includes("/") || value.includes("\\");
-}
-
-/**
- * Build a file → adjacent-files map from the code-structure graph bundle's
- * import/call/reference edges. Only path-like endpoints are used, so this
- * degrades gracefully to "no call-adjacency edges" when the bundle's nodes are
- * symbol ids rather than file paths.
- */
-function buildFileAdjacency(graphBundle?: GraphBundle): Map<string, Set<string>> {
-  const adjacency = new Map<string, Set<string>>();
-  if (!graphBundle) return adjacency;
-  const edgeGroups: Array<GraphEdge[] | undefined> = [
-    graphBundle.graphs.imports,
-    graphBundle.graphs.calls,
-    graphBundle.graphs.references,
-  ];
-  const link = (a: string, b: string) => {
-    if (!adjacency.has(a)) adjacency.set(a, new Set());
-    adjacency.get(a)!.add(b);
-  };
-  for (const edges of edgeGroups) {
-    if (!Array.isArray(edges)) continue;
-    for (const edge of edges) {
-      if (!edge || !looksLikePath(edge.from) || !looksLikePath(edge.to)) continue;
-      const a = toPosixPath(edge.from);
-      const b = toPosixPath(edge.to);
-      if (a === b) continue;
-      link(a, b);
-      link(b, a);
-    }
-  }
-  return adjacency;
-}
-
-function intersects<T>(a: Set<T>, b: Iterable<T>): boolean {
-  for (const item of b) if (a.has(item)) return true;
-  return false;
-}
-
-/**
- * Build the task-affinity graph from frozen tasks. Each task
- * must already carry `token_estimate` and `risk_estimate` (planning freezes
- * them); missing values default to 0 so the graph is always well-formed.
- */
-export function buildTaskAffinityGraph(
-  tasks: ReadonlyArray<AuditTask>,
-  options: { graphBundle?: GraphBundle } = {},
-): TaskAffinityGraph {
-  const canonicalTasks = canonicalizeAuditTasks(tasks);
-  const nodes: TaskAffinityNode[] = canonicalTasks.map((task) => ({
-    task_id: task.task_id,
-    unit_id: task.unit_id,
-    lens: task.lens,
-    file_paths: task.file_paths,
-    token_estimate: task.token_estimate ?? 0,
-    risk_estimate: task.risk_estimate ?? 0,
-  }));
-
-  const adjacency = buildFileAdjacency(options.graphBundle);
-  // Precompute per-task derived sets to keep the O(n^2) pass cheap. Each path
-  // is normalized once and every set below reads the normalized form.
-  const posixPaths = canonicalTasks.map((t) => t.file_paths.map(toPosixPath));
-  const fileSets = posixPaths.map((paths) => new Set(paths));
-  const dirSets = posixPaths.map((paths) => new Set(paths.map(dirOf)));
-  const flowSets = canonicalTasks.map((t) => flowIdsOf(t));
-  const neighborSets = posixPaths.map((paths) => {
-    const out = new Set<string>();
-    for (const p of paths) {
-      const adj = adjacency.get(p);
-      if (adj) for (const n of adj) out.add(n);
-    }
-    return out;
-  });
-
-  const edges: TaskAffinityEdge[] = [];
-  for (let i = 0; i < canonicalTasks.length; i++) {
-    for (let j = i + 1; j < canonicalTasks.length; j++) {
-      const kinds: TaskAffinityEdgeKind[] = [];
-
-      const sharesFile = intersects(fileSets[i], fileSets[j]);
-      if (sharesFile) {
-        // Same file(s), different lens → a single agent could cover both lenses.
-        kinds.push(
-          canonicalTasks[i].lens !== canonicalTasks[j].lens ? "cross_lens_same_file" : "shared_file",
-        );
-      }
-      if (intersects(flowSets[i], flowSets[j])) {
-        kinds.push("same_flow");
-      }
-      if (canonicalTasks[i].unit_id === canonicalTasks[j].unit_id) kinds.push("same_unit");
-      // The adjacency is symmetric (`link(a, b); link(b, a)`), so i's neighbors
-      // meet j's files exactly when j's neighbors meet i's files.
-      if (intersects(neighborSets[i], fileSets[j])) {
-        kinds.push("call_adjacent");
-      }
-      if (intersects(dirSets[i], dirSets[j])) kinds.push("same_dir");
-
-      if (kinds.length === 0) continue;
-
-      let dominant = kinds[0];
-      let weight = KIND_WEIGHT[dominant];
-      for (const k of kinds) {
-        if (KIND_WEIGHT[k] > weight) {
-          weight = KIND_WEIGHT[k];
-          dominant = k;
-        }
-      }
-      const reasons: string[] = [...kinds];
-      if (canonicalTasks[i].lens === canonicalTasks[j].lens) {
-        weight = Math.min(1, weight + SAME_LENS_BONUS);
-        reasons.push("same_lens");
-      }
-
-      const [from, to] =
-        canonicalTasks[i].task_id < canonicalTasks[j].task_id
-          ? [canonicalTasks[i].task_id, canonicalTasks[j].task_id]
-          : [canonicalTasks[j].task_id, canonicalTasks[i].task_id];
-      edges.push({
-        from,
-        to,
-        kind: dominant,
-        weight: Math.round(weight * 1000) / 1000,
-        reason: reasons.join(","),
-      });
-    }
-  }
-
-  return canonicalizeTaskAffinityGraph({
-    schema_version: "task-affinity-graph/v1",
-    nodes,
-    edges,
-  });
-}

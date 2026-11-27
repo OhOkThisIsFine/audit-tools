@@ -103,8 +103,7 @@ export type IssueRemedy = "wait" | "repair" | "none" | "operator";
  * The remedy of every SHARED submission code. A draw that adds its own codes
  * builds its own `Record<ItsCodeUnion, IssueRemedy>` by spreading this one — the
  * record type is what makes a new code state its remedy to compile, rather than
- * defaulting into whichever section a filter happens to leave it in (the audit
- * draw's is `AUDIT_INGEST_ISSUE_REMEDY`).
+ * defaulting into whichever section a filter happens to leave it in.
  */
 export const SUBMISSION_ISSUE_REMEDY: Readonly<
   Record<SubmissionIssueCode, IssueRemedy>

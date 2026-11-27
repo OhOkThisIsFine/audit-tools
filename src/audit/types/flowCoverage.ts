@@ -6,7 +6,6 @@ export const FLOW_COVERAGE_STATUSES = [
   "complete",
 ] as const;
 export const FlowCoverageStatusSchema = z.enum(FLOW_COVERAGE_STATUSES);
-export type FlowCoverageStatus = z.infer<typeof FlowCoverageStatusSchema>;
 
 /** Coverage for one critical flow across the lenses the audit expects to see. */
 export const FlowCoverageRecordSchema = z

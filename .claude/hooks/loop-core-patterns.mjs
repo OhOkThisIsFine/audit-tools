@@ -36,7 +36,6 @@ export const LOOP_CORE_PATTERNS = [
   "src/audit/systemic/aggregateMetricsDigest.ts",
   "src/audit/systemic/reviewFileMap.ts",
   "src/audit/systemic/secondOrderAdversaryPrompt.ts",
-  "src/audit/validation/ingestIssueCodes.ts",
   "src/remediate/contractPipeline/runtimePlanAuthority.ts",
   "src/remediate/droppedFindingsRecord.ts",
   "src/remediate/intent/intentPersistence.ts",

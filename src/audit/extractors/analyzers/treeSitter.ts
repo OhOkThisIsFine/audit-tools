@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
  * floor. The runtime is initialised once and parsed grammars are cached.
  */
 
-// sites-pinned: tests/audit/tree-sitter-language-cache.test.ts, tests/audit/tree-sitter-batch.test.ts
+// sites-pinned: tests/audit-smoke.test.mjs
 // Minimal structural typings — web-tree-sitter is an optional dependency, so we
 // avoid a hard type import and model only the surface the analyzers use.
 export interface TsNode {
@@ -50,20 +50,6 @@ interface ParserModule {
 }
 
 const requireFromHere = createRequire(import.meta.url);
-
-let _degradationCount = 0;
-
-/**
- * Return the number of times tree-sitter fell back to the regex floor since
- * process start (or since the last `__resetTreeSitterForTests` call). Each
- * distinct failure path (import failure, init failure, grammar load failure,
- * parser instantiation failure) increments the counter once. A caller can
- * snapshot this before and after a batch parse pass to detect systemic
- * degradation without scraping stderr.
- */
-export function getTreeSitterDegradationCount(): number {
-  return _degradationCount;
-}
 
 // The parser module is resolved per `dependencyPath`: a call with a different
 // dependencyPath must resolve its own module rather than reusing the first
@@ -102,7 +88,6 @@ async function importParserModule(
         return resolved;
       }
     } catch (e) {
-      _degradationCount += 1;
       process.stderr.write(
         `[audit-code] tree-sitter: failed to import '${specifier}': ${(e as Error).message ?? String(e)}\n`,
       );
@@ -129,7 +114,7 @@ async function ensureInit(parserModule: ParserModule): Promise<boolean> {
     cached = parserModule.Parser.init()
       .then(() => true)
       .catch((e: unknown) => {
-        _degradationCount += 1;
+
         process.stderr.write(
           `[audit-code] tree-sitter: Parser.init() failed: ${(e as Error).message ?? String(e)}\n`,
         );
@@ -179,7 +164,6 @@ async function loadLanguage(
     moduleMap.set(grammar, language);
     return language;
   } catch (e) {
-    _degradationCount += 1;
     process.stderr.write(
       `[audit-code] tree-sitter: failed to load grammar '${grammar}' from '${grammarPath}': ${(e as Error).message ?? String(e)}\n`,
     );
@@ -211,18 +195,9 @@ export async function getTreeSitterParser(
     }
     return parser;
   } catch (e) {
-    _degradationCount += 1;
     process.stderr.write(
       `[audit-code] tree-sitter: failed to instantiate parser for grammar '${grammar}': ${(e as Error).message ?? String(e)}\n`,
     );
     return undefined;
   }
-}
-
-/** Test seam: reset the memoised runtime/grammar caches and degradation counter. */
-export function __resetTreeSitterForTests(): void {
-  moduleCache.clear();
-  initCache.clear();
-  languageCache.clear();
-  _degradationCount = 0;
 }

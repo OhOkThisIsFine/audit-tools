@@ -2,7 +2,6 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
-import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterExtractionMerged, CharterComparisonSubmission, CharterFidelitySubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { IntentEquivalenceVerdictSubmission } from "./intentEquivalenceExecutor.js";
@@ -42,7 +41,6 @@ export interface AdvanceAuditOptions {
   /** Path → size_bytes (from the repo manifest); drives byte-based packet token sizing. */
   sizeIndex?: Record<string, number>;
   auditResults?: AuditResult[];
-  runtimeValidationUpdates?: RuntimeValidationReport;
   /** Single imported tool payload (one file = one tool); the import executor upserts it into the bundle's per-tool array. */
   externalAnalyzerResults?: ExternalAnalyzerResults;
   /** Host-supplied synthesis narrative; merged by synthesis_narrative_executor. */

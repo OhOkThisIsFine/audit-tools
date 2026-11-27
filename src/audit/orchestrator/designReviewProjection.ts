@@ -5,7 +5,7 @@
  *
  * The design-review passes (contract-assessment + conceptual-design-critique)
  * read a structural context assembled from several intake/structure artifacts
- * (`renderSharedStructuralContext` in `designReviewPrompt.ts`): the file
+ * (the former renderSharedStructuralContext helper in `designReviewPrompt.ts`): the file
  * inventory, unit boundaries, dependency graph, externally-reachable surfaces,
  * critical flows, the risk register, and the deterministic structural findings.
  * When any of those upstreams change, the review's verdict can go stale.

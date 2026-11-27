@@ -1,6 +1,5 @@
 // sites-pinned: tests/audit/review-packet-graph-context.test.ts, tests/audit/review-packets.test.ts
 import type { GraphEdge } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 
 // Graph-edge primitives for packet presentation and quality metrics: scoring,
@@ -29,21 +28,6 @@ export function graphEdgeConfidence(edge: GraphEdge): number {
 
 export function isConcreteGraphEdge(edge: GraphEdge): boolean {
   return edge.kind !== "heuristic-container-edge";
-}
-
-/**
- * Stable edge ordering: confidence descending, then content-derived tiebreak.
- * Lives beside `graphEdgeConfidence` because it sorts by it — co-located so the
- * comparator's delta arithmetic cannot drift away from the score it reads.
- */
-export function compareGraphEdges(a: GraphEdge, b: GraphEdge): number {
-  const confidenceDelta = graphEdgeConfidence(b) - graphEdgeConfidence(a);
-  if (confidenceDelta !== 0) return confidenceDelta;
-  return (
-    compareCodeUnits(a.from, b.from) ||
-    compareCodeUnits(a.to, b.to) ||
-    compareCodeUnits(a.kind ?? "", b.kind ?? "")
-  );
 }
 
 export interface GraphDegreeIndex {

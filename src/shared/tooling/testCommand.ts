@@ -3,7 +3,7 @@ import { closeSync, existsSync, lstatSync, openSync, readFileSync, readSync, sta
 import { join } from "node:path";
 
 // Single project-command discovery shared by both orchestrators. Before
-// Phase 0 the auditor (`discoverRuntimeValidationCommand`) and the remediator
+// Phase 0 the retired audit runtime validator and the remediator
 // (inline in `plan.ts`) each detected the test command separately, and only
 // the auditor understood Go and Python. `discoverProjectCommands` unifies them
 // and returns argv arrays so callers never re-parse a command string.

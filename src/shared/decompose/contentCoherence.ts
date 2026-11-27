@@ -77,7 +77,7 @@ export interface ContentCoherencePolicy {
  * legacy tests/audit/partition-task-graph.test.ts.
  *
  * Measurement (a lap-local harness: the live repo's own tracked
- * files through the archived task planner → `buildTaskAffinityGraph` →
+ * files through the archived task planner → the historical task-affinity builder →
  * `buildContentCoherenceTrace`, then three further real repos):
  *
  * | repo                  | tasks | units | components | largest |

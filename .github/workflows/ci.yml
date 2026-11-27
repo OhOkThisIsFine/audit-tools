@@ -138,7 +138,6 @@ on:
       - "src/audit/systemic/reviewFileMap.ts"
       - "src/audit/systemic/secondOrderAdversaryPrompt.ts"
       - "src/audit/types/conceptualAdjudication.ts"
-      - "src/audit/validation/ingestIssueCodes.ts"
       - "src/remediate/contractPipeline/executionPlan.ts"
       - "src/remediate/contractPipeline/runtimePlanAuthority.ts"
       - "src/remediate/droppedFindingsRecord.ts"

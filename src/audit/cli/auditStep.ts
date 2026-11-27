@@ -24,7 +24,7 @@ import type { AdvanceAuditResult } from "../orchestrator/advanceTypes.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
 import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
-import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
+import { sizeIndexFromManifest } from "../orchestrator/reviewPacketSizing.js";
 import { laneSubmissionPath } from "./laneSubmissions.js";
 import { buildLineIndex } from "./lineIndex.js";
 import { nextStepCommand } from "./prompts.js";

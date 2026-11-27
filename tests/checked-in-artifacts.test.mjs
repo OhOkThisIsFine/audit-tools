@@ -15,3 +15,10 @@ test("the checked-in file lock interface matches its public exports", async () =
   const tracked = await readFile(new URL("../scripts/shared/filelock-export-surface.generated.json", import.meta.url), "utf8");
   assert.equal(LF(tracked), renderSurfacePin(extractFileLockExportSurface()));
 });
+
+test("legacy worker schemas remain checked tooling inputs after question review replaced their producers", async () => {
+  const generator = await readFile(new URL("../scripts/audit/generate-schemas.mjs", import.meta.url), "utf8");
+  assert.match(generator, /src\/audit\/contracts\/workerSchemas\.ts/);
+  const { LENS_VERIFICATION_TAG } = await import("../dist/audit/orchestrator/selectiveDeepening/shared.js");
+  assert.equal(LENS_VERIFICATION_TAG, "lens_verification");
+});

@@ -3,7 +3,7 @@ import { compareCodeUnits, pathMatchesPrefix, stableStringify } from "audit-tool
 import { isProjectRulePath } from "../../orchestrator/projectRuleEvidence.js";
 import { analyzerReceiptFingerprint } from "../../orchestrator/questionEvidence.js";
 import { DISCONFIRMATION_PART_ID, questionReopenKey } from "../../../shared/types/reviewQuestion.js";
-import type { CurrentQuestionDependencies, ReviewDependency, ReviewAcceptedAnswer, ReviewAdjudication, ReviewAnswer, ReviewAssignment, ReviewEvidence, ReviewQuestion, ReviewSourceRef, ReviewSubmission } from "../../../shared/types/reviewQuestion.js";
+import type { CurrentQuestionDependencies, ReviewDependency, ReviewAcceptedAnswer, ReviewAnswer, ReviewAssignment, ReviewEvidence, ReviewQuestion, ReviewSourceRef, ReviewSubmission } from "../../../shared/types/reviewQuestion.js";
 
 export interface AuditQuestionBinding {
   question: ReviewQuestion;
@@ -166,25 +166,6 @@ export function acceptQuestionReview(answers: readonly ReviewAcceptedAnswer[], b
       ...submission.evidence_ids.flatMap((id) => evidence.get(id)?.dependencies ?? []),
     ].map((dependency) => [dependencyIdentity([dependency]), dependency])).values()],
   } };
-}
-
-export function validateQuestionAdjudication(answers: readonly ReviewAcceptedAnswer[], existing: readonly ReviewAdjudication[],
-  adjudication: ReviewAdjudication, question: ReviewQuestion, dependencies: ReviewAcceptedAnswer["dependency_bindings"],
-): "replay" | "accepted" {
-  const previous = existing.find((item) => item.adjudication_id === adjudication.adjudication_id);
-  if (previous) {
-    if (stableStringify(previous) !== stableStringify(adjudication)) throw new Error("Conflicting reuse of an adjudication ID");
-    return "replay";
-  }
-  const currentIds = new Set(projectQuestionReview(question, answers, dependencies).current.map(({ submission }) => submission.submission_id));
-  if (adjudication.question_id !== question.question_id || adjudication.revision_id !== question.revision_id ||
-      adjudication.snapshot_id !== question.snapshot_id || new Set(adjudication.submission_ids).size !== adjudication.submission_ids.length ||
-      adjudication.submission_ids.some((id) => !currentIds.has(id)) ||
-      adjudication.selected_submission_ids.some((id) => !adjudication.submission_ids.includes(id)) ||
-      (adjudication.decision === "resolved" && adjudication.selected_submission_ids.length === 0)) {
-    throw new Error("Adjudication must name the current question and the accepted answers it actually resolves");
-  }
-  return "accepted";
 }
 
 function dependencyIdentity(dependencies: Readonly<ReviewAcceptedAnswer["dependency_bindings"]>): string {

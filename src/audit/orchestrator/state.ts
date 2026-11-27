@@ -351,7 +351,7 @@ export function deriveAuditState(
   // (`structureExecutors.ts`). So a resumed pre-split run leaves BOTH
   // obligations actionable, is re-asked for each current pass, and its
   // `review_findings` never re-enter the merged report through
-  // `mergeFindings`.
+  // the former whole-file result merger.
   //
   // What is deliberately NOT done is deleting the stale artifacts from disk: the
   // run was paid for, the old findings stay readable for a human, and the

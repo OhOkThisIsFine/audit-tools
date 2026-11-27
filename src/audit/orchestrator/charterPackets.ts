@@ -148,7 +148,7 @@ export function memberDependencyEdgeLines(bundle: ArtifactBundle): string[] {
  * channel what the file declares without leaking how it works.
  *
  * It takes NUMBERED lines and returns numbered lines, so a declaration keeps the
- * line it actually occupies in its own file. Feeding it `stripCommentText` output
+ * line it actually occupies in its own file. Feeding it the former stripCommentText helper output
  * would number every declaration against a collapsed view — a confidently wrong
  * citation, which is worse than none.
  */

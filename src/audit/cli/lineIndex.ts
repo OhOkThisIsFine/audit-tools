@@ -1,9 +1,8 @@
 // sites-pinned: tests/audit/line-index-measurements.test.ts
 import { resolve } from "node:path";
 import { countLines } from "./args.js";
-import type { AuditTask, RepoManifest } from "../types.js";
+import type { RepoManifest } from "../types.js";
 import { isFileMissingError } from "audit-tools/shared";
-import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
 import { uniqueSorted } from "../../shared/compareCodeUnits.js";
 import { errorMessage } from "../../shared/io/json.js";
 
@@ -25,8 +24,7 @@ const LINE_COUNT_BATCH_SIZE = 25;
  * `false` by IEEE 754 definition — an unmeasured entry can never be silently
  * read as a genuine empty file by an unaware call site. A schema-validated
  * contract field that can only ever hold a real count (`AuditTask.file_line_counts`,
- * `z.number().int().min(0)`) must never persist this value — see
- * `addFileLineCountHints` below omits unmeasured keys when persisting hints.
+ * `z.number().int().min(0)`) must never persist this value.
  */
 export const UNMEASURED_LINE_COUNT = Number.NaN;
 
@@ -98,27 +96,4 @@ export async function buildLineIndexForPaths(
 ): Promise<Record<string, number>> {
   // Only this adapter deduplicates and sorts; keys still retain raw spelling.
   return measureLinePaths(root, uniqueSorted(paths));
-}
-
-export async function addFileLineCountHints(
-  root: string,
-  tasks: AuditTask[],
-): Promise<AuditTask[]> {
-  const lineIndex = await buildLineIndexForPaths(
-    root,
-    tasks.flatMap((task) => task.file_paths),
-  );
-  return canonicalizeAuditTasks(
-    tasks.map((task) => ({
-      ...task,
-      file_line_counts: Object.fromEntries(
-        task.file_paths.flatMap((path) => {
-          const measured = lineIndex[path];
-          // Absent means this artifact has no measurement; a real zero wins
-          // over fallbacks, so never manufacture one for a failed read.
-          return measured === undefined || isUnmeasuredLineCount(measured) ? [] : [[path, measured]];
-        }),
-      ),
-    })),
-  );
 }

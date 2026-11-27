@@ -173,7 +173,7 @@ export interface FindingLocationLineIssue {
  *
  * The audit-results validator walks it over raw per-location records: a
  * persisted or re-validated result carries the TOOL's derived lines (a reviewer
- * may not supply any — `WORKER_REFUSED_LOCATION_FIELDS`), and this is what
+ * may not supply any), and this is what
  * catches a span corrupted after derivation.
  *
  * The fields stay `unknown`: callers hold everything from fully-parsed

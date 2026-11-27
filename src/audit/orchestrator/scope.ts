@@ -4,12 +4,10 @@ import {
   compareCodeUnits,
   gitRefExists,
   isGitRepo,
-  pathMatchesPrefix,
   readChangedFiles,
 } from "audit-tools/shared";
 import type { GraphBundle } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import type { CoverageMatrix } from "../types.js";
 import type { AuditScopeBudget, AuditScopeManifest } from "../types/auditScope.js";
 import { buildDispositionMap } from "../extractors/disposition.js";
 import { buildPathLookup } from "../extractors/graph.js";
@@ -275,83 +273,4 @@ export async function resolveAuditScope(
     graphBundle: input.bundle.graph_bundle,
     budget: input.budget,
   });
-}
-
-/**
- * Apply a delta scope to a freshly-built coverage matrix. In-scope files (seeds
- * + expanded neighbours) keep their fresh `pending` status to be re-audited.
- * Out-of-scope files inherit a prior `complete` record verbatim when present (so
- * previously-finished work is preserved, not re-run), and are otherwise excluded
- * from this run with `classification_status: "out_of_scope_delta"`. Deterministic
- * exclusions (non-auditable/trivial) are left untouched. A full scope is a no-op.
- */
-export function applyScopeToCoverage(
-  coverage: CoverageMatrix,
-  scope: AuditScopeManifest,
-  priorCoverage?: CoverageMatrix,
-): CoverageMatrix {
-  if (scope.mode !== "delta") {
-    return coverage;
-  }
-  const inScope = new Set<string>([
-    ...scope.seed_files,
-    ...scope.expanded_files,
-  ]);
-  const priorByPath = new Map(
-    (priorCoverage?.files ?? []).map((file) => [file.path, file]),
-  );
-
-  for (const file of coverage.files) {
-    if (file.audit_status === "excluded") {
-      continue;
-    }
-    if (inScope.has(file.path)) {
-      continue;
-    }
-    const prior = priorByPath.get(file.path);
-    if (prior && prior.audit_status === "complete") {
-      file.required_lenses = [...prior.required_lenses];
-      file.completed_lenses = [...prior.completed_lenses];
-      file.unit_ids = [...prior.unit_ids];
-      file.audit_status = "complete";
-      file.classification_status = prior.classification_status;
-    } else {
-      file.required_lenses = [];
-      file.completed_lenses = [];
-      file.unit_ids = [];
-      file.audit_status = "excluded";
-      file.classification_status = "out_of_scope_delta";
-    }
-  }
-  return coverage;
-}
-
-/**
- * Apply the intent checkpoint's `excluded_scope` to a coverage matrix: any file
- * whose path matches an exclusion (exact or directory-prefix) is marked excluded
- * so it never becomes an audit task. The user's exclusions layer on top of the
- * deterministic disposition — they catch scope pollution the automatic pass
- * missed. Returns the newly-excluded paths (for the run summary / report); a
- * checkpoint with no exclusions is a no-op.
- */
-export function applyIntentExclusionsToCoverage(
-  coverage: CoverageMatrix,
-  excludedScope: Array<{ path: string; reason: string }> | undefined,
-): string[] {
-  if (!excludedScope || excludedScope.length === 0) return [];
-  const excluded: string[] = [];
-  for (const file of coverage.files) {
-    if (file.audit_status === "excluded") continue;
-    if (
-      excludedScope.some((entry) => pathMatchesPrefix(file.path, entry.path))
-    ) {
-      file.required_lenses = [];
-      file.completed_lenses = [];
-      file.unit_ids = [];
-      file.audit_status = "excluded";
-      file.classification_status = "out_of_scope_intent";
-      excluded.push(file.path);
-    }
-  }
-  return excluded;
 }

@@ -1,13 +1,6 @@
 // sites-pinned: tests/audit/review-run-lifecycle.test.ts
 import type { AuditState } from "../types/auditState.js";
 
-export function buildManualReviewBlocker(emittedStepKind?: string): string {
-  if (emittedStepKind !== undefined) {
-    return `The current step is ${emittedStepKind}; follow its prompt. Scoped-inspection work is also ready for host execution beside it: complete any available bound work items, write their result contracts, then run next-step again.`;
-  }
-  return "Semantic-review work is ready for host execution. Complete any available bound work items, write their result contracts, then run next-step again.";
-}
-
 export function buildBlockedAuditState(params: {
   state: AuditState;
   obligationId: string | null;

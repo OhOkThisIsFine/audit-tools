@@ -14,9 +14,6 @@ export const RuntimeValidationStatusSchema = z.enum([
   "inconclusive",
   "not_required",
 ]);
-export type RuntimeValidationStatus = z.infer<
-  typeof RuntimeValidationStatusSchema
->;
 
 /** A deterministic runtime check queued after static review highlights risk. */
 export const RuntimeValidationTaskSchema = z
@@ -61,9 +58,6 @@ export const RuntimeValidationResultSchema = z
     }).strict().optional(),
   })
   .strict();
-export type RuntimeValidationResult = z.infer<
-  typeof RuntimeValidationResultSchema
->;
 
 /** Persisted runtime validation outcomes keyed by generated task id. */
 export const RuntimeValidationReportSchema = z

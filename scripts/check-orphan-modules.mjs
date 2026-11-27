@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sites-pinned: tests/shared/orphan-modules-relative-import.test.ts
+// sites-pinned: tests/checked-in-artifacts.test.mjs
 // Orphan-module gate: every src/**/*.ts file must be REACHABLE from a
 // production root through literal import edges.
 //
@@ -63,6 +63,7 @@ const repoRoot = join(import.meta.dirname, "..");
 
 /** Files reachability may not flag, each with its reason. */
 const ORPHAN_ALLOW = new Map([
+  ["src/audit/contracts/workerSchemas.ts", "Direct TypeScript input to scripts/audit/generate-schemas.mjs; its checked-in schemas ship even though the production CLI does not import this generator input."],
   // A row here is a file kept alive by a wiring the resolver cannot see,
   // never a parked deletion.
   [
