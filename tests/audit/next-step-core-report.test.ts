@@ -113,6 +113,12 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
       ) + "\n",
     );
 
+    // External analyzers close their evidence assessment before native graph
+    // enrichment can offer an optional local TypeScript install.
+    const calibration = JSON.parse((await runWrapper(["next-step"], { cwd: root, env })).stdout);
+    expect(calibration.step_kind).toBe("analyzer_calibration");
+    expect(await answerHostPause(calibration)).toBe(true);
+
     const proposed = JSON.parse(
       (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );

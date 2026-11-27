@@ -3,6 +3,7 @@ import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { answerHostPause } from "./helpers/step-driver.js";
 import { packageVersion, repoRoot } from "./helpers/wrapper-harness.js";
 import { writeFixtureRepo } from "./helpers/fixture.mjs";
 import type { CriticalFlow } from "audit-tools/shared";
@@ -98,13 +99,15 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     await writeFixtureRepo(root);
     await persistFallbackState(root, artifactsDir);
 
-    // First next-step pauses on the critical-flow fallback host gate.
-    const paused: CriticalFlowFallbackStep = JSON.parse(
-      (await runWrapper(
-        ["next-step"],
-        { cwd: root, env: { AUDIT_CODE_INVOCATION: JSON.stringify(["node", join(repoRoot, "audit-code.mjs"), "--expect-version=old", "--expect-version=older"]) } },
-      )).stdout,
-    );
+    const options = { cwd: root, env: {
+      AUDIT_CODE_INVOCATION: JSON.stringify(["node", join(repoRoot, "audit-code.mjs"), "--expect-version=old", "--expect-version=older"]),
+    } };
+    const calibration = JSON.parse((await runWrapper(["next-step"], options)).stdout);
+    expect(calibration.step_kind).toBe("analyzer_calibration");
+    expect(await answerHostPause(calibration)).toBe(true);
+
+    // After calibration the pending critical-flow fallback remains a host gate.
+    const paused: CriticalFlowFallbackStep = JSON.parse((await runWrapper(["next-step"], options)).stdout);
     expect(paused.step_kind).toBe("critical_flow_fallback");
     expect(paused.status).toBe("ready");
     const resultsPath = paused.artifact_paths.critical_flow_fallback_results;
@@ -207,6 +210,10 @@ test.concurrent("next-step does not re-ask the critical-flow fallback once a sub
       laneSubmissionPath(artifactsDir, GATE_LANES.critical_flow_fallback),
       JSON.stringify({ flows: [] }, null, 2) + "\n",
     );
+
+    const calibration = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
+    expect(calibration.step_kind).toBe("analyzer_calibration");
+    expect(await answerHostPause(calibration)).toBe(true);
 
     const step: CriticalFlowFallbackStep = JSON.parse(
       (await runWrapper(
