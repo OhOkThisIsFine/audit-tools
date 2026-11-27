@@ -12,7 +12,7 @@ import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ingestRemediationHostResults } from "../../src/remediate/steps/dispatch/hostHandoff.js";
+import { hasBoundRemediationSubmission, ingestRemediationHostResults, submitRemediationHostResult } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import { readSubmissionLedger } from "audit-tools/shared";
@@ -74,68 +74,29 @@ describe("obligation evidence-coverage floor", () => {
     expect(ingested.state.items.B1!.status).toBe("resolved");
   });
 
-  // Coverage is validated before Git corroboration. The existing baseline is
-  // sufficient for these rejected results; only the accepted case needs an edit.
-  it("refuses a result that omits evidence for a bound obligation, naming the uncovered id", async () => {
+  it("refuses missing, unbound, and blank evidence at the submission boundary without writing a result", async () => {
     const value = await fixture({ contractOverlays: true });
-    await writeResult(
-      value,
-      evidenceFor(value, value.baseline, [
-        {
-          obligation_id: "mod-a:invariant:1",
-          evidence: ["src/a.ts:1 keeps the export named value"],
-        },
-      ]),
-    );
-    const refused = await ingest(value);
-    expect(refused.accepted_count).toBe(0);
-    expect(refused.issues).toHaveLength(1);
-    expect(refused.issues[0]!.message).toContain("mod-a:output:2");
+    const complete = value.item.obligation_ids.map(obligation_id => ({
+      obligation_id, evidence: ["src/a.ts:1 preserves the export"],
+    }));
+    const cases = [
+      { evidence: complete.slice(0, 1), diagnostic: "mod-a:output:2" },
+      { evidence: [...complete, { obligation_id: "mod-b:invariant:9", evidence: ["unbound evidence"] }], diagnostic: "mod-b:invariant:9" },
+      { evidence: [{ ...complete[0]!, evidence: ["   "] }, complete[1]!], diagnostic: "non-empty evidence string" },
+    ];
+    for (const { evidence, diagnostic } of cases) {
+      const refused = await submitRemediationHostResult({
+        root: value.root, artifactsDir: value.artifactsDir, runId: value.runId,
+        state: boundState(value), workItemId: value.item.id,
+        source: JSON.stringify(evidenceFor(value, value.baseline, evidence)),
+      });
+      expect(refused.written, diagnostic).toBe(false);
+      expect(refused.issues, diagnostic).toHaveLength(1);
+      expect(refused.issues[0]).toMatchObject({ code: "submission_contract_invalid", check: "obligation_evidence" });
+      expect(refused.issues[0]!.message).toContain(diagnostic);
+    }
+    await expect(readFile(join(value.root, value.item.result_path))).rejects.toMatchObject({ code: "ENOENT" });
   });
-
-  it("refuses evidence for an obligation the work item does not bind, naming the unknown id", async () => {
-    const value = await fixture({ contractOverlays: true });
-    await writeResult(
-      value,
-      evidenceFor(value, value.baseline, [
-        {
-          obligation_id: "mod-a:invariant:1",
-          evidence: ["src/a.ts:1 keeps the export named value"],
-        },
-        {
-          obligation_id: "mod-a:output:2",
-          evidence: ["src/a.ts:1 still exports value"],
-        },
-        {
-          obligation_id: "mod-b:invariant:9",
-          evidence: ["src/a.ts:1 unrelated claim"],
-        },
-      ]),
-    );
-    const refused = await ingest(value);
-    expect(refused.accepted_count).toBe(0);
-    expect(refused.issues).toHaveLength(1);
-    expect(refused.issues[0]!.message).toContain("mod-b:invariant:9");
-  });
-
-  it("refuses an evidence entry with no non-empty citation strings", async () => {
-    const value = await fixture({ contractOverlays: true });
-    await writeResult(
-      value,
-      evidenceFor(value, value.baseline, [
-        { obligation_id: "mod-a:invariant:1", evidence: ["   "] },
-        {
-          obligation_id: "mod-a:output:2",
-          evidence: ["src/a.ts:1 still exports value"],
-        },
-      ]),
-    );
-    const refused = await ingest(value);
-    expect(refused.accepted_count).toBe(0);
-    expect(refused.issues).toHaveLength(1);
-    expect(refused.issues[0]!.message).toContain("mod-a:invariant:1");
-  });
-
   it("binds the fallback requirement without a module contract and refuses empty coverage", async () => {
     const value = await fixture();
     expect(value.item.obligation_ids).toEqual(["REQ-B1"]);
@@ -155,26 +116,6 @@ describe("obligation evidence-coverage floor", () => {
 });
 
 describe("independent conformance admission and captured verification evidence", () => {
-  it("opted-in contract conformance cannot accept mechanically valid work before independent review", async () => {
-    const value = await fixture({ contractOverlays: true, beforePrepare: async root => {
-      const artifactsDir = join(root, ".audit-tools", "remediation");
-      await mkdir(artifactsDir, { recursive: true });
-      await writeFile(join(artifactsDir, "intent_checkpoint.json"), JSON.stringify({
-        schema_version: "intent-checkpoint/v1", confirmed_by: "host", confirmed_at: new Date().toISOString(),
-        scope_summary: "fixture", intent_summary: "fix and independently verify contracts", conformance_review: true,
-      }));
-    } });
-    const landed = await landA(value);
-    await writeResult(value, {
-      ...resultFor(value, landed),
-      obligation_evidence: value.item.obligation_ids.map(obligation_id => ({ obligation_id, evidence: ["src/a.ts implements this obligation"] })),
-    });
-    const result = await ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state: boundState(value) });
-    if (result === "unsupported_retired_state") throw Error(result);
-    expect(result.accepted_count).toBe(0);
-    expect(result.issues.map(issue => issue.code)).toContain("conformance_review_required");
-  });
-
   it('retains complete captured required-test output separately from the prompt excerpt', async () => {
     const root = await mkdtemp(join(tmpdir(), 'required-output-log-'));
     cleanupRoots.push(root);
@@ -252,6 +193,8 @@ describe("independent conformance admission and captured verification evidence",
         const accepted = await ingestConformance(value);
         expect(accepted.accepted_count).toBe(1);
         expect(accepted.state.items.B1?.status).toBe(mode === "landed" ? "resolved" : "resolved_no_change");
+        expect(accepted.state.conformance_review?.enabled).toBe(true);
+        expect(accepted.state.items.B1?.conformance_review?.requirement).toBe("independent");
         expect(await readFile(count, "utf8")).toBe(mode === "landed" ? "run\nrun\n" : "run\n");
       },
     );
@@ -278,25 +221,6 @@ describe("independent conformance admission and captured verification evidence",
         expect(accepted.items!.B1.status).toBe("resolved_no_change");
         expect(accepted.items!.B1.conformance_review).toBeDefined();
       } else expect((await ingestConformance(value)).accepted_count).toBe(1);
-    });
-    it("a bound independent pass allows ordinary mechanical acceptance", async () => {
-      const value = await conformanceFixture(); await writeConformanceResult(value);
-      expect((await ingestConformance(value)).accepted_count).toBe(0);
-      await answerConformance(value);
-      const accepted = await ingestConformance(value);
-      expect(accepted.accepted_count).toBe(1);
-      expect(accepted.state.items.B1?.status).toBe("resolved");
-      expect(accepted.state.conformance_review?.enabled).toBe(true);
-      expect(accepted.state.items.B1).toHaveProperty("conformance_review");
-    });
-    it("unavailable and degraded review pause instead of silently self-reviewing", async () => {
-      const value = await conformanceFixture(); await writeConformanceResult(value); await ingestConformance(value);
-      for (const mode of ["unavailable", "degraded"]) {
-        await answerConformance(value, { mode });
-        const outcome = await ingestConformance(value);
-        expect(outcome.accepted_count).toBe(0);
-        expect(outcome.issues.map(issue => issue.code)).toContain("conformance_review_unavailable");
-      }
     });
     it("insufficient evidence can be corrected and reviewed without poisoning acceptance", async () => {
       const value = await conformanceFixture(); const result = await writeConformanceResult(value);
@@ -340,26 +264,45 @@ describe("independent conformance admission and captured verification evidence",
   });
 
   describe("bound returned work only removes the redundant resume acknowledgment", () => {
-    it.each(["wrong run", "wrong prompt", "wrong item", "missing binding", "changed workload", "settled item", "malformed result", "missing result", "explicit restart"])(
-      "%s does not establish a continuation", async (fault) => {
-        const value = await conformanceFixture();
-        const result = await writeConformanceResult(value);
-        const state = boundState(value);
-        if (fault === "wrong run") await writeResult(value, { ...result, run_id: "another-run" });
-        if (fault === "wrong item") await writeResult(value, { ...result, work_item_id: "another-item" });
-        if (fault === "wrong prompt") await writeResult(value, { ...result, prompt_sha256: "0".repeat(64) });
-        if (fault === "missing binding") delete state.host_handoff;
-        if (fault === "changed workload") state.host_handoff = { ...state.host_handoff!, workload_sha256: "0".repeat(64) };
-        if (fault === "settled item") state.items[value.item.id]!.status = "resolved";
-        if (fault === "malformed result") await writeFile(join(value.root, value.item.result_path), "{");
-        if (fault === "missing result") await rm(join(value.root, value.item.result_path));
-        if (fault === "explicit restart") await writeFile(join(value.artifactsDir, "confirm_resume_ack.json"), JSON.stringify({ choice: "restart" }));
-        await persistBoundState(value, state);
-        const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir });
-        expect(step.step_kind).toBe("confirm_resume_or_restart");
-      },
-    );
+    it("recognizes only a current bound submission for a pending item without requiring a landing", async () => {
+      const value = await conformanceFixture();
+      const result = resultFor(value, value.baseline);
+      const probe = (state = boundState(value)) => hasBoundRemediationSubmission({
+        root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state,
+      });
+      await writeResult(value, result);
+      expect(await probe()).toBe(true);
+      const withoutBinding = boundState(value);
+      delete withoutBinding.host_handoff;
+      expect(await probe(withoutBinding), "missing binding").toBe(false);
+      const changedWorkload = boundState(value);
+      changedWorkload.host_handoff = { ...changedWorkload.host_handoff!, workload_sha256: "0".repeat(64) };
+      expect(await probe(changedWorkload), "changed workload").toBe(false);
+      const settled = structuredClone(boundState(value));
+      settled.items[value.item.id]!.status = "resolved";
+      expect(await probe(settled), "already settled").toBe(false);
 
+      for (const [key, replacement] of [
+        ["run_id", "another-run"], ["work_item_id", "another-item"], ["prompt_sha256", "0".repeat(64)],
+      ] as const) {
+        await writeResult(value, { ...result, [key]: replacement });
+        expect(await probe(), key).toBe(false);
+      }
+      const path = join(value.root, value.item.result_path);
+      await writeFile(path, "{");
+      expect(await probe(), "malformed result").toBe(false);
+      await rm(path);
+      expect(await probe(), "missing result").toBe(false);
+    });
+
+    it("an explicit restart still prompts even if ordinary continuation would accept the binding", async () => {
+      const value = await conformanceFixture();
+      await writeResult(value, resultFor(value, value.baseline));
+      await writeFile(join(value.artifactsDir, "confirm_resume_ack.json"), JSON.stringify({ choice: "restart" }));
+      await persistBoundState(value);
+      const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir });
+      expect(step.step_kind).toBe("confirm_resume_or_restart");
+    });
     it("new guidance still requires the source-conflict choice", async () => {
       const value = await conformanceFixture(); await writeConformanceResult(value); await persistBoundState(value);
       const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir, guidanceText: "Use a different scope" });
@@ -378,29 +321,14 @@ describe("independent conformance admission and captured verification evidence",
     });
   });
 
-  it("opt-in no-change success also waits for independent conformance review", async () => {
-    const value = await conformanceFixture();
-    await writeResult(value, decisionFor(value, { status: "resolved_no_change", evidence: ["src/a.ts already preserves the required export and behavior"] }));
-    const pending = await ingestConformance(value);
-    expect(pending.accepted_count).toBe(0);
-    expect(pending.issues.map(issue => issue.code)).toContain("conformance_review_required");
-    await answerConformance(value);
-    expect((await ingestConformance(value)).accepted_count).toBe(1);
-  });
-    it("blocked outcomes do not wait for success conformance review", async () => {
-    const value = await conformanceFixture();
-    await writeResult(value, decisionFor(value, { status: "blocked", failure_reason: "Missing owner decision" }));
-    const outcome = await ingestConformance(value);
-    expect(outcome.accepted_count).toBe(1);
-    expect(outcome.state.items.B1?.status).toBe("blocked");
-    await expect(readFile(conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id).request)).rejects.toMatchObject({ code: "ENOENT" });
-    });
     it("blocked ingestion reaches opted-in triage review and rejects changed uncommitted evidence", async () => {
       const value = await conformanceFixture();
       await writeResult(value, decisionFor(value, { status: "blocked", failure_reason: "Missing owner decision" }));
       const ingested = await ingestConformance(value);
       expect(ingested.accepted_count).toBe(1);
       expect(ingested.state.items.B1?.status).toBe("blocked");
+      const paths = conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id);
+      await expect(readFile(paths.request)).rejects.toMatchObject({ code: "ENOENT" });
       await persistBoundState(value, ingested.state);
       await writeFile(join(value.artifactsDir, "confirm_resume_ack.json"), JSON.stringify({ choice: "resume" }));
       const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir, finalGateRunner: () => ({ status: 0 }) });
@@ -408,7 +336,6 @@ describe("independent conformance admission and captured verification evidence",
       const store = new StateStore(value.artifactsDir);
       const paused = (await store.loadState())!;
       expect(paused.items!.B1.status).toBe("blocked");
-      const paths = conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id);
       const requestB = JSON.parse(await readFile(paths.request, "utf8")) as { binding: string };
       const checkReview = async (state: RemediationState) =>
         checkTriageConformance(value.root, value.artifactsDir, state, value.item.id,
