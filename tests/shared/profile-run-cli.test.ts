@@ -23,12 +23,31 @@ async function run(args: string[], failAt = -1, freshReleasePack = false) {
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { appendFileSync, mkdirSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 let call = 0;
-childProcess.spawnSync = (command, args, options) => {
+let active = 0;
+function record(command, args, options, inFlight = 0) {
   const packDir = process.env.AUDIT_TOOLS_RELEASE_PACK_DIR;
   if (packDir && args.join(' ').includes('run --silent pack:smoke')) mkdirSync(packDir, { recursive: true });
-  appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({command, args, cwd: options.cwd, packDir}) + '\\n');
-  return { status: call++ === ${failAt} ? 7 : 0, signal: null, stdout: '', stderr: '' };
+  appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({command, args, cwd: options.cwd, packDir, inFlight}) + '\\n');
+  return call++ === ${failAt} ? 7 : 0;
+}
+childProcess.spawnSync = (command, args, options) => ({
+  status: record(command, args, options), signal: null, stdout: '', stderr: '',
+});
+childProcess.spawn = (command, args, options) => {
+  const status = record(command, args, options, ++active);
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  setImmediate(() => {
+    active--;
+    child.stdout.end('first stream');
+    child.stderr.end('second stream');
+    child.emit('close', status, null);
+  });
+  return child;
 };
 syncBuiltinESMExports();
 `);
@@ -47,8 +66,8 @@ syncBuiltinESMExports();
   } catch (error) {
     status = (error as { status: number }).status;
   }
-  const calls = (await readFile(callsPath, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { command: string; args: string[]; cwd: string; packDir?: string });
-  const ledger = JSON.parse(await readFile(latest, "utf8")) as { steps: { label: string }[] };
+  const calls = (await readFile(callsPath, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { command: string; args: string[]; cwd: string; packDir?: string; inFlight: number });
+  const ledger = JSON.parse(await readFile(latest, "utf8")) as { steps: { label: string; status: number }[] };
   return { status, calls, ledger, suppliedPack: freshReleasePack ? join(dir, "release-pack") : undefined };
 }
 
@@ -113,4 +132,19 @@ it("shares one fresh private pack for local checks and removes it on success or 
     expect(new Set(outcome.calls.map(call => call.packDir))).toEqual(new Set([packDir]));
     await expect(stat(packDir!)).rejects.toMatchObject({ code: "ENOENT" });
   }
+});
+
+it("runs only the final independent smokes together and records every failure", async () => {
+  const count = catalogCommands("checks", undefined, undefined, { freshReleasePack: true }).length;
+  const outcome = await run(["--catalog=checks"], count - 2);
+  expect(outcome.status).toBe(1);
+  expect(outcome.calls.slice(0, -3).every(({ inFlight }) => inFlight === 0)).toBe(true);
+  const tailConcurrency = outcome.calls.slice(-3).map(({ inFlight }) => inFlight);
+  expect(tailConcurrency.every(workers => workers >= 1)).toBe(true);
+  expect(Math.max(...tailConcurrency)).toBe(2);
+  expect(outcome.ledger.steps.slice(-3)).toMatchObject([
+    { label: "smoke:packaged-audit-code", status: 0 },
+    { label: "smoke:packaged-remediate-code", status: 7 },
+    { label: "smoke:remediate-gate", status: 0 },
+  ]);
 });

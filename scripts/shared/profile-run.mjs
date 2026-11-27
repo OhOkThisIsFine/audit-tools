@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // sites-pinned: tests/shared/profile-run-cli.test.ts
 // Profiled npm-script runner. Runs each named npm script in order, timing each via
-// the shared profiler, then persists the ledger + job summary. Fail-fast: a failing
-// script stops the chain and exits non-zero, preserving the semantics of the former
-// `&&`-chained `verify:checks`.
+// the shared profiler, then persists the ledger + job summary. Stops on failed
+// prerequisites; the final, independent checks smokes together own no shared output.
 //
 // Usage: node scripts/shared/profile-run.mjs <profile-name> <npm-script>...
 //   e.g. node scripts/shared/profile-run.mjs verify-checks check build verify:hosts
@@ -39,7 +38,14 @@ try {
     command: npm,
     args: ["run", "--silent", script],
   }));
-  await runProfiledCommands(profileName, commands);
+  // Each smoke owns a separate install/repo/state (or only reads the built
+  // gate), and the two packaged smokes use the same already-verified tarball.
+  // Restrict concurrency to this known terminal set, not arbitrary catalog additions.
+  const smokeTail = ["smoke:packaged-audit-code", "smoke:packaged-remediate-code", "smoke:remediate-gate"];
+  const parallelTail = mode === "checks" && smokeTail.every((label, i) =>
+    commands[commands.length - smokeTail.length + i]?.label === label)
+    ? smokeTail.length : 0;
+  await runProfiledCommands(profileName, commands, { parallelTail });
 } catch (error) {
   console.error(`[profile:${profileName}] ${/** @type {any} */ (error).message}`);
   process.exitCode = 1;
