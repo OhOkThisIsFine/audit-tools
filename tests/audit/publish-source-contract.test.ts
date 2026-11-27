@@ -1,5 +1,5 @@
-import { test, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { parse } from "yaml";
 
 const workflowPath = new URL("../../.github/workflows/publish-package.yml", import.meta.url);
@@ -85,8 +85,6 @@ test("publish and dry run consume the single tarball qualified and uploaded by t
 
 // Disposable repositories exercise the SAME helper invoked by the workflow.
 // All remotes are file URLs; no release, registry, or credential is involved.
-import { beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
@@ -94,7 +92,9 @@ import { scratchDir } from "../helpers/scratch.js";
 
 type GitResult = { status: number | null; stdout: string; stderr: string; error?: Error };
 type Git = (args: string[]) => GitResult;
-const root = scratchDir("publish-source-contract");
+const fixtureRoot = scratchDir("publish-source-contract");
+const root = join(fixtureRoot, "case");
+const fixedObjectId = "1".repeat(40);
 let remote: string;
 let checkout: string;
 let ancestor: string;
@@ -123,171 +123,195 @@ async function verify(options = input(), seam = git) {
   return verifyReleaseSource(options, seam);
 }
 
-beforeEach(() => {
-  rmSync(root, { recursive: true, force: true });
-  mkdirSync(root, { recursive: true });
-  remote = join(root, "origin");
-  checkout = join(root, "checkout");
-  mkdirSync(remote);
-  command(remote, ["init", "-b", "main"]);
-  command(remote, ["config", "user.name", "Release fixture"]);
-  command(remote, ["config", "user.email", "fixture@example.invalid"]);
-  ancestor = commit("ancestor");
-  command(remote, ["checkout", "-b", "feature"]);
-  merged = commit("merged");
-  command(remote, ["checkout", "main"]);
-  commit("advance");
-  command(remote, ["merge", "--no-ff", "feature", "-m", "merge feature"]);
-  tip = commit("tip");
-  command(remote, ["checkout", "-b", "divergent", ancestor]);
-  divergent = commit("divergent");
-  command(remote, ["checkout", "--orphan", "unrelated"]);
-  command(remote, ["rm", "-rf", "."]);
-  orphan = commit("orphan");
-  command(remote, ["checkout", "main"]);
-  command(remote, ["tag", "v1.0.0", ancestor]);
-  command(root, ["clone", "--no-local", pathToFileURL(remote).href, checkout]);
-  command(checkout, ["checkout", "--detach", ancestor]);
-  git = (args) => spawnSync("git", args, { cwd: checkout, encoding: "utf8", env: env() });
-});
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+describe("live Git release source", () => {
+  beforeAll(() => {
+    // Seed a single graph. Each test gets both repositories copied independently,
+    // including full histories and refs; mutable origin and checkout state never cross cases.
+    const seed = join(fixtureRoot, "seed");
+    remote = join(seed, "origin");
+    checkout = join(seed, "checkout");
+    mkdirSync(remote, { recursive: true });
+    command(remote, ["init", "-b", "main"]);
+    command(remote, ["config", "user.name", "Release fixture"]);
+    command(remote, ["config", "user.email", "fixture@example.invalid"]);
+    ancestor = commit("ancestor");
+    command(remote, ["checkout", "-b", "feature"]);
+    merged = commit("merged");
+    command(remote, ["checkout", "main"]);
+    commit("advance");
+    command(remote, ["merge", "--no-ff", "feature", "-m", "merge feature"]);
+    tip = commit("tip");
+    command(remote, ["checkout", "-b", "divergent", ancestor]);
+    divergent = commit("divergent");
+    command(remote, ["checkout", "--orphan", "unrelated"]);
+    command(remote, ["rm", "-rf", "."]);
+    orphan = commit("orphan");
+    command(remote, ["checkout", "main"]);
+    command(remote, ["tag", "v1.0.0", ancestor]);
+    cpSync(remote, checkout, { recursive: true });
+    command(checkout, ["checkout", "--detach", ancestor]);
+  });
 
-test.each(["ancestor", "tip", "merged"])("release accepts %s via real ancestry, including a merged side branch", async (kind) => {
-  const sha = kind === "ancestor" ? ancestor : kind === "tip" ? tip : merged;
-  command(remote, ["tag", "-f", "v1.0.0", sha]);
-  command(checkout, ["checkout", "--detach", sha]);
-  expect(await verify(input(sha))).toBe(sha);
-});
+  beforeEach(() => {
+    cpSync(join(fixtureRoot, "seed"), root, { recursive: true, errorOnExist: true, force: false });
+    remote = join(root, "origin");
+    checkout = join(root, "checkout");
+    // Seeding uses independent object copies; the helper under test must still do an
+    // actual transport fetch from an isolated live local file URL.
+    command(checkout, ["remote", "add", "origin", pathToFileURL(remote).href]);
+    git = (args) => spawnSync("git", args, { cwd: checkout, encoding: "utf8", env: env() });
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-test.each([false, true])("release peels annotated=%s tags", async (annotated) => {
-  command(remote, ["tag", "-d", "v1.0.0"]);
-  command(remote, annotated ? ["tag", "-a", "v1.0.0", ancestor, "-m", "release"] : ["tag", "v1.0.0", ancestor]);
-  expect(await verify()).toBe(ancestor);
-});
+  test.each(["ancestor", "tip", "merged"])("release accepts %s via real ancestry, including a merged side branch", async (kind) => {
+    const sha = kind === "ancestor" ? ancestor : kind === "tip" ? tip : merged;
+    command(remote, ["tag", "-f", "v1.0.0", sha]);
+    command(checkout, ["checkout", "--detach", sha]);
+    expect(await verify(input(sha))).toBe(sha);
+  });
 
-test.each(["divergent", "orphan"])("metadata claiming main cannot admit %s source", async (kind) => {
-  const sha = kind === "divergent" ? divergent : orphan;
-  command(remote, ["tag", "-f", "v1.0.0", sha]);
-  command(checkout, ["checkout", "--detach", sha]);
-  const misleading = { ...input(sha), target_commitish: "main" };
-  await expect(verify(misleading)).rejects.toThrow(/ancestor/);
-});
+  test.each([false, true])("release peels annotated=%s tags", async (annotated) => {
+    command(remote, ["tag", "-d", "v1.0.0"]);
+    command(remote, annotated ? ["tag", "-a", "v1.0.0", ancestor, "-m", "release"] : ["tag", "v1.0.0", ancestor]);
+    expect(await verify()).toBe(ancestor);
+  });
 
-test("fresh tag resolution refuses a moved tag instead of changing qualification source", async () => {
-  command(remote, ["tag", "-f", "v1.0.0", tip]);
-  await expect(verify()).rejects.toThrow(/tag.*captured/i);
-});
+  test.each(["divergent", "orphan"])("metadata claiming main cannot admit %s source", async (kind) => {
+    const sha = kind === "divergent" ? divergent : orphan;
+    command(remote, ["tag", "-f", "v1.0.0", sha]);
+    command(checkout, ["checkout", "--detach", sha]);
+    const misleading = { ...input(sha), target_commitish: "main" };
+    await expect(verify(misleading)).rejects.toThrow(/ancestor/);
+  });
 
-test("deleted remote tag refuses even when the checkout still has a stale local tag", async () => {
-  command(remote, ["tag", "-d", "v1.0.0"]);
-  await expect(verify()).rejects.toThrow(/fetch/);
-});
+  test("fresh tag resolution refuses a moved tag instead of changing qualification source", async () => {
+    command(remote, ["tag", "-f", "v1.0.0", tip]);
+    await expect(verify()).rejects.toThrow(/tag.*captured/i);
+  });
 
-test("live manual dispatch is default-branch only; off-default dry run captures its own SHA", async () => {
-  command(checkout, ["checkout", "--detach", divergent]);
-  const options = { ...input(divergent), eventName: "workflow_dispatch", ref: "refs/heads/divergent", releaseTag: "" };
-  await expect(verify(options)).rejects.toThrow(/default branch/);
-  expect(await verify({ ...options, dryRun: true })).toBe(divergent);
-  await expect(verify({ ...options, ref: "refs/heads/main" })).rejects.toThrow(/ancestor/);
-  await expect(verify({ ...options, ref: "refs/tags/main" })).rejects.toThrow(/default branch/);
-});
+  test("deleted remote tag refuses even when the checkout still has a stale local tag", async () => {
+    command(remote, ["tag", "-d", "v1.0.0"]);
+    await expect(verify()).rejects.toThrow(/fetch/);
+  });
 
-test("live default dispatch admits an older main commit after advancement", async () => {
-  expect(await verify({ ...input(), eventName: "workflow_dispatch", ref: "refs/heads/main", releaseTag: "" })).toBe(ancestor);
-});
+  test("live manual dispatch is default-branch only; off-default dry run captures its own SHA", async () => {
+    command(checkout, ["checkout", "--detach", divergent]);
+    const options = { ...input(divergent), eventName: "workflow_dispatch", ref: "refs/heads/divergent", releaseTag: "" };
+    await expect(verify(options)).rejects.toThrow(/default branch/);
+    expect(await verify({ ...options, dryRun: true })).toBe(divergent);
+    await expect(verify({ ...options, ref: "refs/heads/main" })).rejects.toThrow(/ancestor/);
+    await expect(verify({ ...options, ref: "refs/tags/main" })).rejects.toThrow(/default branch/);
+  });
 
-test("publish recheck refuses rewritten default history and a different checkout", async () => {
-  const { verifyReleaseSource } = await import("../../scripts/shared/verify-release-source.mjs");
-  const validated = await verify();
-  expect(() => verifyReleaseSource({ ...input(), expectedSha: tip }, git)).toThrow(/validated/);
-  command(checkout, ["checkout", "--detach", tip]);
-  expect(() => verifyReleaseSource({ ...input(), expectedSha: validated }, git)).toThrow(/HEAD/);
-  command(checkout, ["checkout", "--detach", ancestor]);
-  command(remote, ["update-ref", "refs/heads/main", orphan]);
-  expect(() => verifyReleaseSource({ ...input(), expectedSha: validated }, git)).toThrow(/ancestor/);
-});
+  test("live default dispatch admits an older main commit after advancement", async () => {
+    expect(await verify({ ...input(), eventName: "workflow_dispatch", ref: "refs/heads/main", releaseTag: "" })).toBe(ancestor);
+  });
 
-test("shallow history refuses even a trivially matching tip", async () => {
-  const shallow = join(root, "shallow");
-  command(root, ["clone", "--depth=1", pathToFileURL(remote).href, shallow]);
-  const shallowGit: Git = (args) => spawnSync("git", args, { cwd: shallow, encoding: "utf8", env: env() });
-  await expect(verify({ ...input(tip), eventName: "workflow_dispatch", ref: "refs/heads/main" }, shallowGit)).rejects.toThrow(/shallow/);
-});
+  test("publish recheck refuses rewritten default history and a different checkout", async () => {
+    const { verifyReleaseSource } = await import("../../scripts/shared/verify-release-source.mjs");
+    const validated = await verify();
+    expect(() => verifyReleaseSource({ ...input(), expectedSha: tip }, git)).toThrow(/validated/);
+    command(checkout, ["checkout", "--detach", tip]);
+    expect(() => verifyReleaseSource({ ...input(), expectedSha: validated }, git)).toThrow(/HEAD/);
+    command(checkout, ["checkout", "--detach", ancestor]);
+    command(remote, ["update-ref", "refs/heads/main", orphan]);
+    expect(() => verifyReleaseSource({ ...input(), expectedSha: validated }, git)).toThrow(/ancestor/);
+  });
 
-test.each(["fetch", "rev-list", "merge-base", "throw", "spawn-error"])("%s failure cannot admit a release", async (failure) => {
-  const seam: Git = (args) => {
-    if (args.includes(failure) || (args.includes("fetch") && ["throw", "spawn-error"].includes(failure))) {
-      if (failure === "throw") throw new Error("fixture transport threw");
-      return { status: failure === "spawn-error" ? 0 : 128, stdout: "", stderr: "fixture transport failure", ...(failure === "spawn-error" ? { error: new Error("fixture spawn failure") } : {}) };
+  test("shallow history refuses even a trivially matching tip", async () => {
+    const shallow = join(root, "shallow");
+    command(root, ["clone", "--depth=1", pathToFileURL(remote).href, shallow]);
+    const shallowGit: Git = (args) => spawnSync("git", args, { cwd: shallow, encoding: "utf8", env: env() });
+    await expect(verify({ ...input(tip), eventName: "workflow_dispatch", ref: "refs/heads/main" }, shallowGit)).rejects.toThrow(/shallow/);
+  });
+
+  test.each(["fetch", "rev-list", "merge-base", "throw", "spawn-error"])("%s failure cannot admit a release", async (failure) => {
+    const seam: Git = (args) => {
+      if (args.includes(failure) || (args.includes("fetch") && ["throw", "spawn-error"].includes(failure))) {
+        if (failure === "throw") throw new Error("fixture transport threw");
+        return { status: failure === "spawn-error" ? 0 : 128, stdout: "", stderr: "fixture transport failure", ...(failure === "spawn-error" ? { error: new Error("fixture spawn failure") } : {}) };
+      }
+      return git(args);
+    };
+    await expect(verify(input(), seam)).rejects.toThrow();
+  });
+
+  test("missing commit and invalid object IDs fail closed", async () => {
+    await expect(verify(input("0".repeat(40)))).rejects.toThrow();
+    for (const invalid of ["main", "HEAD", "abc123", "-HEAD", `${ancestor}\nother`]) {
+      await expect(verify(input(invalid))).rejects.toThrow(/full object ID/);
     }
-    return git(args);
-  };
-  await expect(verify(input(), seam)).rejects.toThrow();
+    await expect(verify(input(), (args) => args.includes(`${ancestor}^{commit}`) ? { status: 0, stdout: "not-a-sha", stderr: "" } : git(args))).rejects.toThrow(/full object ID/);
+  });
+
+  test("helper import is side-effect-free; CLI emits only its resolved immutable output", () => {
+    const helper = new URL("../../scripts/shared/verify-release-source.mjs", import.meta.url);
+    const output = join(root, "github-output");
+    const invalidEnv = { ...env(), GITHUB_OUTPUT: output, RELEASE_EVENT_SHA: "invalid" };
+    const imported = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(helper.href)})`], { cwd: root, env: invalidEnv, encoding: "utf8" });
+    expect(imported.status).toBe(0);
+    expect(imported.stdout).toBe("");
+    expect(existsSync(output)).toBe(false);
+    const result = spawnSync(process.execPath, [fileURLToPath(helper)], { cwd: checkout, encoding: "utf8", env: { ...env(), GITHUB_OUTPUT: output, RELEASE_EVENT_SHA: ancestor, RELEASE_DEFAULT_BRANCH: "main", RELEASE_REF: "refs/tags/v1.0.0", RELEASE_TAG: "v1.0.0", RELEASE_EVENT_NAME: "release", RELEASE_DRY_RUN: "" } });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(readFileSync(output, "utf8")).toBe(`commit=${ancestor}\n`);
+  });
+
+  test("dry-run input cannot bypass release-event ancestry", async () => {
+    command(remote, ["tag", "-f", "v1.0.0", divergent]);
+    command(checkout, ["checkout", "--detach", divergent]);
+    await expect(verify({ ...input(divergent), dryRun: true })).rejects.toThrow(/ancestor/);
+  });
+
+  test("a deleted default branch cannot reuse a stale fetched default ref", async () => {
+    expect(await verify()).toBe(ancestor);
+    command(remote, ["update-ref", "-d", "refs/heads/main"]);
+    await expect(verify()).rejects.toThrow(/fetch/);
+  });
+
+  test("missing ancestor objects refuse even when captured source equals default tip", async () => {
+    const broken = join(root, "incomplete");
+    cpSync(checkout, broken, { recursive: true });
+    command(broken, ["checkout", "--detach", tip]);
+    const ancestorObject = join(broken, ".git", "objects", ancestor.slice(0, 2), ancestor.slice(2));
+    expect(existsSync(ancestorObject)).toBe(true);
+    rmSync(ancestorObject);
+    expect(command(broken, ["rev-parse", "HEAD"])).toBe(tip);
+    const incompleteGit: Git = (args) => spawnSync("git", args, { cwd: broken, encoding: "utf8", env: env() });
+    await expect(verify({ ...input(tip), eventName: "workflow_dispatch", ref: "refs/heads/main" }, incompleteGit)).rejects.toThrow(/rev-list|fetch/);
+  });
 });
 
-test("missing commit and invalid object IDs fail closed", async () => {
-  await expect(verify(input("0".repeat(40)))).rejects.toThrow();
-  for (const invalid of ["main", "HEAD", "abc123", "-HEAD", `${ancestor}\nother`]) {
-    await expect(verify(input(invalid))).rejects.toThrow(/full object ID/);
-  }
-  await expect(verify(input(), (args) => args.includes(`${ancestor}^{commit}`) ? { status: 0, stdout: "not-a-sha", stderr: "" } : git(args))).rejects.toThrow(/full object ID/);
-});
+afterAll(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+
+// These checks must finish before object lookup or fetching; check-ref-format
+// itself runs without a repository. An early guard needs no cloned fixture.
+function checkRef(args: string[]): GitResult {
+  if (args[1] !== "check-ref-format") throw new Error("Unexpected Git call before release input validation");
+  return spawnSync("git", args, { cwd: fileURLToPath(new URL("../..", import.meta.url)), encoding: "utf8", env: env() });
+}
 
 test.each(["../main", "-main", "main:evil", "main\nother", "main~1"])("invalid ref spelling %j never reaches fetch", async (name) => {
   let fetched = false;
-  const seam: Git = (args) => { fetched ||= args.includes("fetch"); return git(args); };
-  await expect(verify({ ...input(), defaultBranch: name }, seam)).rejects.toThrow();
-  await expect(verify({ ...input(), releaseTag: name }, seam)).rejects.toThrow();
+  const seam: Git = (args) => { fetched ||= args.includes("fetch"); return checkRef(args); };
+  await expect(verify({ ...input(fixedObjectId), defaultBranch: name }, seam)).rejects.toThrow(/Invalid release heads ref|git check-ref-format/);
+  await expect(verify({ ...input(fixedObjectId), releaseTag: name }, seam)).rejects.toThrow(/Invalid release tags ref|git check-ref-format/);
   expect(fetched).toBe(false);
 });
 
-test("helper import is side-effect-free; CLI emits only its resolved immutable output", () => {
-  const helper = new URL("../../scripts/shared/verify-release-source.mjs", import.meta.url);
-  const output = join(root, "github-output");
-  const invalidEnv = { ...env(), GITHUB_OUTPUT: output, RELEASE_EVENT_SHA: "invalid" };
-  const imported = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(helper.href)})`], { cwd: root, env: invalidEnv, encoding: "utf8" });
-  expect(imported.status).toBe(0);
-  expect(imported.stdout).toBe("");
-  expect(existsSync(output)).toBe(false);
-  const result = spawnSync(process.execPath, [fileURLToPath(helper)], { cwd: checkout, encoding: "utf8", env: { ...env(), GITHUB_OUTPUT: output, RELEASE_EVENT_SHA: ancestor, RELEASE_DEFAULT_BRANCH: "main", RELEASE_REF: "refs/tags/v1.0.0", RELEASE_TAG: "v1.0.0", RELEASE_EVENT_NAME: "release", RELEASE_DRY_RUN: "" } });
-  expect(result.stderr).toBe("");
-  expect(result.status).toBe(0);
-  expect(readFileSync(output, "utf8")).toBe(`commit=${ancestor}\n`);
-});
-
-test("dry-run input cannot bypass release-event ancestry", async () => {
-  command(remote, ["tag", "-f", "v1.0.0", divergent]);
-  command(checkout, ["checkout", "--detach", divergent]);
-  await expect(verify({ ...input(divergent), dryRun: true })).rejects.toThrow(/ancestor/);
-});
-
-test("a deleted default branch cannot reuse a stale fetched default ref", async () => {
-  expect(await verify()).toBe(ancestor);
-  command(remote, ["update-ref", "-d", "refs/heads/main"]);
-  await expect(verify()).rejects.toThrow(/fetch/);
-});
-
 test("unknown event and mismatched event ref fail closed", async () => {
-  await expect(verify({ ...input(), eventName: "push" })).rejects.toThrow(/event/);
-  await expect(verify({ ...input(), ref: "refs/tags/something-else" })).rejects.toThrow(/ref/);
-});
-
-test("missing ancestor objects refuse even when captured source equals default tip", async () => {
-  const broken = join(root, "incomplete");
-  command(root, ["clone", "--local", "--no-hardlinks", remote, broken]);
-  const ancestorObject = join(broken, ".git", "objects", ancestor.slice(0, 2), ancestor.slice(2));
-  expect(existsSync(ancestorObject)).toBe(true);
-  rmSync(ancestorObject);
-  expect(command(broken, ["rev-parse", "HEAD"])).toBe(tip);
-  const incompleteGit: Git = (args) => spawnSync("git", args, { cwd: broken, encoding: "utf8", env: env() });
-  await expect(verify({ ...input(tip), eventName: "workflow_dispatch", ref: "refs/heads/main" }, incompleteGit)).rejects.toThrow(/rev-list|fetch/);
+  await expect(verify({ ...input(fixedObjectId), eventName: "push" }, checkRef)).rejects.toThrow(/event/);
+  await expect(verify({ ...input(fixedObjectId), ref: "refs/tags/something-else" }, checkRef)).rejects.toThrow(/ref/);
 });
 
 test.each(["--help", "-h", "--unknown", "unexpected"])("CLI %s exits before source validation or output writes", (arg) => {
   const helper = fileURLToPath(new URL("../../scripts/shared/verify-release-source.mjs", import.meta.url));
-  const output = join(root, "guarded-output");
+  const cwd = join(fixtureRoot, "guard-" + arg);
+  mkdirSync(cwd, { recursive: true });
+  const output = join(cwd, "guarded-output");
   const result = spawnSync(process.execPath, [helper, arg], {
-    cwd: root, encoding: "utf8",
+    cwd, encoding: "utf8",
     env: { ...env(), GITHUB_OUTPUT: output, RELEASE_EVENT_SHA: "invalid" },
   });
   expect(result.status).toBe(arg === "--help" || arg === "-h" ? 0 : 2);
