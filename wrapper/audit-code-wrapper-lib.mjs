@@ -222,7 +222,7 @@ function run(command, args, env, stdioServer) {
   return new Promise((resolvePromise, rejectPromise) => {
     const resolved = resolveSpawn(command, args);
     const child = spawn(resolved.command, resolved.args, {
-      cwd: stdioServer && process.platform === 'win32' ? windowsStdioCwd(repoRoot, callerCwd) : repoRoot,
+      cwd: stdioServer && process.platform === 'win32' ? windowsStdioCwd(repoRoot) : repoRoot,
       stdio: 'inherit',
       // Node-worktree guard: the backend's process.cwd() carries no
       // evidence of where the CALLER ran

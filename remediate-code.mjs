@@ -196,7 +196,7 @@ export async function main(argv = process.argv.slice(2)) {
     const { windowsStdioCwd } = await import("./wrapper/stdio-cwd.mjs");
     const callerCwd = process.cwd();
     stdioOptions = {
-      cwd: windowsStdioCwd(__dirname, callerCwd),
+      cwd: windowsStdioCwd(__dirname),
       env: { ...process.env, AUDIT_TOOLS_CALLER_CWD: callerCwd },
     };
   }
