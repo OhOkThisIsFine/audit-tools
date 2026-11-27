@@ -1,5 +1,7 @@
 # Prior backlog reconciliation
 
+<!-- review-routing: no-forward-work -->
+
 The reference is `0ca20bf76a8441ba390fc852855555aff34b3345`. This covers the 45 entries in the four actionable backlog files (18 open bugs, 15 minor bugs, 5 deferred items, and 7 forward tracks); the durable traps remain reference rather than pending tickets. This is source reconciliation, not a claim to have repeated historical dogfood or platform qualification.
 
 ## Removed from the active queue
