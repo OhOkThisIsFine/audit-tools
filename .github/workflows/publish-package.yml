@@ -362,13 +362,17 @@ jobs:
         run: |
           set -euo pipefail
           echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} on dist-tag ${PUBLISH_TAG}..."
+          # Leave room inside the job timeout for the last bounded exact-version
+          # and tag lookups and the final diagnostics.
+          readback_deadline=$((SECONDS + 440))
           for attempt in {1..24}; do
             status=$(node scripts/shared/verify-release-registry.mjs)
             case "$status" in
-              confirmed|integrity-mismatch) break ;;
-              pending|tag-mismatch)
+              confirmed|integrity-mismatch|invalid-json|unexpected-json) break ;;
+              pending|tag-mismatch|query-timeout|query-error)
                 echo "Registry verification: $status (attempt $attempt)."
-                if [[ "$attempt" -lt 24 ]]; then sleep 10; fi ;;
+                if [[ "$attempt" -ge 24 || "$SECONDS" -ge "$readback_deadline" ]]; then break; fi
+                sleep 10 ;;
               *) echo "::error::Unknown registry verification status: $status"; exit 1 ;;
             esac
           done
@@ -383,7 +387,9 @@ jobs:
             confirmed) exit 0 ;;
             integrity-mismatch) echo "::error::Registry integrity conflicts with the qualified tarball." ;;
             tag-mismatch) echo "::error::Requested dist-tag still points to a different version." ;;
-            pending) echo "::error::Registry confirmation remains pending; upload is not verified." ;;
+            pending) echo "::error::Registry metadata is still missing; upload is not verified." ;;
+            query-timeout|query-error) echo "::error::The npm registry readback did not complete successfully; upload is not verified." ;;
+            invalid-json|unexpected-json) echo "::error::The npm registry readback response is unusable; upload is not verified." ;;
           esac
           exit 1
       - name: Upload npm debug logs
