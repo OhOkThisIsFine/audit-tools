@@ -35,23 +35,3 @@ then verify each candidate against current HEAD before deleting it. [[orphan-mod
     output into leads (cargo-clippy / bundle-rubocop), not skip. FAIL = "skipped" status when the ecosystem
     is present + consent given, or a parse that drops all output. (No Rust/Ruby toolchain on the box →
     install `rustup` / `ruby`+`bundler` first, or point at a repo that vendors them.)
-
-- **Structured MCP submission beyond work-item results (owner, 2026-11-06).** Work-item
-  `submit_result` covers both draws. Audit `submit_gate` supports `synthesis_narrative`,
-  `critical_flow_fallback`, `intent_equivalence` (the current pending pair), and `edge_reasoning`,
-  which accepts the object/array file forms; the other delivered lanes retain their own object
-  schemas. Audit charter clarification also accepts partial or empty operator answers,
-  reusing the file schema and asked-request check without applying answers. Bound design-contract
-  reviews retain the independent-review declaration, live input checks and finding validation.
-  **Remaining:** charter reviews, conceptual design-review and systemic-challenge lanes;
-  operator answers (`analyzer_decisions` persists
-  repository analyzer settings, while `analyzer_consent` records current-run consent).
-  Remediate `submit_gate` supports operator triage decisions, mid-run clarification answers,
-  and item-bound conformance reviews through their existing file validators. Negative review
-  feedback is admitted without authorizing success; existing consumers retain freshness and
-  independence checks. Clarification
-  answers retain the strict bare-array shape and current paused-unit set. The remaining routes
-  are not implemented. **Property:** each route uses the SAME validator as its file route and
-  writes the bound path; none returns a step or prompt or advances the workflow. **Open:** whether
-  sub-agents inherit the parent's MCP tools remains unverified across hosts, so file routes stay
-  first-class.

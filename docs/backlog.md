@@ -24,25 +24,19 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 104 entr(y/ies) indexed.
+> and at commit). 97 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
-- `open-bugs.md:9` — Audit/shared tests time out under full-suite load and pass alone (2026-10-08, medium).
-- `open-bugs.md:11` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
-- `open-bugs.md:13` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
-- `open-bugs.md:16` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
-- `open-bugs.md:18` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:26` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:33` — Qualify opt-in stock-analyzer coverage receipts and reuse (2026-11-27, medium).
+- `open-bugs.md:9` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
+- `open-bugs.md:12` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
+- `open-bugs.md:14` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:22` — Qualify additional analyzer coverage receipts and reuse (2026-11-27, medium).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
-- `minor-bugs.md:14` — A stopped `npm test` leaves its vitest tree alive on Windows (2026-11-16, low).
-- `minor-bugs.md:21` — Two git-spawning tests time out under full-suite load on this machine (2026-11-16, low).
-- `minor-bugs.md:32` — File-lock checks are cooperative, not an atomic write fence (2026-10-06, low).
-- `minor-bugs.md:34` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
-- `minor-bugs.md:36` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:14` — File-lock checks are cooperative, not an atomic write fence (2026-10-06, low).
+- `minor-bugs.md:16` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -51,14 +45,13 @@
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
 - `forward-tracks.md:24` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:39` — Structured MCP submission beyond work-item results (owner, 2026-11-06).
 
 ### [`deferred.md`](backlog/deferred.md)
 
 - `deferred.md:10` — The P1–P8 hardening contract waits for an isolated, platform-qualified execution environment (2026-10-07, medium).
 - `deferred.md:22` — A7 multi-host validation — automated half green, manual GUI half never run.
 - `deferred.md:32` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
-- `deferred.md:57` — Decide whether to retire or revive dormant per-question selective deepening.
+- `deferred.md:57` — Expand structured MCP submission only after a demonstrated transport gap.
 
 ### [`durable-traps.md`](backlog/durable-traps.md)
 
