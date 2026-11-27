@@ -14,6 +14,7 @@ import type { AuditState } from "../../src/audit/types/auditState.js";
 import {
   withTempRepo,
   advanceToDispatchReady,
+  callNextStep,
 } from "./helpers/completion-harness.js";
 import { presentQuestionReport, readAcceptedAnswers, readQuestionFindings, readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
 
@@ -39,11 +40,10 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   } };
 });
 
-test("a completed question audit rolls over without carrying the prior run's answers", async () => {
+test("next-step rolls over a completed audit and refuses its old answers", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     const first = await readQuestionWorkload(await advanceToDispatchReady(root));
-    const firstSnapshot = first.work_items[0]!.binding.question.snapshot_id;
     const firstAnswers = await submitQuestions(root, first.work_items);
     const scratch = hostScratchDir(artifactsDir, AUDIT_GATE_SUBMISSION_SCOPE);
     const unrelated = hostScratchDir(artifactsDir, "unowned-scratch");
@@ -75,9 +75,6 @@ test("a completed question audit rolls over without carrying the prior run's ans
     const strayPath = join(artifactsDir, "stray-run-record.json");
     await writeFile(sessionPath, JSON.stringify({ review_mode: "attended" }));
     await writeFile(strayPath, "{}");
-    const edited = join(root, "src", "lib", "session.ts");
-    await writeFile(edited, (await readFile(edited, "utf8")) + "\nexport const extra = 1;\n");
-
     const interruption = join(artifactsDir, "zzz-interruption");
     await writeFile(interruption, "old run scratch");
     interruptRollover.before = interruption;
@@ -91,32 +88,28 @@ test("a completed question audit rolls over without carrying the prior run's ans
       interruptRollover.after = "";
     }
 
-    await expect(rollOverFinishedRun(artifactsDir, root)).resolves.toBe(true);
-    const second = await readQuestionWorkload(await advanceToDispatchReady(root));
+    const next = await callNextStep(root, artifactsDir);
+    expect(next).toMatchObject({ step_kind: "functional_preflight", status: "ready" });
     expect(previousReport).not.toContain("late valid reflection");
     const refreshed = await readFile(promotedReportPath, "utf8");
     expect(refreshed.match(/late valid reflection rendered exactly once/g)).toHaveLength(1);
     expect(refreshed).not.toContain("not-json-late-raw-diagnostic");
     expect(await readFile(join(promotedDir, "audit-agent-feedback.jsonl"))).toEqual(feedback);
     expect(await readFile(reportPath)).toEqual(previousMachineReport);
-    expect(second.run_id).not.toBe(first.run_id);
-    expect(second.work_items[0]!.binding.question.snapshot_id).not.toBe(firstSnapshot);
     const secondConsent = JSON.parse(await readFile(join(artifactsDir, "run-consent.json"), "utf8")) as { run_id: string };
     expect(secondConsent.run_id).not.toBe(firstConsent.run_id);
+    expect(next.run_id).toBe(secondConsent.run_id);
     expect(existsSync(sessionPath)).toBe(true);
     expect(existsSync(strayPath)).toBe(false);
     expect(existsSync(interruption)).toBe(false);
-    await expect(readAcceptedAnswers(artifactsDir, first.run_id)).rejects.toMatchObject({ code: "ENOENT" });
 
-    // Admit one real result into the fresh ledger. Terminal promotion replacing
-    // an older report is tested separately below; don't repeat that full flow.
-    const [secondAnswer] = await submitQuestions(root, second.work_items.slice(0, 1));
-    expect(await submitWorkItemResult({
-      root, artifactsDir, workItemId: secondAnswer!.assignment_id, source: JSON.stringify(secondAnswer),
-    })).toMatchObject({ disposition: "accepted", submission_id: secondAnswer!.submission_id });
-    expect(await readAcceptedAnswers(artifactsDir, second.run_id)).toEqual([secondAnswer]);
+    // Before planning another audit, the real submission entry point must
+    // refuse a reply to a genuinely issued assignment from the completed run.
+    const [oldAnswer] = firstAnswers;
+    await expect(submitWorkItemResult({
+      root, artifactsDir, workItemId: oldAnswer!.assignment_id, source: JSON.stringify(oldAnswer),
+    })).rejects.toThrow(/No active question-review run/u);
     await expect(readAcceptedAnswers(artifactsDir, first.run_id)).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await readFile(reportPath)).toEqual(previousMachineReport);
   });
 });
 // The gate is the run-ended marker the terminal step writes after a successful
