@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, lstat, symlink } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, realpath, rm, writeFile, lstat, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -82,9 +82,10 @@ afterEach(async () => {
  * A committed repo with tracked dirt, an untracked file, a STAGED new file, a
  * staged deletion kept on disk, an ignored directory and an ignored file.
  */
-async function dirtyRepo(): Promise<{ root: string; artifactsDir: string }> {
-  const base = await mkdtemp(join(tmpdir(), "audit-run-snapshot-"));
-  const root = join(base, "repo");
+let baseline: Promise<string> | undefined;
+
+async function seedDirtyRepo(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "audit-run-snapshot-template-"));
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(join(root, ".gitignore"), "node_modules/\n.env\n.audit-tools/\n");
   await writeFile(join(root, "src", "a.ts"), "export const a = 1;\n");
@@ -100,6 +101,15 @@ async function dirtyRepo(): Promise<{ root: string; artifactsDir: string }> {
   await mkdir(join(root, "node_modules", "dep"), { recursive: true });
   await writeFile(join(root, "node_modules", "dep", "index.js"), "module.exports = 1;\n");
   await writeFile(join(root, ".env"), "KEY=1\n");
+  return root;
+}
+
+async function dirtyRepo(): Promise<{ root: string; artifactsDir: string }> {
+  const base = await mkdtemp(join(tmpdir(), "audit-run-snapshot-"));
+  const root = join(base, "repo");
+  // Copy the ordinary repo (no links/worktrees) including its dirty index.
+  // Each test can mutate the copy freely without repeating git init/add/commit.
+  await cp(await (baseline ??= seedDirtyRepo()), root, { recursive: true });
   const artifactsDir = join(root, ".audit-tools", "audit");
   await mkdir(artifactsDir, { recursive: true });
   cleanups.push(async () => {
@@ -110,10 +120,13 @@ async function dirtyRepo(): Promise<{ root: string; artifactsDir: string }> {
 }
 
 describe("ensureRunSnapshot — git root", () => {
-  test("pins working bytes and preserves Git state and ignored dependencies on resume", async () => {
+  test("pins a dirty tree without altering Git and removes only its own snapshot", async () => {
     const { root, artifactsDir } = await dirtyRepo();
     const headBefore = await gitOut(root, ["rev-parse", "HEAD"]);
     const statusBefore = await gitOut(root, ["status", "--porcelain"]);
+    const trackedBefore = await gitOut(root, ["ls-files"]);
+    const logBefore = await gitOut(root, ["log", "--format=%H %an"]);
+    const readBefore = await readAuditReadState(root);
     const snapshot = await ensureRunSnapshot(root, artifactsDir);
 
     expect(snapshot.kind).toBe("git");
@@ -128,6 +141,9 @@ describe("ensureRunSnapshot — git root", () => {
     expect(await gitOut(root, ["rev-parse", "HEAD"])).toBe(headBefore);
     expect(await gitOut(root, ["status", "--porcelain"])).toBe(statusBefore);
     expect(existsSync(join(snapshot.source_root, ".audit-tools"))).toBe(false);
+    expect(await gitOut(snapshot.source_root, ["ls-files"])).toBe(trackedBefore);
+    expect(await gitOut(snapshot.source_root, ["log", "--format=%H %an"])).toBe(logBefore);
+    expect(await readAuditReadState(snapshot.source_root, null, { excludePaths: snapshot.linked })).toEqual(readBefore);
 
     // The same acquisition links ignored dependency directories, copies
     // ignored files, and stays pinned once the live source changes.
@@ -139,6 +155,11 @@ describe("ensureRunSnapshot — git root", () => {
     const resumed = await ensureRunSnapshot(root, artifactsDir);
     expect(resumed).toEqual(snapshot);
     expect(await readFile(join(resumed.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 2;\n");
+    expect(await removeRunSnapshot(artifactsDir, root)).toEqual([]);
+    expect(existsSync(snapshot.source_root)).toBe(false);
+    expect(await readFile(join(root, "node_modules", "dep", "index.js"), "utf8")).toBe("module.exports = 1;\n");
+    await expect(gitOut(root, ["rev-parse", "--verify", "--quiet", snapshot.pins[0].ref])).rejects.toThrow();
+    expect(await gitOut(root, ["worktree", "list", "--porcelain"])).not.toContain(snapshot.source_root.replace(/\\/g, "/"));
   });
 
   test.each(["lstat", "copyFile"] as const)("an admitted source %s failure refuses the snapshot and permits retry", async (operation) => {
@@ -245,19 +266,6 @@ describe("ensureRunSnapshot — git root", () => {
     expect(existsSync(acquiring)).toBe(false);
   });
 
-  test("git inside the snapshot answers as the live tree did: tracked set, history and audit-read state", async () => {
-    const { root, artifactsDir } = await dirtyRepo();
-    const liveTracked = await gitOut(root, ["ls-files"]);
-    const liveLog = await gitOut(root, ["log", "--format=%H %an"]);
-    const liveRead = await readAuditReadState(root);
-    const snapshot = await ensureRunSnapshot(root, artifactsDir);
-    // An untracked live file stays untracked (the disposition rule keys on it).
-    expect(await gitOut(snapshot.source_root, ["ls-files"])).toBe(liveTracked);
-    // No synthetic commit reaches history mining.
-    expect(await gitOut(snapshot.source_root, ["log", "--format=%H %an"])).toBe(liveLog);
-    expect(await readAuditReadState(snapshot.source_root, null, { excludePaths: snapshot.linked })).toEqual(liveRead);
-  });
-
   test("a root that is a subdirectory of the repository reads from the same subdirectory of the snapshot", async () => {
     const { root, artifactsDir } = await dirtyRepo();
     const sub = join(root, "src");
@@ -294,18 +302,7 @@ describe("ensureRunSnapshot — git root", () => {
     expect(await readFile(join(snapshot.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 2;\n");
   });
 
-  test("a --since ref is resolved once against the live root and kept for the run", async () => {
-    const { root, artifactsDir } = await dirtyRepo();
-    await ensureRunSnapshot(root, artifactsDir);
-    const head = await gitOut(root, ["rev-parse", "HEAD"]);
-    expect(await resolveRunSince(root, artifactsDir, "HEAD")).toBe(head);
-    await git(root, ["add", "-A"]);
-    await git(root, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "moved"]);
-    expect(await resolveRunSince(root, artifactsDir, "HEAD")).toBe(head);
-    expect(await lookupRunSince(artifactsDir, "HEAD")).toBe(head);
-  });
-
-  test("a clean tree's snapshot sits at HEAD with a clean status", async () => {
+  test("a clean tree sits at HEAD and keeps its original --since after HEAD moves", async () => {
     const { root, artifactsDir } = await dirtyRepo();
     await git(root, ["add", "-A"]);
     await git(root, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "clean"]);
@@ -313,6 +310,11 @@ describe("ensureRunSnapshot — git root", () => {
     expect(snapshot.pins[0].base).toBe(await gitOut(root, ["rev-parse", "HEAD"]));
     expect(await readAuditReadState(snapshot.source_root, null, { excludePaths: snapshot.linked }))
       .toEqual({ commit: snapshot.pins[0].base, dirty_paths: [] });
+    const head = snapshot.pins[0].base;
+    expect(await resolveRunSince(root, artifactsDir, "HEAD")).toBe(head);
+    await git(root, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "moved"]);
+    expect(await resolveRunSince(root, artifactsDir, "HEAD")).toBe(head);
+    expect(await lookupRunSince(artifactsDir, "HEAD")).toBe(head);
   });
 
   test("a completed run is given the live root and no snapshot", async () => {
@@ -353,16 +355,6 @@ describe("ensureRunSnapshot — git root", () => {
     );
     await expect(ensureRunSnapshot(root, artifactsDir)).rejects.toThrow(/unable to verify\/restore frozen bytes/i);
     await expect(readRunSourceRoot(root, artifactsDir)).rejects.toThrow(/unable to verify\/restore frozen bytes/i);
-  });
-
-  test("removal deletes the checkout, the ref and the worktree registration, never the linked live directory", async () => {
-    const { root, artifactsDir } = await dirtyRepo();
-    const snapshot = await ensureRunSnapshot(root, artifactsDir);
-    expect(await removeRunSnapshot(artifactsDir, root)).toEqual([]);
-    expect(existsSync(snapshot.source_root)).toBe(false);
-    expect(await readFile(join(root, "node_modules", "dep", "index.js"), "utf8")).toBe("module.exports = 1;\n");
-    await expect(gitOut(root, ["rev-parse", "--verify", "--quiet", snapshot.pins[0].ref])).rejects.toThrow();
-    expect(await gitOut(root, ["worktree", "list", "--porcelain"])).not.toContain(snapshot.source_root.replace(/\\/g, "/"));
   });
 
   test("a held live index.lock loses no staged path, and the live index is never written", async () => {

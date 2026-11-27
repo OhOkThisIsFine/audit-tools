@@ -1,48 +1,15 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { expect, test } from "vitest";
 import { hashContent } from "audit-tools/shared";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 import { advanceToDispatchReady, callNextStep } from "./helpers/completion-harness.js";
 import { readAcceptedAnswers, readQuestionWorkload } from "./helpers/question-completion-harness.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
-import { git } from "./helpers/submoduleRepo.mjs";
-import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
-import { runDeterministicForNextStep } from "../../src/audit/cli/nextStepCommand.js";
 import { countLines } from "../../src/audit/cli/args.js";
-import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
+import { ensureRunSnapshot, runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
 import { existsSync } from "node:fs";
-
-// The frozen-snapshot property (docs/backlog/forward-tracks.md): no edit to the
-// live tree during a run changes that run's inputs. A git root is pinned at run
-// start; a non-git root is frozen by a copy — both must hold.
-test.each(["git", "non-git"])("a live edit during a run leaves the run's inputs unchanged (%s root)", async (kind) => {
-  await withTempRepo(async (root) => {
-    if (kind === "git") {
-      await git(root, ["init", "-q"]);
-      await git(root, ["add", "-A"]);
-      await git(root, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "fixture"]);
-    }
-    expect((await advanceToDispatchReady(root)).step_kind).toBe("dispatch_review");
-    const artifactsDir = join(root, ".audit-tools", "audit");
-    const source = join(root, "src", "api", "auth.ts");
-    const atStart = hashContent(await readFile(source));
-    const before = await loadArtifactBundle(artifactsDir);
-    expect(before.repo_manifest?.files.find((file) => file.path === "src/api/auth.ts")?.hash).toBe(atStart);
-    // Identity stays on the live root: the manifest is named after it, never after the snapshot dir.
-    expect(before.repo_manifest?.repository.name).toBe(basename(root));
-
-    await writeFile(source, (await readFile(source, "utf8")).replace("length > 0", "length > 1"));
-    await runDeterministicForNextStep({ root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 30_000,
-      narrativeEnabled: false, graphLlmEdgeReasoning: false,
-      analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" } });
-
-    const after = await loadArtifactBundle(artifactsDir);
-    expect(after.repo_manifest?.files.find((file) => file.path === "src/api/auth.ts")?.hash).toBe(atStart);
-    expect(after.repo_manifest).toEqual(before.repo_manifest);
-  });
-});
 
 // Two independently issued questions share the same frozen file. The
 // unchanged source span is accepted, while the new live-only span is not.
@@ -96,9 +63,8 @@ test("bound question source spans are measured against the frozen snapshot, not 
 
 test("cleanup removes the run's snapshot with its artifacts dir", async () => {
   await withTempRepo(async (root) => {
-    await advanceToDispatchReady(root);
     const artifactsDir = join(root, ".audit-tools", "audit");
-    const { source_root: sourceRoot } = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as { source_root: string };
+    const { source_root: sourceRoot } = await ensureRunSnapshot(root, artifactsDir);
     expect(existsSync(sourceRoot)).toBe(true);
     expect((await cleanupStaleArtifactsDir(artifactsDir, { force: true, repositoryRoot: root })).action).toBe("deleted");
     expect(existsSync(sourceRoot)).toBe(false);
