@@ -76,10 +76,24 @@ test("a run under load is `parallel`; the isolated re-run that proves contention
 test("the environment key separates measurements taken under different concurrency", () => {
   expect(environmentKey(ENV)).not.toBe(environmentKey(OTHER_ENV));
   expect(environmentKey(ENV)).toBe(environmentKey({ ...ENV }));
-  const live = currentEnvironment({}, "win32");
-  expect(live.platform).toBe("win32");
-  expect(live.workers).toBeGreaterThan(0);
-  expect(currentEnvironment({ VITEST_MAX_WORKERS: "3" }, "linux").workers).toBe(3);
+  const forks = currentEnvironment({ pool: "forks" }, "win32", 16);
+  expect(forks).toEqual({ platform: "win32", cpuCount: 16, workers: 15, pool: "forks" });
+  const threads = currentEnvironment({ pool: "threads" }, "win32", 16);
+  expect(environmentKey(forks)).not.toBe(environmentKey(threads));
+  expect(environmentKey(forks)).not.toBe(environmentKey({ ...forks, pool: "" }));
+  expect(currentEnvironment({ watch: true }, "win32", 16).workers).toBe(8);
+  expect(currentEnvironment(undefined, "win32", 1).workers).toBe(1);
+});
+
+test("uses effective Vitest concurrency after CLI and pool overrides", () => {
+  expect(currentEnvironment({ pool: "forks", maxWorkers: 6 }, "win32", 16).workers).toBe(6);
+  expect(currentEnvironment({
+    pool: "forks", maxWorkers: 6, poolOptions: { forks: { maxForks: 2 }, threads: { maxThreads: 3 } },
+  }, "win32", 16).workers).toBe(2);
+  expect(currentEnvironment({
+    pool: "vmThreads", maxWorkers: 6, poolOptions: { vmThreads: { singleThread: true } },
+  }, "win32", 16).workers).toBe(1);
+  expect(currentEnvironment({ pool: "threads", maxWorkers: 6, fileParallelism: false }, "win32", 16).workers).toBe(1);
 });
 
 test("observations carry the full test id and drop every non-decisive result", () => {

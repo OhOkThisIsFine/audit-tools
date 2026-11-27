@@ -150,18 +150,26 @@ const EMPTY_EVIDENCE = { passedSolo: false, failedSolo: false, failedParallel: f
  * or on a box with a different core count says nothing about this run — the
  * record is bucketed by this key and a mismatch reads as "no record".
  */
-export function currentEnvironment(env = process.env, platform = process.platform) {
-  const cpuCount = availableParallelism();
-  // vitest's default worker budget is the machine's parallelism; these env vars
-  // are its documented overrides. Absent means "vitest chose the default", which
-  // is a real value here, not a missing one.
-  const declared = Number(env.VITEST_MAX_WORKERS ?? env.VITEST_MAX_THREADS);
-  const workers = Number.isFinite(declared) && declared > 0 ? declared : cpuCount;
-  return { platform, cpuCount, workers };
+/** @param {Partial<import("vitest/node").Vitest["config"]>} [config] */
+export function currentEnvironment(config, platform = process.platform, cpuCount = availableParallelism()) {
+  const pool = config?.pool ?? "forks";
+  const forkOptions = pool === "forks" ? config?.poolOptions?.forks : config?.poolOptions?.vmForks;
+  const threadOptions = pool === "threads" ? config?.poolOptions?.threads : config?.poolOptions?.vmThreads;
+  const useForks = pool === "forks" || pool === "vmForks";
+  const single = useForks ? forkOptions?.singleFork : threadOptions?.singleThread;
+  const poolMaximum = useForks ? forkOptions?.maxForks : threadOptions?.maxThreads;
+  // Vitest resolves CLI flags, percentages and pool-specific environment
+  // overrides into this configuration before invoking any reporter.
+  const defaultWorkers = Math.max(1, config?.watch ? Math.floor(cpuCount / 2) : cpuCount - 1);
+  const workers = config?.fileParallelism === false || single ? 1 : poolMaximum ?? config?.maxWorkers ?? defaultWorkers;
+  return { platform, cpuCount, workers, pool };
 }
 
-export function environmentKey({ platform, cpuCount, workers }) {
-  return `${platform}-cpu${cpuCount}-w${workers}`;
+export function environmentKey({ platform, cpuCount, workers, pool = "" }) {
+  // Legacy buckets remain readable, but had neither the actual pool nor a
+  // reliable cap. Do not alias or migrate them into a measured pool bucket.
+  // A new run must earn that evidence through normal rebaselining.
+  return `${platform}-cpu${cpuCount}-w${workers}${pool ? `-${pool}` : ""}`;
 }
 
 /**
@@ -394,6 +402,13 @@ export function updateFlakeBaseline({
 
 export default class TimingReporter {
   scheduledFiles;
+  /** @type {import("vitest/node").Vitest["config"] | undefined} */
+  config;
+
+  /** @param {import("vitest/node").Vitest} ctx */
+  onInit(ctx) {
+    this.config = ctx.config;
+  }
 
   onTestRunStart(specifications) {
     // Vitest 3's run-start list is pre-shard. Without a selected inventory a
@@ -445,9 +460,10 @@ export default class TimingReporter {
     // Baseline step. Wrapped because it is bookkeeping riding on every run in the
     // repo: a defect in it must degrade to "no classification", never take down a
     // suite it has no business failing.
+    const workerBudget = currentEnvironment(this.config);
     let flake = null;
     try {
-      flake = updateFlakeBaseline({ files, environment: currentEnvironment() });
+      flake = updateFlakeBaseline({ files, environment: workerBudget });
       const known = flake.classified.filter((c) => c.classification === "known_parallel_flaky");
       const unrecognized = flake.classified.filter((c) => c.classification === "unrecognized");
       if (flake.classified.length > 0) {
@@ -504,6 +520,7 @@ export default class TimingReporter {
         files.length === this.scheduledFiles.size &&
         new Set(files.map(file => file.id)).size === files.length &&
         files.every(file => this.scheduledFiles.has(file.id) && ["pass", "skip", "todo"].includes(file.result?.state)),
+      workerBudget,
       // Per-failure classification against the tracked baseline. Advisory to the
       // gate today — it rides in the ledger so a lap can answer "is this mine?"
       // from the run's own record instead of re-running the suite on main.
