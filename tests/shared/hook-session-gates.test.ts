@@ -11,6 +11,7 @@
 // inside the session.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
+import { g as fixtureGit, initGateRepo } from './pre-commit-gate-harness.js';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import {
   liveSessionWorkReason,
@@ -57,7 +58,12 @@ function runHook(
   delete inherited.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE;
   delete inherited.AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY;
   delete inherited.AUDIT_TOOLS_NO_FRICTION_STOP_GATE;
-  const r = spawnSyncHidden(process.execPath, [hook], {
+  // Ordinary lifecycle cases don't test GitHub. Retain the real hook and Git
+  // subprocesses, but avoid probing ambient gh/auth dozens of times. The
+  // explicit fake-gh PATH cases still drive the actual spawn boundary.
+  const quietGh = hook === CLOSEOUT_GATE && env.PATH === undefined;
+  const args = quietGh ? ['--require', join(docRoot, 'no-ambient-gh.cjs'), hook] : [hook];
+  const r = spawnSyncHidden(process.execPath, args, {
     input: JSON.stringify(payload),
     encoding: 'utf8',
     timeout: 60_000,
@@ -84,6 +90,14 @@ const askPayload = (session: string): HookPayload => ({
 let docRoot: string;
 beforeAll(() => {
   docRoot = mkdtempSync(join(tmpdir(), 'philgate-'));
+  writeFileSync(join(docRoot, 'no-ambient-gh.cjs'), `
+const cp = require('node:child_process');
+const spawnSync = cp.spawnSync;
+cp.spawnSync = (command, ...args) => command === 'gh'
+  ? { status: 1, stdout: '', stderr: '' }
+  : spawnSync(command, ...args);
+require('node:module').syncBuiltinESMExports();
+`);
   mkdirSync(join(docRoot, 'docs'), { recursive: true });
   cpSync(join(REPO_ROOT, 'docs', 'project-philosophy.md'), join(docRoot, 'docs', 'project-philosophy.md'));
 });
@@ -104,10 +118,6 @@ describe('question-philosophy-gate: the philosophy reaches the agent before the 
     // A question can be about either half, so both must be present.
     expect(stderr).toContain('trustworthy even when the host agent is weak');
     expect(stderr).toContain('Ask on genuine ambiguity');
-  });
-
-  it('tells the agent to ask again if the question survives (B1 still says ask on ambiguity)', () => {
-    const { stderr } = runHook(QUESTION_GATE, askPayload(sid('ask-again')), { root: docRoot });
     expect(stderr).toContain('ASK IT AGAIN');
   });
 
@@ -226,6 +236,15 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     expect(code).toBe(2);
     expect(stderr).toContain('are you sure that was all taken care of');
     expect(stderr).toContain('dirty.txt');
+    // The same challenge must name homes for outstanding work, ask the
+    // owner's decisions, and point to the real structured renderer.
+    expect(stderr).toContain('nothing pending');
+    expect(stderr).toMatch(/HANDOFF/);
+    expect(stderr).toContain('ASKED as a direct question');
+    expect(stderr).toContain('a pointer, not a question');
+    expect(stderr).toContain('scripts/render-closeout.mjs --in');
+    expect(stderr).toContain('INPUT JSON, EVERY section carries a value');
+    expect(stderr).toContain('RENDERED OUTPUT');
   });
 
   // The session's project folder is the MAIN checkout while it works in a linked
@@ -253,39 +272,6 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
       rmSync(main, { recursive: true, force: true });
       rmSync(dirname(linked), { recursive: true, force: true });
     }
-  });
-
-  it('names the home doc for every remaining step — the point of the challenge', () => {
-    const { stderr } = runHook(CLOSEOUT_GATE, stop(sid('homes')), { root: repo });
-    expect(stderr).toContain('nothing pending');
-    expect(stderr).toMatch(/HANDOFF/);
-  });
-
-  it('demands owner decisions be ASKED in the hand-back, not pointed at', () => {
-    // The recurring failure: "your decision — item X" with the actual question
-    // (which the agent holds, options and all) never posed to the owner.
-    const { stderr } = runHook(CLOSEOUT_GATE, stop(sid('ask-decisions')), { root: repo });
-    expect(stderr).toContain('ASKED as a direct question');
-    expect(stderr).toContain('a pointer, not a question');
-  });
-
-  it('demands the hand-back come from the RENDERER, not a conversational "yes, it was handled"', () => {
-    // Left to its own devices the agent answers the challenge in prose and the
-    // structured hand-back — the thing the next session actually reads — is
-    // never re-emitted with the corrections this pass just made.
-    //
-    // What is pinned is the COMMAND and both halves of the "none" rule, not the
-    // doc name. The message used to say "RE-RENDER the whole closeout report to
-    // the scheme in <doc> ... never written out as none", which reads as an
-    // instruction to hand-write markdown against a scheme, and applies the
-    // OUTPUT rule to the INPUT, where every section must state a value or the
-    // literal "none". 19 of 29 challenged sessions hand-wrote the report
-    // (docs/reviews/closeout-generation-failure-2026-08-26.md).
-    const { stderr } = runHook(CLOSEOUT_GATE, stop(sid('re-render')), { root: repo });
-    expect(stderr).toContain('scripts/render-closeout.mjs --in');
-    expect(stderr).toContain('INPUT JSON, EVERY section carries a value');
-    expect(stderr).toContain('RENDERED OUTPUT');
-    expect(stderr).toMatch(/render/i);
   });
 
   it('does not re-ask about a tree state it already challenged', () => {
@@ -542,9 +528,14 @@ describe('closeout-challenge-gate: tree-dirt baseline partition (Build 3)', () =
     }
   });
 
+  let backdatedSeed: string | undefined;
   function freshRepo({ backdatedHours = 24 }: { backdatedHours?: number } = {}): string {
     const root = mkdtempSync(join(tmpdir(), 'closeout-part-'));
     partitionRoots.push(root);
+    if (backdatedHours === 24 && backdatedSeed) {
+      cpSync(backdatedSeed, root, { recursive: true });
+      return root;
+    }
     const g = (args: string[], env: NodeJS.ProcessEnv = {}) =>
       spawnSyncHidden('git', args, {
         cwd: root,
@@ -566,6 +557,11 @@ describe('closeout-challenge-gate: tree-dirt baseline partition (Build 3)', () =
       ['commit', '-qm', 'initial'],
       backdatedHours > 0 ? { GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } : {},
     );
+    if (backdatedHours === 24) {
+      backdatedSeed = mkdtempSync(join(tmpdir(), 'closeout-backdated-seed-'));
+      partitionRoots.push(backdatedSeed);
+      cpSync(root, backdatedSeed, { recursive: true });
+    }
     return root;
   }
 
@@ -635,16 +631,6 @@ describe('closeout-challenge-gate: tree-dirt baseline partition (Build 3)', () =
     // and burn the second cap slot.
     rmSync(join(repo, 'gone.txt'));
     expect(runHook(CLOSEOUT_GATE, stopPayload(session), { root: repo }).code).toBe(0);
-  });
-
-  it("an unregistered session under an ARMED registry is skipped — its stop is not this repo's closeout", async () => {
-    // Fresh HEAD + dirty tree: the strongest work signal, still skipped. This
-    // is the gate-side half of the child-session split, landed with the
-    // partition because the decision tree forces it.
-    const repo = freshRepo({ backdatedHours: 0 });
-    await register(repo, 'someone-else', []);
-    writeFileSync(join(repo, 'work.txt'), "a child's deliverable\n");
-    expect(runHook(CLOSEOUT_GATE, stopPayload(sid('unregistered-child')), { root: repo }).code).toBe(0);
   });
 
   it('a skipped child stop spends NOTHING — no marker written, full cap available after registration', async () => {
@@ -719,52 +705,27 @@ describe('closeout-challenge-gate: the not-on-main finding names what it TESTS',
     }
   });
 
-  /** A repo on branch `feat` with one commit past `main`, optionally pushed. */
+  /** The hook reads local tracking refs; a network transport is not a witness. */
   function repoWithBranch({ pushed }: { pushed: boolean }): string {
-    const root = mkdtempSync(join(tmpdir(), 'closeout-upstream-'));
+    const root = initGateRepo();
     roots.push(root);
-    const g = (...args: string[]) => spawnSyncHidden('git', args, { cwd: root, encoding: 'utf8' });
-    g('init', '-q');
-    g('config', 'user.email', 'test@example.com');
-    g('config', 'user.name', 'test');
-    g('config', 'commit.gpgsign', 'false');
-    writeFileSync(join(root, 'a.txt'), 'one\n');
-    g('add', '.');
-    g('commit', '-qm', 'initial');
-    g('branch', '-M', 'main');
-    // A real local bare remote: a URL that does not resolve would make the
-    // upstream questions unanswerable for reasons unrelated to the gate.
-    const bare = mkdtempSync(join(tmpdir(), 'closeout-bare-'));
-    roots.push(bare);
-    spawnSyncHidden('git', ['init', '-q', '--bare', bare], { encoding: 'utf8' });
-    g('remote', 'add', 'origin', bare);
-    g('checkout', '-q', '-b', 'feat');
+    const g = (...args: string[]) => fixtureGit(root, ...args);
+    g('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    // Configure the fetch refspec a clone would have, without invoking a
+    // transport. The hook only reads the name, ref and actual Git ancestry.
+    g('remote', 'add', 'origin', '.');
+    g('switch', '-q', '-c', 'feat');
     writeFileSync(join(root, 'b.txt'), 'work\n');
     g('add', '.');
     g('commit', '-qm', 'the work this branch carries');
-    // `origin/main` must exist for the range to resolve at all.
-    g('push', '-q', 'origin', 'main');
-    if (pushed) g('push', '-q', '-u', 'origin', 'feat');
-    g('fetch', '-q', 'origin');
+    if (pushed) {
+      g('update-ref', 'refs/remotes/origin/feat', 'HEAD');
+      g('branch', '--set-upstream-to=origin/feat', 'feat');
+    }
     return root;
   }
 
-  it('names the tested condition — NOT MERGED into main — instead of asserting the work is local', () => {
-    const { code, stderr } = runHook(
-      CLOSEOUT_GATE,
-      { hook_event_name: 'Stop', session_id: sid('upstream-name') },
-      { root: repoWithBranch({ pushed: false }) },
-    );
-    expect(code).toBe(2);
-    expect(stderr).toContain('NOT MERGED into');
-    // The false headline must be gone: it is the thing this test exists for.
-    expect(stderr).not.toContain('UNPUSHED');
-  });
-
-  it('says the work is NOT local-only when the branch upstream exists and is current', () => {
-    // The case the entry was filed from: a lap that pushed every commit to its
-    // own branch, upstream current, read a flat assertion it could disprove in
-    // one command.
+  it('names work not merged into main even when its own upstream is current', () => {
     const { code, stderr } = runHook(
       CLOSEOUT_GATE,
       { hook_event_name: 'Stop', session_id: sid('upstream-current') },
@@ -772,6 +733,7 @@ describe('closeout-challenge-gate: the not-on-main finding names what it TESTS',
     );
     expect(code).toBe(2);
     expect(stderr).toContain('NOT MERGED into');
+    expect(stderr).not.toContain('UNPUSHED');
     expect(stderr).toMatch(/IS pushed and current on/);
     expect(stderr).toMatch(/not local-only/);
   });

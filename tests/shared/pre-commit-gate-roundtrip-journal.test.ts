@@ -164,43 +164,34 @@ describe("pre-commit gate: round-trip journal HEAD binding (open-bugs.md:291)", 
     expect(g("show", workingDirectory ? ":shape" : ":shape/nested").stdout).toBe(workingDirectory ? "flat\n" : "nested\n");
   });
 
-  test.each(["rollback", "worktree", "index", "pending journal", "held lock"])(
-    "a real commit keeps HEAD until recovery from %s", (fault) => {
-      installCommitHook();
-      const data = join(repo, "data.txt");
-      writeFileSync(data, "working\n");
-      g("add", "data.txt");
-      const worktreeTree = g("write-tree").stdout.trim();
-      writeFileSync(data, "stage\n");
-      g("add", "data.txt");
-      const stagedTree = g("write-tree").stdout.trim();
-      const head = revParse("HEAD");
-      const lock = join(stateDir(), "gate-roundtrip.lock");
-      if (fault === "pending journal") plantJournal({ head, worktreeTree, stagedTree });
-      if (fault === "held lock") mkdirSync(lock, { recursive: true });
-      // A live round-trip may already have made the worktree match the index.
-      if (fault !== "held lock") writeFileSync(data, "working\n");
-      const conditions: Record<string, string> = {
-        rollback: "args[0] === 'checkout-index'",
-        worktree: "args[0] === 'checkout-index' && ++count === 2",
-        index: "args[0] === 'read-tree' && !opts.env?.GIT_INDEX_FILE",
-        "pending journal": "args[0] === 'checkout-index'",
-        "held lock": "false",
-      };
-      const env = injectGitFault(conditions[fault]!, fault === "rollback");
-      const first = spawnSyncHidden("git", ["commit", "-qm", "candidate"], { cwd: repo, env: { ...process.env, ...env }, encoding: "utf8" });
-      expect(first.status, first.stderr).not.toBe(0);
-      expect(revParse("HEAD")).toBe(head);
-      expect(g("show", ":data.txt").stdout).toBe("stage\n");
-      if (fault === "held lock") rmSync(lock, { recursive: true });
-      else expect(JSON.parse(readFileSync(journalPath(), "utf8"))).toMatchObject({ head, worktreeTree, stagedTree });
-      g("commit", "-qm", "retry");
-      expect(revParse("HEAD")).not.toBe(head);
-      expect(g("show", "HEAD:data.txt").stdout).toBe("stage\n");
-      expect(readFileSync(data, "utf8")).toBe(fault === "held lock" ? "stage\n" : "working\n");
-      expect(existsSync(journalPath())).toBe(false);
-    },
-  );
+  // One interrupted real git commit proves the exit/journal crosses the Git
+  // boundary. The fault-matrix below tests separate fault handling directly;
+  // repeating the entire commit+retry cycle for every fault adds no new boundary.
+  test("a real commit keeps HEAD until recovery from failed rollback", () => {
+    installCommitHook();
+    const data = join(repo, "data.txt");
+    writeFileSync(data, "working\n");
+    g("add", "data.txt");
+    const worktreeTree = g("write-tree").stdout.trim();
+    writeFileSync(data, "stage\n");
+    g("add", "data.txt");
+    const stagedTree = g("write-tree").stdout.trim();
+    const head = revParse("HEAD");
+    writeFileSync(data, "working\n");
+
+    const env = injectGitFault("args[0] === 'checkout-index'", true);
+    const first = spawnSyncHidden("git", ["commit", "-qm", "candidate"], { cwd: repo, env: { ...process.env, ...env }, encoding: "utf8" });
+    expect(first.status, first.stderr).not.toBe(0);
+    expect(revParse("HEAD")).toBe(head);
+    expect(g("show", ":data.txt").stdout).toBe("stage\n");
+    expect(JSON.parse(readFileSync(journalPath(), "utf8"))).toMatchObject({ head, worktreeTree, stagedTree });
+
+    g("commit", "-qm", "retry");
+    expect(revParse("HEAD")).not.toBe(head);
+    expect(g("show", "HEAD:data.txt").stdout).toBe("stage\n");
+    expect(readFileSync(data, "utf8")).toBe("working\n");
+    expect(existsSync(journalPath())).toBe(false);
+  });
 
   test.each(["path-limited commit", "caller-supplied index"])(
     "recovery for a %s preserves unrelated staging", (kind) => {

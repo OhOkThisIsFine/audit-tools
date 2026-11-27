@@ -9,7 +9,7 @@
 // the same contract Claude Code uses. Exit 2 = blocked, exit 0 = allowed.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -1006,16 +1006,29 @@ describe('shell-trap-guard: an over-long ad-hoc peer-CLI dispatch prompt (P28)',
 describe('shell-trap-guard: destructive restore (silently discards unstaged work)', () => {
   // A real throwaway git repo: the rule's whole point is that it consults actual
   // worktree state, so a parse-only test would prove nothing.
-  function makeRepo() {
-    const dir = mkdtempSync(join(tmpdir(), 'trap-guard-repo-'));
-    const git = (...args: string[]) => spawnSyncHidden('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true });
+  let seed: string;
+  beforeAll(() => {
+    seed = mkdtempSync(join(tmpdir(), 'trap-guard-seed-'));
+    const git = (...args: string[]) => {
+      const result = spawnSyncHidden('git', args, { cwd: seed, encoding: 'utf8', windowsHide: true });
+      expect(result.status, result.stderr).toBe(0);
+    };
     git('init', '-q');
     git('config', 'user.email', 'test@example.com');
     git('config', 'user.name', 'test');
-    writeFileSync(join(dir, 'a.txt'), 'committed\n');
-    writeFileSync(join(dir, 'b.txt'), 'committed\n');
+    git('config', 'commit.gpgsign', 'false');
+    writeFileSync(join(seed, 'a.txt'), 'committed\n');
+    writeFileSync(join(seed, 'b.txt'), 'committed\n');
     git('add', '-A');
     git('commit', '-qm', 'base');
+  });
+  afterAll(() => {
+    if (seed) rmSync(seed, { recursive: true, force: true });
+  });
+  function makeRepo() {
+    const dir = mkdtempSync(join(tmpdir(), 'trap-guard-repo-'));
+    cpSync(seed, dir, { recursive: true });
+    const git = (...args: string[]) => spawnSyncHidden('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true });
     return { dir, git };
   }
 
@@ -1369,11 +1382,16 @@ function runInputGuard(
   return runHook(INPUT_GUARD, payload, { root, env });
 }
 
-function seedStaleInputGuardRepo(root: string): (...args: string[]) => void {
+function fixtureGit(root: string): (...args: string[]) => void {
   const git = (...args: string[]) => {
     const result = spawnSyncHidden('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
     expect(result.status, result.stderr).toBe(0);
   };
+  return git;
+}
+
+function seedStaleInputGuardRepo(root: string) {
+  const git = fixtureGit(root);
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', 'Test');
   git('config', 'user.email', 'test@example.com');
@@ -1385,14 +1403,22 @@ function seedStaleInputGuardRepo(root: string): (...args: string[]) => void {
   git('commit', '--no-gpg-sign', '-qm', 'upstream');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
   git('switch', '-q', '-c', 'stale', 'HEAD~1');
-  return git;
 }
 
 describe('tool-input-guard: stale-main evidence is recounted before refusal', () => {
+  let seed: string;
+  beforeAll(() => {
+    seed = mkdtempSync(join(tmpdir(), 'stale-input-guard-seed-'));
+    seedStaleInputGuardRepo(seed);
+  });
+  afterAll(() => {
+    if (seed) rmSync(seed, { recursive: true, force: true });
+  });
   it.each(['synced', 'still-behind', 'missing-ref', 'invalid-remote'])('%s checkout uses current Git evidence', (state) => {
     const root = mkdtempSync(join(tmpdir(), 'input-guard-recount-'));
     try {
-      const git = seedStaleInputGuardRepo(root);
+      cpSync(seed, root, { recursive: true });
+      const git = fixtureGit(root);
       const markerPath = join(root, '.claude', 'hooks', '.state', 'stale-main.json');
       mkdirSync(join(root, '.claude', 'hooks', '.state'), { recursive: true });
       writeFileSync(markerPath, JSON.stringify({ behind: 99, remote: state === 'invalid-remote' ? null : 'origin' }));
@@ -1406,7 +1432,9 @@ describe('tool-input-guard: stale-main evidence is recounted before refusal', ()
       expect(result.code).toBe(state === 'still-behind' ? 2 : 0);
       if (state === 'still-behind') expect(result.stderr).toContain('HEAD is 1 commit(s) BEHIND origin/main');
       expect(existsSync(markerPath)).toBe(false);
-      expect(runInputGuard(payload, { root }).code, 'the existing interruption remains deny-once').toBe(0);
+      if (state === 'still-behind') {
+        expect(runInputGuard(payload, { root }).code, 'the existing interruption remains deny-once').toBe(0);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

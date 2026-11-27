@@ -7,8 +7,9 @@
 // release gates run it — judges the whole tree that landed.
 //
 // Drives the REAL attest hook and the REAL check script in a throwaway repo.
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
@@ -56,6 +57,39 @@ function attestedCommit(content: string, message = "attested") {
   g("commit", "-qm", message);
 }
 
+// Reuse only the starting history. Each case still exercises the real hook
+// or CI gate against its own copied ordinary repo with independent Git data.
+const savedFixtures: string[] = [];
+afterAll(() => {
+  for (const saved of savedFixtures) rmSync(saved, { recursive: true, force: true });
+});
+function reusableFixture(populate: () => void) {
+  let saved: string | undefined;
+  return () => {
+    if (saved) {
+      cpSync(saved, repo, { recursive: true });
+      return;
+    }
+    populate();
+    saved = mkdtempSync(join(tmpdir(), "attestation-fixture-"));
+    savedFixtures.push(saved);
+    cpSync(repo, saved, { recursive: true });
+  };
+}
+
+const useAttestedFixture = reusableFixture(() => attestedCommit("export const x = 1;\n"));
+
+/** Commit x.ts unreviewed, seed the baseline from that commit, commit the ledger. */
+const useSeededFixture = reusableFixture(() => {
+  writeLoopCore("export const x = 1;\n");
+  g("add", "-A");
+  g("commit", "-qm", "pre-ledger content");
+  const s = seed("--commit", "HEAD");
+  expect(s.status, s.stdout + s.stderr).toBe(0);
+  g("add", "-f", "--", LEDGER_PATH);
+  g("commit", "-qm", "seed");
+});
+
 beforeEach(() => {
   repo = initGateRepo();
   g("branch", "-M", "main");
@@ -90,7 +124,7 @@ describe("check:loop-core-attestations judges the tree that landed", () => {
   });
 
   test("a hook-less commit that changes attested loop-core content is refused", () => {
-    attestedCommit("export const x = 1;\n");
+    useAttestedFixture();
     // A cloud agent's commit: no .githooks, no attestation — just a commit.
     writeLoopCore("export const x = 2;\n");
     g("commit", "-qam", "cloud edit");
@@ -100,7 +134,7 @@ describe("check:loop-core-attestations judges the tree that landed", () => {
   });
 
   test("a squash merge of an attested branch passes; of an unattested branch, is refused", () => {
-    attestedCommit("export const x = 1;\n");
+    useAttestedFixture();
     g("checkout", "-qb", "feature");
     attestedCommit("export const x = 2;\n", "attested on a branch");
     g("checkout", "-q", "main");
@@ -131,7 +165,7 @@ describe("check:loop-core-attestations judges the tree that landed", () => {
   });
 
   test("deleting an attested loop-core file without re-attesting leaves a refused orphan entry", () => {
-    attestedCommit("export const x = 1;\n");
+    useAttestedFixture();
     unlinkSync(join(repo, ...STAGED_LOOP_CORE_PATH.split("/")));
     g("commit", "-qam", "delete");
     const r = check(["--rev", "HEAD"]);
@@ -140,7 +174,7 @@ describe("check:loop-core-attestations judges the tree that landed", () => {
   });
 
   test("rewriting the ledger's blob ids to new content, under the old review, is refused", () => {
-    attestedCommit("export const x = 1;\n");
+    useAttestedFixture();
     const oldBlob = g("rev-parse", `HEAD:${STAGED_LOOP_CORE_PATH}`).stdout.trim();
     // The forgery: change the file, then swap the new blob id in for the old one
     // everywhere the ledger records it — every review id left as it was.
@@ -159,7 +193,7 @@ describe("check:loop-core-attestations judges the tree that landed", () => {
   });
 
   test("a review whose tests_ran is not a full-suite stamp record is refused", () => {
-    attestedCommit("export const x = 1;\n");
+    useAttestedFixture();
     const ledgerFile = join(repo, LEDGER_PATH);
     const text = readFileSync(ledgerFile, "utf8");
     expect(text).toContain('"scope": "full-suite"');
@@ -173,19 +207,8 @@ describe("check:loop-core-attestations judges the tree that landed", () => {
 });
 
 describe("a baseline records starting content and claims no review", () => {
-  /** Commit x.ts unreviewed, seed the baseline from that commit, commit the ledger. */
-  function seededRepo() {
-    writeLoopCore("export const x = 1;\n");
-    g("add", "-A");
-    g("commit", "-qm", "pre-ledger content");
-    const s = seed("--commit", "HEAD");
-    expect(s.status, s.stdout + s.stderr).toBe(0);
-    g("add", "-f", "--", LEDGER_PATH);
-    g("commit", "-qm", "seed");
-  }
-
   test("a baseline entry passes for unchanged content, and is reported apart from reviewed files", () => {
-    seededRepo();
+    useSeededFixture();
     const ledger = JSON.parse(readFileSync(join(repo, LEDGER_PATH), "utf8"));
     const [baseline] = Object.values(ledger.baselines) as Record<string, unknown>[];
     expect(Object.keys(baseline).sort()).toEqual(["commit", "vouches"]);
@@ -234,7 +257,7 @@ describe("a baseline records starting content and claims no review", () => {
   });
 
   test("changed content under a baseline entry is refused", () => {
-    seededRepo();
+    useSeededFixture();
     writeLoopCore("export const x = 2;\n");
     g("commit", "-qam", "hook-less edit");
     const r = check(["--rev", "HEAD"], { GITHUB_REF: "refs/heads/main" });
@@ -243,7 +266,7 @@ describe("a baseline records starting content and claims no review", () => {
   });
 
   test("a forged baseline (blob swapped to new content) is refused", () => {
-    seededRepo();
+    useSeededFixture();
     const oldBlob = g("rev-parse", `HEAD:${STAGED_LOOP_CORE_PATH}`).stdout.trim();
     writeLoopCore("export const x = 2;\n");
     g("add", "--", STAGED_LOOP_CORE_PATH);
@@ -258,7 +281,7 @@ describe("a baseline records starting content and claims no review", () => {
   });
 
   test("the seed refuses a ledger that already has a baseline", () => {
-    seededRepo();
+    useSeededFixture();
     const s = seed("--commit", "HEAD");
     expect(s.status, s.stdout + s.stderr).toBe(1);
     expect(s.stderr).toContain("already has a baseline");
@@ -302,7 +325,7 @@ describe("a baseline records starting content and claims no review", () => {
 
   test("the attest hook cannot write a baseline: it has no flag for one, and an attest writes a review", () => {
     expect(attest("--baseline").stderr).toContain("unknown argument: --baseline");
-    seededRepo();
+    useSeededFixture();
     writeLoopCore("export const x = 2;\n");
     g("add", "--", STAGED_LOOP_CORE_PATH);
     const a = attest();
@@ -322,7 +345,7 @@ describe("the attest hook vouches only for content it is told to", () => {
 
   /** Attested x.ts, then y.ts landing unreviewed, then a staged x.ts edit. */
   function unvouchedBesideStagedEdit() {
-    attestedCommit("export const x = 1;\n");
+    useAttestedFixture();
     writeLoopCore("export const y = 1;\n", UNVOUCHED);
     g("add", "-A");
     g("commit", "-qm", "unattested");
