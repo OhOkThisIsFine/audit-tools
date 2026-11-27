@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnHidden } from "../helpers/spawn.mjs";
+import { execFileSyncHidden, spawnHidden } from "../helpers/spawn.mjs";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -65,7 +65,11 @@ test.skipIf(process.platform !== "win32")("terminating only npm ends the exact g
     // Keep the native dependency in its normal package root; the isolated fixture
     // re-exports just that runtime dependency, so it cannot resolve real Vitest.
     put("node_modules/koffi/package.json", JSON.stringify({ type: "module", exports: "./index.mjs" }));
-    const koffi = import.meta.resolve("koffi");
+    // Ask native Node for the ESM entry. Vitest's transformed import.meta
+    // does not implement resolve, and require would pick a different export.
+    const koffi = execFileSyncHidden(process.execPath,
+      ["--input-type=module", "-e", 'process.stdout.write(import.meta.resolve("koffi"))'],
+      { cwd: source, encoding: "utf8" });
     put("node_modules/koffi/index.mjs", `export { default } from ${JSON.stringify(koffi)};`);
     put("node_modules/vitest/package.json", '{"name":"vitest"}');
     put("node_modules/vitest/vitest.mjs", `
