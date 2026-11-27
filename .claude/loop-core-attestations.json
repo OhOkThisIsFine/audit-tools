@@ -591,6 +591,26 @@
         "src/audit/orchestrator/localCommands.ts": "e206cb67a4ea1be84299739069e66e74ffdcbf14"
       }
     },
+    "6f07c78126b62f66": {
+      "reviewed_by": "audit_ship_review",
+      "attester_class": "agent",
+      "checked": "Independently traced pending, empty, malformed and fully settled predecessor workloads: the unbound Git branch never reads/accepts results. Checked advertised, authorized and actual required-test log routing for dispatch, corroboration, recovery, triage and wave review; the custom-dir failing-command fixture verifies the advertised destination. Exact question-row validation and invalid theme references remain enforced.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "1a0d29018b13258dad0e97587b7c7a08dbab19c9",
+        "ran_at": "2026-11-27T23:33:46.338Z"
+      },
+      "attested_at": "2026-11-27T23:34:06.909Z",
+      "vouches": {
+        "src/remediate/steps/dispatch/hostCorroboration.ts": "1821fe1beb010e173bfa2ae28ae0e2bb1578421e",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "821a48edd954f814eaf6523162fe3f112559c137",
+        "src/remediate/steps/dispatch/requiredTests.ts": "34a4a6b44100f593acb861f5f7483014573f9847",
+        "src/remediate/steps/nextStep.ts": "1c5d6b2640c630cd194935093d600a876a61d679",
+        "src/remediate/steps/waveSimplification.ts": "725ca4ecf46c7e915bc4dcbbe801e5c341a414da"
+      }
+    },
     "74f5fdb4c95e9366": {
       "reviewed_by": "OpenAI Codex with independent intake, close and recovery reviewers",
       "attester_class": "agent",
@@ -648,22 +668,6 @@
         "src/audit/orchestrator/configDeploymentSources.ts": "dc5fb712358416d19a61520029624df64ee8ace0",
         "src/audit/orchestrator/executorRunners.ts": "28f2078dd91a45a06060658254750557bb1b7844",
         "src/audit/orchestrator/questionPlanning.ts": "afe3f0fe02b3b347767042f5f3b330e6ee959a26"
-      }
-    },
-    "a6fdf00f198edd21": {
-      "reviewed_by": "independent Audit Tools lifecycle reviewer",
-      "attester_class": "agent",
-      "checked": "Traced actual phase ownership callback through explicit change, plan-only activation and both automatic pauses. Deterministic fixture checks correct state and unchanged bytes after ownership refusal. Callback checked immediately before write, not an atomic fence. Other scope is factual backlog notes and qualified opt-in diagnostics using the unchanged shared literal path primitive.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "7602e3750ae2a9a1ff4438bb8756ab9c4cc811b0",
-        "ran_at": "2026-11-27T21:13:57.096Z"
-      },
-      "attested_at": "2026-11-27T21:13:57.327Z",
-      "vouches": {
-        "src/remediate/steps/nextStep.ts": "a9a4190cac55b4a5236d4ce76e905e7ea5ed897a"
       }
     },
     "aca87556da5ba611": {
@@ -1384,19 +1388,19 @@
       "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/dispatch/hostCorroboration.ts": {
-      "review": "185e1a9338c25bfc"
+      "review": "6f07c78126b62f66"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "6f07c78126b62f66"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
-      "review": "cfe244114db006a2"
+      "review": "6f07c78126b62f66"
     },
     "src/remediate/steps/frictionCloseout.ts": {
       "review": "3e7d0736a83209a4"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "a6fdf00f198edd21"
+      "review": "6f07c78126b62f66"
     },
     "src/remediate/steps/planningGraph.ts": {
       "review": "d9632808536dd1ea"
@@ -1408,7 +1412,7 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/remediate/steps/waveSimplification.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "6f07c78126b62f66"
     },
     "src/shared/engine/obligationEngine.ts": {
       "review": "c2fa0250dd9f5ee5"
