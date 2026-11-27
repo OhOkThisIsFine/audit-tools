@@ -446,7 +446,7 @@ export function evaluatePreparedRuns(response, { headSha, branch, repoId }) {
   const red = evaluateCiGreenForSha(runs, { headSha }).redWorkflows;
   if (red.length) throw new Error(`Prepared release has red CI on ${headSha}: ${red.join(", ")}.`);
   const required = preparedWorkflows.map((path) => {
-    const candidates = runs.filter((row) => row?.path === path && row.head_sha === headSha &&
+    const candidates = runs.filter((row) => (row?.path === path || row?.path === `${path}@refs/heads/${branch}`) && row.head_sha === headSha &&
       row.head_branch === branch && row.event === "push" &&
       row.repository?.id === repoId && row.head_repository?.id === repoId);
     if (!candidates.length) return null;
@@ -481,8 +481,14 @@ export function verifyPreparedChecksJob(response, { runId, headSha }) {
   }
 }
 
-/** @param {string} repoSlug @param {string} headSha */
-function requireProtectedDefaultTip(repoSlug, headSha) {
+/** @param {any} comparison @param {string} headSha */
+export function isProtectedReleaseAncestor(comparison, headSha) {
+  return comparison?.status === "ahead" && comparison.base_commit?.sha === headSha &&
+    comparison.merge_base_commit?.sha === headSha;
+}
+
+/** @param {string} repoSlug @param {string} headSha @param {boolean} [alreadyPushed] */
+function requireProtectedDefaultTip(repoSlug, headSha, alreadyPushed = false) {
   const repository = runJson("gh", ["api", `repos/${repoSlug}`]);
   const branch = repository?.default_branch;
   if (typeof repository?.full_name !== "string" || repository.full_name.toLowerCase() !== repoSlug.toLowerCase() ||
@@ -490,15 +496,46 @@ function requireProtectedDefaultTip(repoSlug, headSha) {
     throw new Error("Cannot establish the prepared release repository/default branch identity.");
   }
   const tip = runJson("gh", ["api", `repos/${repoSlug}/branches/${encodeURIComponent(branch)}`]);
-  if (tip.name !== branch || tip.protected !== true || tip.commit?.sha !== headSha) {
+  if (tip.name !== branch || tip.protected !== true || !/^[a-f0-9]{40}$/.test(tip.commit?.sha ?? "")) {
+    throw new Error("Cannot establish the protected GitHub default-branch tip.");
+  }
+  if (tip.commit.sha !== headSha && !alreadyPushed) {
     throw new Error("Prepared publishing requires HEAD to equal the protected GitHub default-branch tip.");
+  }
+  if (tip.commit.sha !== headSha) {
+    const comparison = runJson("gh", ["api", `repos/${repoSlug}/compare/${headSha}...${tip.commit.sha}?per_page=1`]);
+    if (!isProtectedReleaseAncestor(comparison, headSha)) {
+      throw new Error("Cannot finish a pushed prepared release: its exact commit is no longer on the protected default branch.");
+    }
   }
   return { branch, repoId: repository.id };
 }
 
-/** @param {string} repoSlug @param {string} headSha */
-async function qualifyPreparedHead(repoSlug, headSha) {
-  const identity = { ...requireProtectedDefaultTip(repoSlug, headSha), headSha };
+/**
+ * @param {string} refs
+ * @param {{tag: string, localTagSha: string|null, headSha: string}} identity
+ */
+export function assessPreparedRemoteTag(refs, { tag, localTagSha, headSha }) {
+  if (!refs.trim()) return false;
+  const ref = `refs/tags/${tag}`;
+  const rows = refs.trim().split(/\r?\n/);
+  if (!localTagSha || rows.length !== 2 || !rows.includes(`${localTagSha}\t${ref}`) ||
+      !rows.includes(`${headSha}\t${ref}^{}`)) {
+    throw new Error(`Cannot resume ${tag}: the remote tag object or peeled commit differs from the prepared local tag.`);
+  }
+  return true;
+}
+
+/** @param {string} remote @param {string} tag @param {string} headSha */
+function inspectPreparedRemoteTag(remote, tag, headSha) {
+  const ref = `refs/tags/${tag}`;
+  const refs = run("git", ["ls-remote", "--tags", remote, ref, `${ref}^{}`], { capture: true }).stdout;
+  return assessPreparedRemoteTag(refs, { tag, headSha, localTagSha: tryGitSha(ref) });
+}
+
+/** @param {string} repoSlug @param {string} headSha @param {boolean} [alreadyPushed] */
+async function qualifyPreparedHead(repoSlug, headSha, alreadyPushed = false) {
+  const identity = { ...requireProtectedDefaultTip(repoSlug, headSha, alreadyPushed), headSha };
   const deadline = Date.now() + ciInFlightWaitMs;
   console.log(`[release] waiting for the protected default-branch push checks and tests on ${headSha}`);
   for (;;) {
@@ -511,7 +548,7 @@ async function qualifyPreparedHead(repoSlug, headSha) {
       if (current.id !== ci.id || current.run_attempt !== ci.run_attempt || current.status !== "completed" || current.conclusion !== "success") {
         throw new Error("Prepared release checks changed during qualification; wait for the new attempt and retry.");
       }
-      const tip = requireProtectedDefaultTip(repoSlug, headSha);
+      const tip = requireProtectedDefaultTip(repoSlug, headSha, alreadyPushed);
       if (tip.branch !== identity.branch || tip.repoId !== identity.repoId) {
         throw new Error("Prepared release default-branch identity changed during CI qualification.");
       }
@@ -1194,7 +1231,7 @@ export function releaseJournalPath(root) {
 }
 
 /** @typedef {{repo: string, base: string, previousVersion: string, bump: string, skipped: boolean, prepared?: {tree: string, tag: string, version: string}}} ReleaseIntent */
-/** @typedef {{schema?: string, repo?: string, tag?: string, version?: string, commit?: string, updated_at?: string, phases?: Record<string, unknown>, intent?: ReleaseIntent, preTagCiSkipped?: boolean, preparedCiRun?: number}} ReleaseJournal */
+/** @typedef {{schema?: string, repo?: string, tag?: string, version?: string, commit?: string, updated_at?: string, phases?: Record<string, unknown>, intent?: ReleaseIntent, preTagCiSkipped?: boolean, preparedCiRun?: number, preparedTagSha?: string}} ReleaseJournal */
 
 /** @param {string} root @returns {ReleaseJournal | null} */
 export function readReleaseJournal(root) {
@@ -1330,6 +1367,14 @@ export function planReleaseResume(journal, { tag, headSha } = {}) {
     return { resume: false, reason: `the journal names ${journal.tag}, this checkout's version implies ${tag}` };
   }
   return { resume: true, tag: journal.tag, reason: `resuming ${journal.tag} at ${headSha.slice(0, 8)}` };
+}
+
+/** @param {ReleaseJournal | null} journal @param {boolean} publishPrepared @param {boolean} resumes */
+export function assertPreparedReleaseMode(journal, publishPrepared, resumes) {
+  if ((!publishPrepared && journal?.preparedCiRun && !journal.phases?.["reinstall+smoke"]) ||
+      (publishPrepared && resumes && !journal?.preparedCiRun)) {
+    throw new Error("Cannot resume this release in a different mode. Retry with the original release command.");
+  }
 }
 
 /** Does the GitHub Release for `tag` already exist? Idempotence guard — never recreate. */
@@ -1542,9 +1587,7 @@ async function runRelease() {
     tag: `v${packageBefore.version}`,
     headSha: headAtStart,
   });
-  if (resume.resume && Boolean(journal?.preparedCiRun) !== publishPrepared) {
-    throw new Error("Cannot resume this release in a different mode. Retry with the original release command.");
-  }
+  assertPreparedReleaseMode(journal, publishPrepared, resume.resume);
   if (publishPrepared && !resume.resume && journal && !journal.phases?.["reinstall+smoke"]) {
     throw new Error("Cannot begin a prepared release while a different release is pending in this worktree.");
   }
@@ -1558,14 +1601,20 @@ async function runRelease() {
     : ensureMainBranch();
   const published = resume.resume && Boolean(journal?.phases?.["tag+release"]);
   let ciGate;
+  let preparedTagAlreadyPushed = false;
 
   if (resume.resume) {
     if (journal?.preTagCiSkipped && !skipCiGreen) {
       throw new Error("Cannot resume release: the version commit was prepared with --skip-ci-green, which this invocation did not select.");
     }
     if (publishPrepared && !published && headAtStart && resume.tag) {
-      verifyReleasePushDestination(repoSlug, getRemoteName());
-      await runPhase("pre-tag-gate(prepared-ci)", () => qualifyPreparedHead(repoSlug, headAtStart));
+      const remote = getRemoteName();
+      verifyReleasePushDestination(repoSlug, remote);
+      preparedTagAlreadyPushed = inspectPreparedRemoteTag(remote, resume.tag, headAtStart);
+      if (preparedTagAlreadyPushed && journal?.preparedTagSha !== tryGitSha(`refs/tags/${resume.tag}`)) {
+        throw new Error("Cannot finish a pushed prepared release without its checkpointed tag object.");
+      }
+      await runPhase("pre-tag-gate(prepared-ci)", () => qualifyPreparedHead(repoSlug, headAtStart, preparedTagAlreadyPushed));
       ensureCleanWorktree();
       if (tryGitSha("HEAD") !== headAtStart) throw new Error("Prepared release HEAD changed; refusing to tag or push.");
       ensurePreparedLocalTag(resume.tag, headAtStart);
@@ -1730,10 +1779,26 @@ async function runRelease() {
         if (!headSha || tryGitSha(`refs/tags/${tag}^{commit}`) !== headSha || tryGitSha("HEAD") !== headSha) {
           throw new Error("Prepared release tag or HEAD changed; refusing to push.");
         }
-        requireProtectedDefaultTip(repoSlug, headSha);
+        requireProtectedDefaultTip(repoSlug, headSha, preparedTagAlreadyPushed);
+        const localTagSha = tryGitSha(`refs/tags/${tag}`);
+        if (!journal || !localTagSha || (journal.preparedTagSha && journal.preparedTagSha !== localTagSha)) {
+          throw new Error("Prepared local tag disappeared or changed before publication.");
+        }
+        if (!preparedTagAlreadyPushed) {
+          // Unlike the best-effort phase log, the exact pushed tag object
+          // must survive an interruption after the push but before release creation.
+          journal.preparedTagSha = localTagSha;
+          writeReleaseJournal(repoRoot, journal);
+          console.log(`[release] pushing tag ${tag}`);
+          run("git", ["push", remoteName, `${localTagSha}:refs/tags/${tag}`]);
+        }
+        if (!inspectPreparedRemoteTag(remoteName, tag, headSha)) {
+          throw new Error("Prepared remote tag is missing; refusing to create a release.");
+        }
+      } else {
+        console.log(`[release] pushing tag ${tag}`);
+        run("git", ["push", remoteName, tag]);
       }
-      console.log(`[release] pushing tag ${tag}`);
-      run("git", ["push", remoteName, publishPrepared ? `refs/tags/${tag}:refs/tags/${tag}` : tag]);
       if (releaseExists(repoSlug, tag)) {
         console.log(`[release] GitHub Release ${tag} already exists — leaving it untouched.`);
       } else {

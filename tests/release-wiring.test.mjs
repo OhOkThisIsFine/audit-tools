@@ -7,8 +7,11 @@ import { catalogCommands } from "../scripts/shared/verify-steps.mjs";
 import { DOC_MANIFEST } from "../scripts/doc-manifest-data.mjs";
 import { PINS, legCommand } from "../scripts/shared/derived-file-preflight.mjs";
 import {
+  assessPreparedRemoteTag,
+  assertPreparedReleaseMode,
   evaluatePreparedRuns,
   isPreparedVersionBump,
+  isProtectedReleaseAncestor,
   verifyPreparedChecksJob,
 } from "../scripts/release-and-publish.mjs";
 
@@ -52,10 +55,13 @@ test("prepared release requires exact successful default pushes from both canoni
   const suite = { ...run, id: 18, name: "audit-code-test-suite", path: ".github/workflows/audit-code-test-suite.yml" };
   const evaluate = (...rows) => evaluatePreparedRuns({ total_count: rows.length, workflow_runs: rows }, identity);
   assert.equal(evaluate(run, suite), run);
+  const scoped = { ...run, path: `${run.path}@refs/heads/main` };
+  assert.equal(evaluate(scoped, suite), scoped);
   assert.equal(evaluate(run), null);
   for (const wrong of [
     { event: "pull_request" }, { event: "workflow_dispatch" }, { head_sha: "b".repeat(40) },
-    { head_branch: "feature" }, { path: ".github/workflows/lookalike.yml" }, { head_repository: { id: 43 } },
+    { head_branch: "feature" }, { path: ".github/workflows/lookalike.yml" },
+    { path: `${run.path}@refs/heads/feature` }, { path: `${run.path}@refs/pull/1/merge` }, { head_repository: { id: 43 } },
     { repository: { id: 43 } }, { status: "in_progress", conclusion: null },
   ]) assert.equal(evaluate({ ...run, ...wrong }, suite), null);
   const rerun = { ...run, run_attempt: 2 };
@@ -91,4 +97,35 @@ test("prepared version must be the requested conventional bump of the first-pare
   assert.equal(isPreparedVersionBump("0.57.19", "0.57.21", "patch"), false);
   assert.equal(isPreparedVersionBump("0.57.19", "0.57.20", "minor"), false);
   assert.equal(isPreparedVersionBump("0.57.19", "0.57.020", "patch"), false);
+});
+
+test("a pushed prepared release requires both the exact remote tag object and peeled commit", () => {
+  const identity = { tag: "v0.57.20", localTagSha: "a".repeat(40), headSha: "b".repeat(40) };
+  const object = `${identity.localTagSha}\trefs/tags/v0.57.20\n`;
+  const peeled = `${identity.headSha}\trefs/tags/v0.57.20^{}\n`;
+  assert.equal(assessPreparedRemoteTag("", identity), false);
+  assert.equal(assessPreparedRemoteTag(object + peeled, identity), true);
+  assert.equal(assessPreparedRemoteTag(peeled + object, identity), true);
+  assert.throws(() => assessPreparedRemoteTag(object, identity), /differs/);
+  assert.throws(() => assessPreparedRemoteTag(peeled, identity), /differs/);
+  assert.throws(() => assessPreparedRemoteTag(object + peeled, { ...identity, localTagSha: null }), /differs/);
+  assert.throws(() => assessPreparedRemoteTag(object + peeled, { ...identity, localTagSha: "c".repeat(40) }), /differs/);
+  assert.throws(() => assessPreparedRemoteTag(object + peeled, { ...identity, headSha: "c".repeat(40) }), /differs/);
+});
+
+test("an advanced protected tip can only finish a pushed release whose exact commit remains an ancestor", () => {
+  const sha = "a".repeat(40);
+  const comparison = { status: "ahead", base_commit: { sha }, merge_base_commit: { sha } };
+  assert.equal(isProtectedReleaseAncestor(comparison, sha), true);
+  assert.equal(isProtectedReleaseAncestor({ ...comparison, status: "diverged" }, sha), false);
+  assert.equal(isProtectedReleaseAncestor({ ...comparison, merge_base_commit: { sha: "b".repeat(40) } }, sha), false);
+  assert.equal(isProtectedReleaseAncestor({ ...comparison, base_commit: { sha: "b".repeat(40) } }, sha), false);
+});
+
+test("a pending prepared journal blocks a legacy bump even when the checkout no longer matches it", () => {
+  const pending = { preparedCiRun: 17, phases: { land: { alreadyLanded: true } } };
+  assert.throws(() => assertPreparedReleaseMode(pending, false, false), /different mode/);
+  assert.throws(() => assertPreparedReleaseMode(pending, false, true), /different mode/);
+  assert.doesNotThrow(() => assertPreparedReleaseMode(pending, true, true));
+  assert.doesNotThrow(() => assertPreparedReleaseMode({ ...pending, phases: { "reinstall+smoke": {} } }, false, false));
 });
