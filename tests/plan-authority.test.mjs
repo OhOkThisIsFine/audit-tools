@@ -89,6 +89,41 @@ test("a plan replays without change and closes only after approval and a verifie
   await put(paths.history,history);
   await put(paths.approval,{revision_sha256:revision,judge_input_sha256:hash({role:"judge",revision}),
     owner_decision_sha256:hash(null),risk_decision_sha256:hash(null),history_sha256:hash(history),review_sha256:reviewHashes});
+  await t.test("ingest distinguishes a retired workload from a lost live binding", async () => {
+    const { prepareRemediationHostHandoff, ingestRemediationHostResults } = await load("remediate/steps/dispatch/hostHandoff.js");
+    const { REMEDIATION_STATE_CONTRACT_VERSION } = await load("remediate/state/store.js");
+    const { REMEDIATION_HOST_DECISION_CONTRACT_VERSION } = await load("remediate/steps/types.js");
+    const { deriveResultId } = await load("shared/index.js");
+    const { closing_plan, ...sharedState } = state;
+    const pending = { ...sharedState, status:"implementing", contract_version:REMEDIATION_STATE_CONTRACT_VERSION,
+      items:{title:{unit_id:"title",status:"pending"}} };
+    const wave = { ...options, runId:"fixture-wave" };
+    const handoff = await prepareRemediationHostHandoff({ ...wave,
+      state:pending, baselineCommit:git("rev-parse","HEAD").trim() });
+    const [item] = handoff.workload.work_items;
+    await put(resolve(root,item.result_path),{
+      contract_version:REMEDIATION_HOST_DECISION_CONTRACT_VERSION,
+      result_id:deriveResultId(item.id,item.prompt.sha256),
+      run_id:wave.runId, work_item_id:item.id, prompt_sha256:item.prompt.sha256,
+      outcome:{status:"resolved_no_change",evidence:["Synthetic unchanged fixture."]}
+    });
+    const unbound = await ingestRemediationHostResults({ ...wave, state:pending });
+    assert.deepEqual(unbound.issues.map(issue => issue.code), ["trusted_binding_missing"]);
+    assert.equal(unbound.accepted_count,0);
+    const accepted = await ingestRemediationHostResults({ ...wave,
+      state:{ ...pending, host_handoff:handoff.handoff_record, conformance_review:handoff.conformance_review } });
+    assert.equal(accepted.accepted_count,1);
+    assert.equal(accepted.state.items.title.status,"resolved_no_change");
+    assert.equal(accepted.state.host_handoff,undefined);
+    const retired = await ingestRemediationHostResults({ ...wave, state:accepted.state });
+    assert.deepEqual(retired.issues,[]);
+    assert.equal(retired.accepted_count,0);
+    assert.equal(retired.state_changed,false);
+    await put(handoff.workload_path,{ ...handoff.workload, work_items:[] });
+    const empty = await ingestRemediationHostResults({ ...wave, state:accepted.state });
+    assert.deepEqual(empty.issues.map(issue => issue.code), ["trusted_binding_missing"]);
+    assert.equal(empty.accepted_count,0);
+  });
   const blocked = await runClosePhase(state,options);
   assert.equal(blocked.status,"closing");
   const red = await readFinalGateReport(artifactsDir);

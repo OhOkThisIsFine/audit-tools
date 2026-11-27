@@ -1902,6 +1902,15 @@ async function validateHostResultBundle(input: {
   issues.push(...planBlockIssues(paths.root, state));
 
   if ((await isGitRepo(paths.root)) && !state.host_handoff) {
+    // The run-level file is reused between waves. Once a wave settles, its
+    // binding is retired before the next dispatch overwrites the file. A
+    // canonical workload whose items are all already verified is not missing
+    // a live binding. Never scan or accept results on this unbound path.
+    const previous = parseWorkload(workloadRead.value, paths, input.runId, state);
+    if (previous && previous.work_items.length > 0 &&
+        previous.work_items.every(({ id }) => isVerifiedCompleteStatus(state.items[id]?.status))) {
+      return noAcceptance([]);
+    }
     issues.push({
       code: "trusted_binding_missing",
       check: "workload_binding",
