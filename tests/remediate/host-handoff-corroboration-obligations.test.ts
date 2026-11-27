@@ -49,21 +49,11 @@ describe("obligation evidence-coverage floor", () => {
     return ingested;
   }
 
-  it("binds the block's contract obligation ids onto the work item, sorted and deduplicated", async () => {
+  it("binds and prompts for sorted obligation ids, then accepts complete coverage", async () => {
     const value = await fixture({ contractOverlays: true });
-    expect(value.item.obligation_ids).toEqual([
-      "mod-a:invariant:1",
-      "mod-a:output:2",
-    ]);
-  });
-
-  it("binds stable requirements even without a full module contract", async () => {
-    const value = await fixture();
-    expect(value.item.obligation_ids).toEqual(["REQ-B1"]);
-  });
-
-  it("accepts a result whose obligation_evidence covers every bound obligation", async () => {
-    const value = await fixture({ contractOverlays: true });
+    expect(value.item.obligation_ids).toEqual(["mod-a:invariant:1", "mod-a:output:2"]);
+    expect(value.item.prompt.text).toContain("obligation_evidence");
+    for (const id of value.item.obligation_ids) expect(value.item.prompt.text).toContain(id);
     const after = await landA(value);
     await writeResult(
       value,
@@ -147,7 +137,7 @@ describe("obligation evidence-coverage floor", () => {
     expect(refused.issues[0]!.message).toContain("mod-a:invariant:1");
   });
 
-  it("refuses empty coverage for a unit even without a module contract", async () => {
+  it("binds the fallback requirement without a module contract and refuses empty coverage", async () => {
     const value = await fixture();
     expect(value.item.obligation_ids).toEqual(["REQ-B1"]);
     const after = await landA(value);
@@ -164,12 +154,6 @@ describe("obligation evidence-coverage floor", () => {
     expect(ingested.issues[0]!.message).toContain("REQ-B1");
   });
 
-  it("the dispatch prompt enumerates the bound obligation ids it demands evidence for", async () => {
-    const value = await fixture({ contractOverlays: true });
-    expect(value.item.prompt.text).toContain("obligation_evidence");
-    expect(value.item.prompt.text).toContain("mod-a:invariant:1");
-    expect(value.item.prompt.text).toContain("mod-a:output:2");
-  });
 });
 
 describe("independent conformance admission and captured verification evidence", () => {
