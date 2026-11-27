@@ -508,18 +508,20 @@ function gitControlLine(stdout: string): string {
 
 async function admitGitWorkingTreeRoot(
   root: string,
-): Promise<{ ok: true } | GitDiscoveryFailure> {
-  const inside = await runGitDiscovery(root, ["rev-parse", "--is-inside-work-tree"]);
-  if (!inside.ok) return inside;
-  if (gitControlLine(inside.stdout) !== "true") {
-    return { ok: false, reason: "git rev-parse --is-inside-work-tree: expected a working tree" };
+  includeHead = false,
+): Promise<{ ok: true; commit: string | null } | GitDiscoveryFailure> {
+  // Git emits one terminated line per requested control value, including the
+  // empty prefix at the top level. Read them together rather than starting a
+  // new Git process for each value (and possibly reading a different HEAD).
+  const args = ["rev-parse", "--is-inside-work-tree", "--show-prefix", ...(includeHead ? ["HEAD"] : [])];
+  const probe = await runGitDiscovery(root, args);
+  if (!probe.ok) return probe;
+  const lines = probe.stdout.split(/\r?\n/u);
+  if (lines.length !== (includeHead ? 4 : 3) || lines[0] !== "true" ||
+      lines[1] !== "" || lines.at(-1) !== "") {
+    return { ok: false, reason: "git rev-parse: expected complete control output for a top-level working-tree root" };
   }
-  const prefix = await runGitDiscovery(root, ["rev-parse", "--show-prefix"]);
-  if (!prefix.ok) return prefix;
-  if (gitControlLine(prefix.stdout) !== "") {
-    return { ok: false, reason: "git rev-parse --show-prefix: expected a top-level working-tree root" };
-  }
-  return { ok: true };
+  return { ok: true, commit: includeHead ? gitCommitControl(lines[2] ?? "") : null };
 }
 
 function gitCommitControl(stdout: string): string | null {
@@ -590,11 +592,9 @@ export async function readAuditReadState(
   } = {},
 ): Promise<{ commit: string; dirty_paths: string[] } | null> {
   // Audit paths are relative to this root; never silently rebase a nested root.
-  if (!(await admitGitWorkingTreeRoot(root)).ok) return null;
-  const head = await runGitDiscovery(root, ["rev-parse", "HEAD"]);
-  if (!head.ok) return null;
-  const commit = gitCommitControl(head.stdout);
-  if (commit === null) return null;
+  const admitted = await admitGitWorkingTreeRoot(root, true);
+  if (!admitted.ok || admitted.commit === null) return null;
+  const { commit } = admitted;
   const excluded = options.excludePaths ?? [];
   const dirty = await dirtyPathsAgainst(root, commit, excluded);
   if (dirty === null) return null;

@@ -21,9 +21,8 @@ const STATUS = [
 ];
 const DIFF = ["diff", "--name-only", "--no-renames", "-z", HEAD];
 const UNTRACKED = ["ls-files", "--others", "--exclude-standard", "-z"];
-const INSIDE = ["rev-parse", "--is-inside-work-tree"];
-const PREFIX = ["rev-parse", "--show-prefix"];
-const CURRENT = ["rev-parse", "HEAD"];
+const ROOT_PROBE = ["rev-parse", "--is-inside-work-tree", "--show-prefix"];
+const AUDIT_PROBE = [...ROOT_PROBE, "HEAD"];
 const PRIOR_REF = ["rev-parse", "--verify", "--quiet", `${PRIOR}^{commit}`];
 
 function result(stdout: string, overrides: Partial<exec.RunTrackedResult> = {}): exec.RunTrackedResult {
@@ -37,9 +36,9 @@ function mockGit(
     const args = argv.slice(1);
     const overridden = override(args);
     if (overridden) return overridden;
-    if (args[1] === "--is-inside-work-tree") return result("true\n");
-    if (args[1] === "--show-prefix") return result("\n");
-    if (args[0] === "rev-parse") return result(`${args[1] === "HEAD" ? HEAD : PRIOR}\n`);
+    if (matches(args, ROOT_PROBE)) return result("true\n\n");
+    if (matches(args, AUDIT_PROBE)) return result("true\n\n" + HEAD + "\n");
+    if (matches(args, PRIOR_REF)) return result(PRIOR + "\n");
     return result("");
   });
 }
@@ -127,7 +126,7 @@ describe("bounded Git path transport", () => {
       expect(answer).not.toHaveProperty("paths");
     });
     for (const [operation, args] of [
-      ["working-tree probe", INSIDE], ["prefix probe", PREFIX], ["HEAD probe", CURRENT],
+      ["root and HEAD probe", AUDIT_PROBE],
       ["audit diff", DIFF], ["audit untracked", UNTRACKED],
     ] as const) {
       it(`audit fails closed on ${operation}: ${failure}`, async () => {
@@ -142,7 +141,7 @@ describe("bounded Git path transport", () => {
       });
     }
     for (const [operation, args] of [
-      ["working-tree probe", INSIDE], ["prefix probe", PREFIX], ["status", STATUS],
+      ["root probe", ROOT_PROBE], ["status", STATUS],
     ] as const) {
       it(`remediation rejects ${operation}: ${failure}`, async () => {
         mockGit((actual) => matches(actual, [...args]) ? fail() : undefined);
@@ -165,7 +164,7 @@ describe("strict porcelain-v1 NUL parsing through remediation discovery", () => 
     const spy = statusFixture(`${names.map((path) => `?? ${path}\0`).join("")} M  z \0`);
     expect(await stagedAndUntracked(ROOT)).toEqual(names);
     expect(spy.mock.calls.map(([argv]) => argv)).toEqual([
-      ["git", ...INSIDE], ["git", ...PREFIX], ["git", ...STATUS],
+      ["git", ...ROOT_PROBE], ["git", ...STATUS],
     ]);
     for (const [, options] of spy.mock.calls) {
       expect(options).toMatchObject({
@@ -210,26 +209,33 @@ describe("strict porcelain-v1 NUL parsing through remediation discovery", () => 
 });
 
 describe("root admission and audit stamp conservatism", () => {
-  for (const [operation, output] of [
-    [INSIDE, "false\n"], [INSIDE, " true\n"], [INSIDE, "true\n\n"],
-    [PREFIX, "nested/\n"], [PREFIX, "   \n"], [PREFIX, "\n\n"],
-    [PREFIX, "\r"],
-  ] as const) {
-    it(`refuses synthetic malformed/non-root control output ${JSON.stringify(output)} from ${operation[1]}`, async () => {
-      mockGit((args) => matches(args, [...operation]) ? result(output) : undefined);
-      expect(await readAuditReadState(ROOT)).toBeNull();
-      await expect(stagedAndUntracked(ROOT)).rejects.toBeInstanceOf(DirtyPathDiscoveryError);
-    });
-  }
-
-  it("accepts one terminal CRLF without trimming path control responses", async () => {
-    mockGit((args) => matches(args, INSIDE) ? result("true\r\n") : matches(args, PREFIX) ? result("\r\n") : undefined);
-    expect(await stagedAndUntracked(ROOT)).toEqual([]);
-    expect(await readAuditReadState(ROOT)).toEqual({ commit: HEAD, dirty_paths: [] });
+  it.each([
+    ["false", ""], [" true", ""], ["true", "nested/"], ["true", "   "],
+    ["true", "\n"], ["true", "\r\r"], ["true\n", ""],
+  ])("refuses malformed or non-root control output %j / %j", async (inside, prefix) => {
+    const probeOutput = inside + "\n" + prefix + "\n";
+    const spy = mockGit((args) => matches(args, ROOT_PROBE) ? result(probeOutput)
+      : matches(args, AUDIT_PROBE) ? result(probeOutput + HEAD + "\n") : undefined);
+    expect(await readAuditReadState(ROOT)).toBeNull();
+    await expect(stagedAndUntracked(ROOT)).rejects.toBeInstanceOf(DirtyPathDiscoveryError);
+    expect(spy.mock.calls.map(([argv]) => argv)).toEqual([
+      ["git", ...AUDIT_PROBE], ["git", ...ROOT_PROBE],
+    ]);
   });
 
-  it.each(["", "HEAD\n", `${HEAD}\ntrailer`, ` ${HEAD}\n`, `${HEAD}\n\n`])("audit refuses malformed current HEAD %j", async (stdout) => {
-    mockGit((args) => matches(args, CURRENT) ? result(stdout) : undefined);
+  it("accepts CRLF control lines without trimming prefix or object id", async () => {
+    const spy = mockGit((args) => matches(args, ROOT_PROBE) ? result("true\r\n\r\n")
+      : matches(args, AUDIT_PROBE) ? result("true\r\n\r\n" + HEAD + "\r\n") : undefined);
+    expect(await stagedAndUntracked(ROOT)).toEqual([]);
+    expect(await readAuditReadState(ROOT)).toEqual({ commit: HEAD, dirty_paths: [] });
+    expect(spy.mock.calls.map(([argv]) => argv)).toEqual([
+      ["git", ...ROOT_PROBE], ["git", ...STATUS], ["git", ...AUDIT_PROBE], ["git", ...DIFF], ["git", ...UNTRACKED],
+    ]);
+  });
+
+  it.each(["", "HEAD\n", HEAD, HEAD + "\ntrailer", " " + HEAD + "\n", HEAD + "\n\n"])
+  ("audit refuses malformed or incomplete current HEAD %j", async (stdout) => {
+    mockGit((args) => matches(args, AUDIT_PROBE) ? result("true\n\n" + stdout) : undefined);
     expect(await readAuditReadState(ROOT)).toBeNull();
   });
 
