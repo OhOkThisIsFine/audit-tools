@@ -282,6 +282,36 @@
         "src/shared/loopCorePaths.ts": "8c4ad34e56d2eaaf4c5621cf38bc7c7cf89c6898"
       }
     },
+    "3ac795cb6300b0c0": {
+      "reviewed_by": "Independent audit reviewers and integration reviewer (agents)",
+      "attester_class": "agent",
+      "checked": "Traced confirmed-intent resume and frozen-run completion; ruled out stale graph and loss of analyzer observations across scoped retries; checked exact legacy and shared graph digests and indexed caches, skipped versus attempted selections, bound step submissions, single scope decision, and admitted-file Tests lens context. Reviewed Windows obstructed-directory read behavior and preserved fail-closed error reporting.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "24ffba72f1c70e641b7741e3776d452bc5e7bf54",
+        "ran_at": "2026-11-27T00:59:38.100Z"
+      },
+      "attested_at": "2026-11-27T01:05:24.702Z",
+      "vouches": {
+        "src/audit/cli/confirmIntentStep.ts": "92c15387746121da87e4c91481d9691a8294da27",
+        "src/audit/cli/dispatch/hostHandoff.ts": "c8c568721f408c7098c13af5a733287d23cb6abf",
+        "src/audit/cli/laneSubmissions.ts": "22dd64bfa2fa681f5ff33878cafef52630cf07db",
+        "src/audit/cli/laneValidators.ts": "f351fc6c4bfda2b318c8511c290550a63dfd6bca",
+        "src/audit/cli/nextStepCommand.ts": "f654ce2b799ee0fff5a8217445c1d3c19b943a08",
+        "src/audit/cli/nextStepHelpers.ts": "d74d3610807e0d43cac1c5c0c5d7862e133a980c",
+        "src/audit/cli/prompts.ts": "224809cb271a6f4160b7a6ffaf4090ecc435950e",
+        "src/audit/orchestrator/acquisitionExecutor.ts": "0b092155cac0697c69951888ceb2371636353e78",
+        "src/audit/orchestrator/analyzerCalibration.ts": "ba6b08b94182f1d0e7b8eb8057a8067fb1f5d254",
+        "src/audit/orchestrator/analyzerSelection.ts": "4772e73de33c346e8b0a0a0006c426292546684a",
+        "src/audit/orchestrator/dependencyMap.ts": "59f5a443866a438da5e133b76a6e82432467d2d1",
+        "src/audit/orchestrator/designReviewSnapshot.ts": "a6f4496dc29c017b03b6efbf3cf3369633865639",
+        "src/audit/orchestrator/executorRunners.ts": "3588494abb71cef741eea3834807f17e08a99abb",
+        "src/audit/orchestrator/questionPlanning.ts": "c8cdb44b4dba5fe688a88f4f8e5652989f658311",
+        "src/audit/orchestrator/testSuiteSubjects.ts": "e81188f86846ebdbcb5e2d7504954bf14fda5695"
+      }
+    },
     "3e7d0736a83209a4": {
       "reviewed_by": "dot (inherited loop changes) + implement_planner (exact shared context patch)",
       "attester_class": "agent",
@@ -425,24 +455,6 @@
         "src/audit/reporting/criticalFlowFallbackPrompt.ts": "bacda78481a44508d215c5d7160ea80d4d587ffc"
       }
     },
-    "51642764524969f9": {
-      "reviewed_by": "tutor_systemic_4f7",
-      "attester_class": "agent",
-      "checked": "Independently compared exact staged blobs to base; replayed frozen Tutor Sync planner, challenged generic hub and test-import grouping; verified distinct leaf coverage and 24 accepted claims, binding priority only and unchanged identities; verified systemic artifact dependency and matching generated mirror; confirmed final cache pin-only qualification delta.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "d284cdfd2c9b18051fb4817e44ffd5e9b2c81781",
-        "ran_at": "2026-11-22T09:38:24.901Z"
-      },
-      "attested_at": "2026-11-22T09:38:36.244Z",
-      "vouches": {
-        "src/audit/cli/questionWorkloadBindings.ts": "48a9ba64db941ad0038e4887125fdfb031e5330f",
-        "src/audit/orchestrator/dependencyMap.ts": "96a4a3523ee97339435794b413d747db0f7f1080",
-        "src/audit/orchestrator/questionPlanning.ts": "52bdd49525e73ec8ef606e638e84e17401d171fe"
-      }
-    },
     "58a44ca3a3caea9d": {
       "reviewed_by": "claude-opus-5-5",
       "attester_class": "agent",
@@ -461,31 +473,6 @@
         "src/audit/orchestrator/executors.ts": "a3c578c5dc8df531e1fddf8a70a25ac39edb5f5a",
         "src/audit/orchestrator/obligationPolicy.ts": "6f9a592d9dd7326fff4369ce82770060e3fa947f",
         "src/audit/orchestrator/staleness.ts": "dc720ae7b488aa0a601399f76400bb595a932c7f"
-      }
-    },
-    "5a1d216870700235": {
-      "reviewed_by": "claude-opus-5-5 independent adversarial review subagent (P05 diff)",
-      "attester_class": "agent",
-      "checked": "Every hunk of the staged src/audit/cli diff compared with d28d41fe for emitted text, JSON, prompt bytes, side-effect and throw order, object identity, sort/dedupe, removed names; ingestAuditHostResults landed filter proven equal to additions; snapshot projections read no field that differs; conceptual revision hoist pure; describeZodIssues byte-identical; one stderr-only change (lineIndex warning once per fold) documented; the lane-projection helper reverted after the lane-demand pin; full suite 8555 passed / 0 failed on this tree",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "7032f62ccfd6e992431589e5978da5b8fc5207c9",
-        "ran_at": "2026-11-18T12:39:36.042Z"
-      },
-      "attested_at": "2026-11-18T12:39:47.736Z",
-      "vouches": {
-        "src/audit/cli/charterExtractionPrompt.ts": "00e3b9e1d5ca756245603ffb97f5b5b2bf058725",
-        "src/audit/cli/conceptualDispatch.ts": "172cad28ffc03cd9e4d4b59c5f8d4a2a1add31a9",
-        "src/audit/cli/confirmIntentStep.ts": "8e0191a12901bd33cd3820d5819955ff9a898d12",
-        "src/audit/cli/dispatch/hostHandoff.ts": "1706fd1e2c377abf3e404761e16cf40d50393f4a",
-        "src/audit/cli/fanoutLanes.ts": "bcb392815c87d05136059b20f36e2badabd5823f",
-        "src/audit/cli/laneSubmissions.ts": "c238aa6edf313fb58e30cf19382f895f6fd4deb6",
-        "src/audit/cli/laneValidators.ts": "dd1f899f26df1024bb120394d97bc04a22c7059a",
-        "src/audit/cli/nextStepCommand.ts": "16fb5d17fd4f9630e948a505bd875db3cf9879f3",
-        "src/audit/cli/nextStepHelpers.ts": "99f8dc77b97bd28d4bd0682fe0fb2b69c8be2719",
-        "src/audit/cli/semanticReviewStep.ts": "28122f453d1c22e0a162b7e3e0035712c0444b50"
       }
     },
     "677face55f9a5a77": {
@@ -860,23 +847,6 @@
         "src/shared/submission/submissionScan.ts": "86726d05792322664bb576d0f9ca6b901888d175"
       }
     },
-    "ea151410085234cc": {
-      "reviewed_by": "audit-tools-independent-security-review-v0579",
-      "attester_class": "agent",
-      "checked": "Reviewed exact staged production blobs for admission and scope regressions: frozen root and original consent gate retained; dispatcher-only notices never broaden charter access; no imported success can erase native failure without verification.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "d1b27ae3bd9cd61cbe9fab91d38dfd50023347cc",
-        "ran_at": "2026-11-25T22:45:47.706Z"
-      },
-      "attested_at": "2026-11-25T22:45:47.768Z",
-      "vouches": {
-        "src/audit/cli/nextStepCommand.ts": "cedfd3484bf946ca2f5b587586b6ff51eb72eb18",
-        "src/audit/orchestrator/acquisitionExecutor.ts": "4af2ecb30a5a002b62afe7b936cbfb3867cee852"
-      }
-    },
     "f20b857654eebefb": {
       "reviewed_by": "claude-opus-5-5 session 48f746a3 (orchestrator) + four simplify reviewer subagents (reuse, simplification, efficiency, altitude)",
       "attester_class": "agent",
@@ -954,10 +924,10 @@
       "review": "a1a3dd0149010098"
     },
     "src/audit/cli/confirmIntentStep.ts": {
-      "review": "e36223304299f9c6"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "0279a0adf3e99489"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -972,19 +942,19 @@
       "review": "3e7d0736a83209a4"
     },
     "src/audit/cli/laneSubmissions.ts": {
-      "review": "aef2aac1e2d57f15"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/laneValidators.ts": {
-      "review": "5a1d216870700235"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "0279a0adf3e99489"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "aef2aac1e2d57f15"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/prompts.ts": {
-      "review": "0279a0adf3e99489"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/questionReviewCycle.ts": {
       "review": "3e7d0736a83209a4"
@@ -1005,13 +975,19 @@
       "review": "6e602a027f50ded0"
     },
     "src/audit/orchestrator/acquisitionExecutor.ts": {
-      "review": "ea151410085234cc"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/advance.ts": {
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
       "review": "392554939aa89e3b"
+    },
+    "src/audit/orchestrator/analyzerCalibration.ts": {
+      "review": "3ac795cb6300b0c0"
+    },
+    "src/audit/orchestrator/analyzerSelection.ts": {
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/architectureDiscovery.ts": {
       "review": "e36223304299f9c6"
@@ -1053,7 +1029,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/dependencyMap.ts": {
-      "review": "51642764524969f9"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/dependencySlices.ts": {
       "review": "e36223304299f9c6"
@@ -1065,7 +1041,7 @@
       "review": "0279a0adf3e99489"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/designReviewTask.ts": {
       "review": "f20b857654eebefb"
@@ -1077,7 +1053,7 @@
       "review": "ad938761f1a24d50"
     },
     "src/audit/orchestrator/executorRunners.ts": {
-      "review": "a6bf59c41c6e9e97"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/executors.ts": {
       "review": "e36223304299f9c6"
@@ -1161,7 +1137,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "0279a0adf3e99489"
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"
@@ -1261,6 +1237,9 @@
     },
     "src/audit/orchestrator/taskAffinityGraph.ts": {
       "review": "f20b857654eebefb"
+    },
+    "src/audit/orchestrator/testSuiteSubjects.ts": {
+      "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/unitBuilder.ts": {
       "review": "677face55f9a5a77"
