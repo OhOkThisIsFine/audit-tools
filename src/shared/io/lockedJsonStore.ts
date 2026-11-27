@@ -1,4 +1,4 @@
-import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
+import { withFileLock, STALE_LOCK_MS, type AssertLockOwnership } from "./fileLock.js";
 import {
   isJsonParseError,
   readOptionalJsonFile,
@@ -117,8 +117,9 @@ export function createLockedJsonStore<T>(
     return parse(raw);
   };
 
-  const persist = async (next: T): Promise<void> => {
+  const persist = async (next: T, assertOwnership: AssertLockOwnership): Promise<void> => {
     validate?.(next);
+    await assertOwnership();
     await writeJsonFile(path, next);
   };
 
@@ -128,14 +129,14 @@ export function createLockedJsonStore<T>(
       let result!: T;
       await withFileLock(
         lockPath,
-        async () => {
+        async (assertOwnership) => {
           const current = await read();
           const next = await fn(current);
           if (next === SKIP_WRITE) {
             result = current;
             return;
           }
-          await persist(next);
+          await persist(next, assertOwnership);
           result = next;
         },
         LOCKED_JSON_STORE_TIMEOUT_MS,
@@ -145,8 +146,8 @@ export function createLockedJsonStore<T>(
     async replace(next) {
       await withFileLock(
         lockPath,
-        async () => {
-          await persist(next);
+        async (assertOwnership) => {
+          await persist(next, assertOwnership);
         },
         LOCKED_JSON_STORE_TIMEOUT_MS,
       );

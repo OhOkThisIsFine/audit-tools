@@ -444,7 +444,7 @@ export async function lockedJsonMutate<T>(
 ): Promise<T> {
   return withFileLock(
     lockPath,
-    async () => {
+    async (assertOwnership) => {
       const current = await readJsonIfExists(jsonPath);
       const next = mutate(current);
       // Persisted through the SHARED atomic writer (temp + rename), not a bare
@@ -454,6 +454,7 @@ export async function lockedJsonMutate<T>(
       // state the lock cannot recover, because the bytes never existed whole.
       // `writeJsonFile` also creates the parent directory itself, so the former
       // explicit `mkdir` folds into it.
+      await assertOwnership();
       await writeJsonFile(jsonPath, next);
       return next;
     },

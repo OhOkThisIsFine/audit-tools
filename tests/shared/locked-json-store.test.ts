@@ -15,7 +15,7 @@
  */
 
 import { test, expect } from "vitest";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createLockedJsonStore,
@@ -24,6 +24,7 @@ import {
   STALE_LOCK_MS,
   type LockedJsonStoreOptions,
 } from "audit-tools/shared";
+import { acquireLock, releaseLock, FileLockOwnershipLostError } from "../../src/shared/io/fileLock.js";
 import { withTempDir } from "./fileLockTestSupport.mjs";
 
 type Counter = { count: number };
@@ -80,6 +81,30 @@ test("mutate on an absent file receives the initial value and persists the resul
 });
 
 // ── Concurrent mutate exclusion ───────────────────────────────────────────────
+
+test("a store mutation cannot overwrite its successor after a stale lock takeover", async () => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = join(dir, "counter.lock");
+    const jsonPath = join(dir, "counter.json");
+    const store = counterStore(dir);
+    let successor: string | undefined;
+    await store.replace({ count: 1 });
+    try {
+      await expect(store.mutate(async current => {
+        expect(current).toEqual({ count: 1 });
+        const stale = new Date(Date.now() - STALE_LOCK_MS * 2);
+        await utimes(lockPath, stale, stale);
+        successor = await acquireLock(lockPath);
+        await writeFile(jsonPath, JSON.stringify({ count: 9 }));
+        return { count: 2 };
+      })).rejects.toBeInstanceOf(FileLockOwnershipLostError);
+      expect(await store.read()).toEqual({ count: 9 });
+      expect(await readFile(lockPath, "utf8")).toBe(successor);
+    } finally {
+      if (successor) await releaseLock(lockPath, successor);
+    }
+  });
+});
 
 test("concurrent mutates against one store serialize — no lost updates", async () => {
   await withTempDir(async (dir: string) => {
