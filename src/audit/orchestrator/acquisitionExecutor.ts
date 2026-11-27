@@ -11,6 +11,7 @@ import {
   runAcquisitionEngine,
   prepareAcquisition,
   compareCodeUnits,
+  stableStringify,
   defaultBinaryFetcher,
   resolveBinaryCandidates,
   resolveAnalyzerRelease,
@@ -215,17 +216,18 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     // A calibration rerun can change the rules as well as the files scanned.
     // Current adapters can report some paths, but cannot prove that the prior
     // finding's rule or graph query ran. Absence in a rerun is not retraction.
-    // Retain prior leads; a matching newly observed item replaces its old copy.
+    // Retain prior leads; only an equivalent observation deduplicates.
     const retained = prior?.results ?? [];
     const edges = prior?.graph_edges ?? [];
     const ownership = prior?.ownership_roots ?? [];
     if (retained.length || edges.length || ownership.length) {
-      const items = new Map([...retained, ...toolResults.results].map(row => [JSON.stringify([row.path, row.id]), row]));
-      const graph = new Map([...edges, ...(toolResults.graph_edges ?? [])].map(edge => [JSON.stringify(edge), edge]));
-      const roots = new Map([...ownership, ...(toolResults.ownership_roots ?? [])].map(row => [JSON.stringify(row), row]));
+      const unique = <T>(rows: T[]) => [...new Map(rows.map(row => [stableStringify(row), row])).values()];
+      const items = unique([...retained, ...toolResults.results]);
+      const graph = unique([...edges, ...(toolResults.graph_edges ?? [])]);
+      const roots = unique([...ownership, ...(toolResults.ownership_roots ?? [])]);
       mergedResults = upsertExternalToolResults(mergedResults, {
-        ...toolResults, results: [...items.values()], ...(graph.size && { graph_edges: [...graph.values()] }),
-        ...(roots.size && { ownership_roots: [...roots.values()] }),
+        ...toolResults, results: items, ...(graph.length && { graph_edges: graph }),
+        ...(roots.length && { ownership_roots: roots }),
       });
     } else {
       mergedResults = upsertExternalToolResults(mergedResults, toolResults);

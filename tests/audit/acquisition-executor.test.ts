@@ -439,18 +439,22 @@ test.each([false, true])("calibration preserves prior leads without rule-coverag
         }],
       }),
     });
-    const output = await runExternalAnalyzerAcquisitionExecutor(bundle, root, {
+    const options = {
       enabled: true, run, consentToken: { value: "fixture-grant", tools: ["semgrep"] },
-    }, ["semgrep"]);
+    };
+    const output = await runExternalAnalyzerAcquisitionExecutor(bundle, root, options, ["semgrep"]);
     const results = output.updated.external_analyzer_results!;
     expect(results.find(row => row.tool === "gitleaks")).toBe(untouched);
     expect(results.find(row => row.tool === "semgrep")).toMatchObject({
-      results: [oldOnly, expect.objectContaining({ id: repeated.id, summary: "New observation" })],
+      results: [oldOnly, repeated, expect.objectContaining({ id: repeated.id, summary: "New observation" })],
       graph_edges: graph, ownership_roots: ownership,
     });
     const status = output.updated.external_analyzer_acquisition!.tool_statuses.find(row => row.tool === "semgrep")!;
     expect(status.status).toBe("findings");
     expect(status.reported_coverage?.scanned).toEqual(reportsPaths ? ["specimen.ts"] : undefined);
+    const repeat = await runExternalAnalyzerAcquisitionExecutor(output.updated, root, options, ["semgrep"]);
+    expect(repeat.updated.external_analyzer_results!.find(row => row.tool === "semgrep")?.results)
+      .toEqual(results.find(row => row.tool === "semgrep")?.results);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
