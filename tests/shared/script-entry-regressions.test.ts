@@ -40,7 +40,7 @@ test.each([
 
 test("the timing reporter writes distinct latest and history records for split shard flags", () => {
   const root = fixture();
-  copySources(root, ["vitest-timing-reporter.mjs", "vitestShard.mjs", "profile.mjs", "spawn-shell.mjs", "primitives.mjs"].map(f => "scripts/shared/" + f));
+  copySources(root, ["vitest-timing-reporter.mjs", "vitestGateVerdict.mjs", "vitestShard.mjs", "profile.mjs", "spawn-shell.mjs", "primitives.mjs"].map(f => "scripts/shared/" + f));
   const driver = join(root, "run.mjs");
   writeFileSync(driver, `import Reporter from "./scripts/shared/vitest-timing-reporter.mjs";
     new Reporter().onFinished([{filepath: "tests/shared/example.test.ts", tasks: [{type:"test", name:"pass", result:{state:"pass"}}]}]);`);
