@@ -10,6 +10,13 @@ import { hashContent } from "audit-tools/shared";
 import { MAX_DRAIN_STEPS } from "../../src/audit/orchestrator/advance.js";
 import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
 
+// Keep the working native graph and omit only the optional workstation-specific index.
+// Native index preparation has its own dedicated tests.
+vi.mock("../../src/audit/cli/reviewerCodebaseMemory.js", async (original) => ({
+  ...await original<typeof import("../../src/audit/cli/reviewerCodebaseMemory.js")>(),
+  prepareReviewerCbm: async () => undefined,
+}));
+
 const observation = vi.hoisted(() => ({ intake: 0, holds: 0, failAfterIntake: false, engineBudget: 0 }));
 vi.mock("../../src/audit/orchestrator/intakeExecutors.js", async (original) => {
   const actual = await original<typeof import("../../src/audit/orchestrator/intakeExecutors.js")>();
