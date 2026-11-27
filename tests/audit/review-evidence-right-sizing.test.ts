@@ -249,6 +249,38 @@ describe("systemic call-site map: uncovered ground", () => {
   });
 });
 
+test("review file slices preserve first ownership, unit order, and unassigned files", () => {
+  const [a, b, c, d, unassigned] = files as [string, string, string, string, string];
+  const units = [
+    { unit_id: "later-sorting", files: [b, a] },
+    { unit_id: "earlier-sorting", files: [b, c] },
+    { unit_id: "later-sorting", files: [d] },
+    { unit_id: "empty", files: ["outside.ts"] },
+  ];
+  const scope = { files: [unassigned, c, b, a, b, d], basis: "overlapping units" };
+  const expected = (unit_id: string | null, paths: string[]) => ({
+    unit_id, filename: `review-call-site-map.${unit_id ?? "unassigned"}.md`, files: paths,
+  });
+
+  const supplied = buildReviewFileMap(bundle(), { ...scope, units });
+  expect(supplied.slices).toEqual([
+    expected("later-sorting", [a, b, d]),
+    expected("earlier-sorting", [c]),
+    expected("empty", []),
+    expected(null, [unassigned]),
+  ]);
+
+  const fromManifest = buildReviewFileMap({
+    ...bundle(),
+    unit_manifest: { units: units.map(unit => ({ ...unit, name: unit.unit_id, required_lenses: [] })) },
+  }, scope);
+  expect(fromManifest.slices).toEqual([
+    expected("earlier-sorting", [b, c]),
+    expected("later-sorting", [a, d]),
+    expected(null, [unassigned]),
+  ]);
+});
+
 describe("slice file names", () => {
   test("unit ids differing only in case get names that differ case-insensitively", () => {
     const b: ArtifactBundle = {

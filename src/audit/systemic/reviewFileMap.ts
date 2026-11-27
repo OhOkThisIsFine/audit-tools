@@ -223,9 +223,25 @@ export function buildReviewFileMap(
     (file) => !inScopeSet.has(file.path),
   ).length;
 
+  // Slice by unit: the consumer's units in its order, else the manifest's by id.
+  const units =
+    scope.units ??
+    [...(bundle.unit_manifest?.units ?? [])].sort((a, b) => compareCodeUnits(a.unit_id, b.unit_id));
+  const owner = unitOwnership(units);
+  const filesByUnit = new Map<string, string[]>();
+  const unassigned: string[] = [];
+
   const anchors: ReviewFileMapAnchor[] = [];
   let filesWithoutEdges = 0;
   for (const path of inScope) {
+    const unitId = owner.get(path);
+    if (unitId === undefined) {
+      unassigned.push(path);
+    } else {
+      const files = filesByUnit.get(unitId);
+      if (files === undefined) filesByUnit.set(unitId, [path]);
+      else files.push(path);
+    }
     const callers = [...(incoming.get(path) ?? [])].sort(compareCodeUnits);
     const callees = [...(outgoing.get(path) ?? [])].sort(compareCodeUnits);
     const notes = [...(scope.notes?.get(path) ?? [])];
@@ -236,24 +252,18 @@ export function buildReviewFileMap(
     anchors.push({ path, callers, callees, notes });
   }
 
-  // Slice by unit: the consumer's units in its order, else the manifest's by id.
-  const units =
-    scope.units ??
-    [...(bundle.unit_manifest?.units ?? [])].sort((a, b) => compareCodeUnits(a.unit_id, b.unit_id));
-  const owner = unitOwnership(units);
   const used = new Set<string>();
   const slices: ReviewFileMapSlice[] = [];
   const seenUnits = new Set<string>();
   for (const unit of units) {
     if (seenUnits.has(unit.unit_id)) continue;
     seenUnits.add(unit.unit_id);
-    const unitFiles = inScope.filter((file) => owner.get(file) === unit.unit_id);
+    const unitFiles = filesByUnit.get(unit.unit_id);
     // The consumer's units are all listed (they ARE its index); the manifest's
     // only where they hold a file under review.
-    if (unitFiles.length === 0 && scope.units === undefined) continue;
-    slices.push({ unit_id: unit.unit_id, filename: sliceFilename(unit.unit_id, used), files: unitFiles });
+    if (unitFiles === undefined && scope.units === undefined) continue;
+    slices.push({ unit_id: unit.unit_id, filename: sliceFilename(unit.unit_id, used), files: unitFiles ?? [] });
   }
-  const unassigned = inScope.filter((file) => !owner.has(file));
   if (unassigned.length > 0) {
     slices.push({ unit_id: null, filename: sliceFilename(null, used), files: unassigned });
   }
