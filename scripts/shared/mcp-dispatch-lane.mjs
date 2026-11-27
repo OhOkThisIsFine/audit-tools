@@ -173,7 +173,7 @@ export function satisfiesAgentDispatchNode(version) {
 
 /**
  * Fail loudly before spawning anything: a missing checkout or an old Node
- * produces a `MODULE_NOT_FOUND` or a type-stripping error deep inside the
+ * produces a MODULE_NOT_FOUND or a type-stripping error deep inside the
  * bridge's own stdout, not a message that names the fix. Skipped when the
  * caller supplies its own `command` (a test's fake bridge needs neither
  * check — see `openDispatchLane`).

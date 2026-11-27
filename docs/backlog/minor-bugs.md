@@ -22,7 +22,7 @@
   claimed: `charterReadFileSlice` compares content for consensus members ∪ every `isDocIntentFile`
   path (`doc_only` status **OR** `.md/.markdown/.adoc/.rst/.txt` — single-sourced at
   `buildStructureDecomposition.ts` so it can never be narrower than the decomposition's own doc
-  universe; pinned by `tests/audit/dependency-slices.test.ts`), PLUS the complete sorted path list,
+  universe; pinned by [historical dependency-slices.test.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/audit/dependency-slices.test.ts)), PLUS the complete sorted path list,
   so every add / delete / rename fires regardless of classification. What stays outside is a
   content-only edit to a file that is neither a consensus member nor doc-extensioned nor `doc_only`
   — e.g. spec prose living inside a `.ts` the Stated pass reads. Widen `charterReadFileSlice` if a

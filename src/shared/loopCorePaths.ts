@@ -22,7 +22,7 @@
 // list AND the `isLoopCorePath` predicate — so neither the set nor the matching
 // semantics has a second hand-maintained home. `npm run check:loop-core-patterns`
 // (in verify:checks) fails on a stale generated file, and
-// `tests/shared/loop-core-gate-parity.test.ts` pins byte-equality plus
+// legacy tests/shared/loop-core-gate-parity.test.ts pins byte-equality plus
 // behavioral parity of the two predicates. Keep the array below the ONE
 // canonical definition — edit here, then regenerate.
 //

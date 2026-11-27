@@ -88,7 +88,7 @@ export interface ClauseInterpretResult {
  * Comma-vs-`and` is the ONLY intentional difference between the two; every
  * other boundary (including the `;` rule above) is the shared
  * {@link splitIntentClauses} scan, so the two cannot drift on it. See
- * `tests/shared/maintainability-split-rules.test.ts` for a regression assertion
+ * legacy tests/shared/maintainability-split-rules.test.ts for a regression assertion
  * that guards the difference.
  */
 export function decomposeIntent(free_form_intent: string): IntentClause[] {

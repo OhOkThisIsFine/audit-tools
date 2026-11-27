@@ -15,7 +15,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 // (the installer verbs `ensure` / `install` / `verify-install` are answered
 // entirely in the wrapper and must never trigger a build just to learn where
 // they are), so it cannot import the TypeScript source or the built module.
-// `tests/shared/wrapper-repo-root-parity.test.ts` runs BOTH implementations over
+// legacy tests/shared/wrapper-repo-root-parity.test.ts runs BOTH implementations over
 // the same fixture trees and fails if they ever disagree — the two copies cannot
 // drift silently.
 //

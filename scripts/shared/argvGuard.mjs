@@ -8,7 +8,7 @@
 // (`--dryrun` for `--dry-run`) is indistinguishable from a valid run.
 //
 // The rule is enforced by `.claude/hooks/…`-adjacent contract test over the
-// tracked script set — `tests/shared/script-argv-refusal.test.ts` — because a
+// tracked script set — legacy tests/shared/script-argv-refusal.test.ts — because a
 // convention nobody can check is a convention that decays. This module is the
 // ONE implementation that test recognizes, so the parsing rule itself is
 // single-sourced rather than re-derived per script.

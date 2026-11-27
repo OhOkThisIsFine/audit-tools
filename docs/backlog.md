@@ -109,7 +109,7 @@
 - `durable-traps.md:594` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
 - `durable-traps.md:605` — A backlog entry's bold title must not contain `
 - `durable-traps.md:610` — Child sessions in the shared checkout — session-registry split (2026-08-18, mechanized; supersedes the 2026-08-07/09 kill-switch advice).
-- `durable-traps.md:640` — A full-suite-only failure is classified by `runIsolatedDiagnostics` in `scripts/shared/run-vitest-gate.mjs`, never from a remembered file list.
+- `durable-traps.md:640` — A full-suite-only failure is classified by `runIsolatedDiagnostics` in [historical run-vitest-gate.mjs](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/scripts/shared/run-vitest-gate.mjs), never from a remembered file list.
 - `durable-traps.md:649` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
 - `durable-traps.md:656` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
 - `durable-traps.md:670` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).

@@ -20,7 +20,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   INSIDE the suite — a false red on files the change never touched. Run the suite alone; run the
   checks before or after it. The same rule holds for any concurrent lane child (a relay
   `dispatch` sweep, a `codex exec` lane): they starve the box instead of `dist/`, and
-  `tests/shared/sync-spawn-budget.test.ts` reds because three sync spawns each blocked >60s
+  [historical sync-spawn-budget.test.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/shared/sync-spawn-budget.test.ts) reds because three sync spawns each blocked >60s
   (2026-09-16 — all three passed alone on the quiet re-run).
 
 - **A checkout under a deep directory fails on Windows: "Filename too long" (2026-10-01).** Some
@@ -411,9 +411,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   wall is expected, not a hang.** It was ONE file (`audit-code-completion.test.ts`) and the slowest in the <!-- doc-citation-exempt: names the pre-split file deliberately -->
   whole suite — rank 1 in every profiled run that listed it
   (`.audit-tools-profile/vitest-history.ndjson`) — until it was split over
-  `tests/audit/helpers/completion-harness.ts` (2026-08-07, wall-clock brief T4); the fragments are still
+  [historical completion-harness.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/audit/helpers/completion-harness.ts) (2026-08-07, wall-clock brief T4); the fragments are still
   among the slowest files in the suite. The CLI handlers are imported and called directly rather than subprocess-spawned, and
-  no test has a time cap (`tests/shared/no-fixed-test-caps.test.ts`), so a long wall is the shape of the
+  no test has a time cap ([historical no-fixed-test-caps.test.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/shared/no-fixed-test-caps.test.ts)), so a long wall is the shape of the
   workload. **Confirmed, do not re-chase:** production
   does NOT redundantly re-extract on an unchanged repo. `repo_manifest` *specifically* is presence-gated
   (`src/audit/orchestrator/state.ts` — `has(bundle.repo_manifest) ? "satisfied" : "missing"`), so its sole
@@ -424,18 +424,18 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   presence gate is one artifact, not a suite-wide rule. The wall is legitimate one-time-per-phase
   extraction, not a caching bug. Remaining lever (test-side only): pre-seed artifacts to cut pump
   iterations — each test builds a fresh temp repo and pumps up to `MAX_FINALIZE_STEPS` next-step calls
-  (`tests/audit/helpers/completion-harness.ts`). Full investigation record: memory
+  ([historical completion-harness.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/audit/helpers/completion-harness.ts)). Full investigation record: memory
   `audit-no-redundant-reextraction-verified`.
 
 - **A full vitest run can print `[vitest-worker]: Timeout calling "onTaskUpdate"` and exit 1 with 0
   failed — read it through the gate, never raw.** The worker's RPC reply timeout is a fixed 60s, so the
   marker means one worker blocked its event loop for 60s or more. `npm test` and CI run through
-  `scripts/shared/run-vitest-gate.mjs`, which renders that exit as a REPORTER-TRANSPORT PASS; a raw
+  [historical run-vitest-gate.mjs](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/scripts/shared/run-vitest-gate.mjs), which renders that exit as a REPORTER-TRANSPORT PASS; a raw
   `npx vitest run` full run still reads red. A synchronous test spawn is held under
-  `SYNC_BLOCK_BUDGET_MS` (`tests/helpers/trackedSpawn.ts`, pinned by
-  `tests/shared/sync-spawn-budget.test.ts`); no marker appeared in 12 green CI runs after that gate.
+  `SYNC_BLOCK_BUDGET_MS` ([historical trackedSpawn.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/helpers/trackedSpawn.ts), pinned by
+  [historical sync-spawn-budget.test.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/shared/sync-spawn-budget.test.ts)); no marker appeared in 12 green CI runs after that gate.
   **Not covered:** a synchronous CPU stretch of 60s or more that is not a spawn. ⚠ `projects:` at the
-  TOP LEVEL of `vitest.config.ts` is silently ignored and voids the whole test config (false GREEN):
+  TOP LEVEL of [historical vitest.config.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/vitest.config.ts) is silently ignored and voids the whole test config (false GREEN):
   a config split nests under `test.projects` and proves both exit polarities.
 
 - **One test runner: vitest** (all three areas — `tests/audit`, `tests/shared`, `tests/remediate`).
@@ -450,7 +450,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   assertion lib (runs under vitest) for the control-flow assertions
   (`assert.throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that have no clean `expect` equivalent; value
   assertions are `expect`. Vitest runs every test and hook with no time limit (`testTimeout: 0` in
-  `vitest.config.ts`); a hung test stops at the CI job limit.
+  [historical vitest.config.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/vitest.config.ts)); a hung test stops at the CI job limit.
 
 - **Don't mask the test exit code with a REDIRECT.** `npm test > out; echo done` reports the *trailing*
   command's exit, not the suite's — and piping through `grep`/`rm` in the same Bash call races the output
@@ -564,7 +564,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   flake-first protocol. A red with actual `error TS…` lines is real.
 
 - **A typecheck sweep's error count is not final until you re-run it.** Clearing the test tree for
-  `check:tests` (`tsconfig.test.json`, `allowJs`; wired into `verify:checks`) surfaced ~20 errors
+  `check:tests` ([historical tsconfig.test.json](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tsconfig.test.json), `allowJs`; wired into `verify:checks`) surfaced ~20 errors
   beyond the initial count — TS unmasks a second error on the same object literal only once its
   sibling is fixed, so "N remaining" falls as you fix and then rises again. Budget for the re-run, and
   hold the line that every fix be semantics-preserving: `as any`, `@ts-expect-error` and
@@ -577,9 +577,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   loops against a kind RETIRED from `RemediationStepKind`, so those loop bodies never executed at all.
   Nothing had flagged either, because nothing typechecked the tree. A green suite over an inert
   fixture is not evidence.
-  ⚠ **CLOSED to its floor — `check:tests` reaches every test file except ONE.** `tsconfig.test.json`
+  ⚠ **CLOSED to its floor — `check:tests` reaches every test file except ONE.** [historical tsconfig.test.json](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tsconfig.test.json)
   sets `checkJs: false`, which silently excludes any `.mjs` test. The single file still outside the
-  gate is deliberate and permanent: `tests/shared/shared-tests-invariants.test.mjs` (a `.ts` guard
+  gate is deliberate and permanent: [historical shared-tests-invariants.test.mjs](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/shared/shared-tests-invariants.test.mjs) (a `.ts` guard
   cannot detect its own exclusion) — "the test tree is typechecked" carries exactly that one-file
   asterisk, no larger. (No absolute file count is pinned here: hand-typed counts drift both ways —
   nightly sol-3 decision 2026-08-06.)
@@ -587,7 +587,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   flip yields 8,903 errors across essentially every `.mjs` file, so the exclude list would cover
   the whole tree, buy zero coverage, and leave a 451-entry config to rot (it also dirties 28 `.ts`
   consumers). Do not rebuild this.
-  ⚠ Converting a test file named in `scripts/shared/test-flake-baseline.json` must move its
+  ⚠ Converting a test file named in [historical test-flake-baseline.json](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/scripts/shared/test-flake-baseline.json) must move its
   baseline key in the same commit, or the flake record orphans.
   ⚠ For a test conversion, review the diff and run behavioral tests that exercise the converted assertions.
 
@@ -638,9 +638,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `node scripts/shared/sessionRegistry.mjs --register <session-id>` (explicit id, no discovery).
 
 - **A full-suite-only failure is classified by `runIsolatedDiagnostics` in
-  `scripts/shared/run-vitest-gate.mjs`, never from a remembered file list.** The gate reruns every
+  [historical run-vitest-gate.mjs](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/scripts/shared/run-vitest-gate.mjs), never from a remembered file list.** The gate reruns every
   attributable failing file alone while preserving the original red verdict. A full-suite fail plus
-  solo pass is recorded by `addLoadOnlyObservation` in `scripts/shared/load-flake-record.mjs`, bound
+  solo pass is recorded by `addLoadOnlyObservation` in [historical load-flake-record.mjs](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/scripts/shared/load-flake-record.mjs), bound
   to the current worktree tree so rerunning unchanged content cannot manufacture recurrence. On a
   second distinct-tree occurrence, the gate both prints the prior evidence and starts a read-only
   test-repair investigation whose report lands under `.audit-tools-profile/load-flake-investigations/`.
@@ -793,7 +793,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   when an agent acts on file content that does not match disk).
 
 - **A COMMENT-only edit to a graph extractor reds the graph-edge cache digest pin, and the
-  failure text tells you to bump the cache version (2026-08-24).** `tests/audit/graph-edge-cache.test.ts`
+  failure text tells you to bump the cache version (2026-08-24).** [historical graph-edge-cache.test.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/audit/graph-edge-cache.test.ts)
   hashes whole extractor module CONTENT, so a reworded comment moves the digest exactly like a
   behaviour change. Its assertion message says to bump `GRAPH_EDGE_CACHE_KEY_VERSION`, which
   invalidates EVERY prior cache entry. Judge before obeying: if the diff inside the cached-contribution
@@ -884,7 +884,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 - **A targeted vitest run after a source edit can red on a half-built `dist/` (2026-10-08).** The
   dev wrapper (`wrapper/audit-code-wrapper-build.mjs`) runs `npm run build` (clean-dist, then `tsc`)
   whenever `src/` is newer than `dist/`. A test file that spawns the wrapper (`runWrapper`, e.g.
-  `cleanup.test.ts`) therefore deletes `dist/` while files running beside it read it; they fail
+  cleanup.test.ts) therefore deletes `dist/` while files running beside it read it; they fail
   with EPERM or "cannot load the AuditResult validator from dist/". `npm test` builds first and is
   immune. After editing `src/`, run `npm run build` before a targeted run that mixes such files.
 

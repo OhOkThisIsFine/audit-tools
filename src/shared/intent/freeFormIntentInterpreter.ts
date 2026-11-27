@@ -111,7 +111,7 @@ const DEFAULT_WEIGHT_BOOST = 1.5;
  *
  * The two functions still differ on commas, and that difference is intentional.
  * Any change to one should be evaluated against the contract of the other. See
- * `tests/shared/maintainability-split-rules.test.ts` for a regression assertion
+ * legacy tests/shared/maintainability-split-rules.test.ts for a regression assertion
  * that guards the difference.
  */
 function decomposeClauses(input: string): string[] {

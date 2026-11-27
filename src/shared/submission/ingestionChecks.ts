@@ -15,7 +15,7 @@
  * ingestion emits cites one of these ids (`refuse(check, detail)`,
  * `invalidResult(check, reason)`, a `check:` on an issue), the id type below
  * refuses an unregistered citation at compile time, and
- * `tests/shared/ingestion-checks-drift.test.ts` extracts the citations
+ * legacy tests/shared/ingestion-checks-drift.test.ts extracts the citations
  * structurally and pins them against the declared `draws` in both directions —
  * a row nothing cites is dead, and a citation nothing declares is an
  * undocumented check.

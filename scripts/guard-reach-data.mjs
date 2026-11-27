@@ -1,3 +1,4 @@
+// sites-pinned: tests/release-wiring.test.mjs
 // Guard-reach registry — the canonical declaration of every guard and what it
 // actually covers (nightly determination ec64d159). Reconciled by
 // `scripts/check-guard-reach.mjs` (`npm run check:guard-reach`, in
@@ -20,7 +21,7 @@
 // Glob grammar is check-doc-manifest.mjs's: `*` within a segment, `**/` across
 // segments, `?` one character.
 
-// sites-pinned: tests/shared/guard-reach-gate.test.ts, tests/shared/guard-form-reach.test.ts
+// sites-pinned: tests/release-wiring.test.mjs
 //   Every row added to this registry is pinned by the guard-reach suite, which
 //   drives the real reconciler over synthetic registries and refuses a stale or
 //   phantom claim.
@@ -166,9 +167,8 @@ export const GUARDS = [
     impl: 'check:tests',
     preCommit: 'reach',
     fix:
-      'the test tree failed its typecheck (tsconfig.test.json) — fix the staged type error; ' +
-      'untyped destructured test params infer never[] and red only this leg and release CI',
-    note: 'tsc over the test tree (tsconfig.test.json); ~7s, so the src-reach widening is deliberate',
+      'a replacement Node contract test failed its syntax check; fix the named file',
+    note: 'syntax check for the Node contract suite without building dist',
   },
   {
     id: 'check:control-bytes',
@@ -1199,11 +1199,11 @@ export const GUARDS = [
       '(junction / global-bin shadowing); fix the wrapper resolution, not the smoke',
   },
   {
-    id: 'vitest-gate',
+    id: 'contract-test-suite',
     releaseOrder: 52,
     releaseStage: 'release',
     kind: 'gate',
-    impl: 'scripts/shared/run-vitest-gate.mjs',
+    impl: 'scripts/shared/run-contract-tests.mjs',
     preCommit: false,
     fix:
       'the full suite is red — rerun the failing file alone before calling it a regression ' +
@@ -1253,8 +1253,6 @@ export const GUARDS = [
       'suite and the gate\'s own round-trip, which that test already owns. core.hooksPath is pointed at ' +
       '.githooks by session-start-guards.mjs; a clone that never opened a session runs no hook until then',
     forms: [
-      { name: 'doc-contract attribution line', drive: 'test',
-        test: 'tests/shared/pre-commit-gate-doc-contract-attribution.test.ts', sample: '[vitest-gate] ATTRIBUTION:' },
     ],
   },
   {
@@ -1322,497 +1320,6 @@ export const GUARDS = [
   },
   { id: 'async-typecheck', kind: 'hook', impl: '.claude/hooks/async-typecheck.mjs' },
   { id: 'closeout-challenge-gate', kind: 'hook', impl: '.claude/hooks/closeout-challenge-gate.mjs' },
-
-  // ── contract tests (the guards' own guards) ────────────────────────────────
-  {
-    id: 'sites-pinned-gate-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/sites-pinned-gate.test.ts',
-    note:
-      'drives scripts/check-sites-pinned.mjs against fixture diffs (the derivation, every exclusion ' +
-      'rule, and each refusal) and, for the one refusal that must fire exactly as shipped, spawns the ' +
-      'real CLI against a throwaway git repo',
-  },
-  {
-    id: 'contract-construction-sites-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/contract-construction-sites.test.ts',
-    note:
-      'drives the site walker against fixture trees AND holds the CONTRACT_PROPERTY_SHAPES registry ' +
-      'against the REAL zod schemas (property set and per-field optionality), so the registry cannot ' +
-      'drift from the contracts it describes',
-  },
-  {
-    id: 'guard-form-reach-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/guard-form-reach.test.ts',
-    note:
-      'P51: drives the REAL recognizer of every guard row that declares `forms` over each declared ' +
-      'sample (script in a fixture repo, exported pure function, or hook payload), so a syntax form a ' +
-      'guard stops recognizing goes red instead of being found by accident',
-  },
-  {
-    id: 'shared-primitives-gate-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/check-shared-primitives.test.ts',
-    note:
-      'pins the rule matching semantics of check:shared-primitives on synthetic content; its forms are ' +
-      'the gate\'s own (declared on the check:shared-primitives row), driven through the same scanFile export',
-  },
-  {
-    id: 'push-gate-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/push-gate.test.ts',
-    note:
-      'spawns the REAL push-gate hook with a PreToolUse payload against a throwaway repo, and mints its ' +
-      'stamp through the REAL writeSuiteGreenStamp — so the refusal case, the bound case, the STALE case ' +
-      '(a stamp covering different content) and the announced relocated-push fail-open are all pinned ' +
-      'against the shipped mechanism rather than a hand-rolled stamp file',
-  },
-  {
-    id: 'ledger-suite-transition-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/ledger-suite-transition.test.ts',
-    note:
-      'drives the official attester and qualification consumers; an exact ledger-only transition ' +
-      'retains the original token-bound suite evidence, while other entries, modes, deletions, ' +
-      'tampering and incomplete or filtered run evidence refuse',
-  },
-  {
-    id: 'suite-green-stamp-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/suite-green-stamp.test.ts',
-    note:
-      'pins the full-suite green stamp (P48): the full-suite predicate, the tree-bound stamp path, ' +
-      'the run-vitest-gate write wiring, and the closeout-challenge-gate read wiring',
-  },
-  {
-    id: 'sync-spawn-budget-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/sync-spawn-budget.test.ts',
-    note:
-      'no worker blocks its event loop for >= SYNC_BLOCK_BUDGET_MS (60s) in one synchronous spawn ' +
-      '(the P14 worktree-RPC-starvation half): tests/helpers/trackedSpawn.ts records (file, command, ms) ' +
-      'per spawnSync call into a run-scoped ledger and this test is the gate over it, so a checker that ' +
-      'acquires a network call or a full-tree walk goes red naming the command rather than surfacing as ' +
-      'an unattributable flaky worker. UNCOVERED: a sync spawn that bypasses tests/helpers/spawn.mjs ' +
-      'with a raw node:child_process import is not recorded — INV-WH ' +
-      '(tests/shared/shared-tests-invariants.test.mjs) is the sibling guard that fails exactly that ' +
-      'import, so the half is closed by a different mechanism, not left to memory.',
-  },
-  {
-    id: 'test-mirrors-production-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/test-mirrors-production.test.ts',
-    note:
-      'a test file may not re-implement its subject: a test-declared function whose NAME matches a ' +
-      'production export, whose body BRANCHES, and whose body calls nothing imported from production ' +
-      'is a copy, and a copy stays green after the original changes. Three signals together separate a ' +
-      'mirror from a fixture builder (no branching) and from a delegation wrapper (imports the name). ' +
-      'Drove five live conversions — stableStringify x2, compareCodeUnits, globToRegExp, countLines, ' +
-      'the AuditResult producer x2. UNCOVERED, stated: detection is textual, so an SEMANTIC mirror ' +
-      'under a different name is not caught (the survey that sized this guard found ~13 of those, ' +
-      'including a hand-rolled cycle detector and a release poll loop); and a mirror whose name ' +
-      'coincides with no production export is invisible to the name-match signal.',
-  },
-  { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
-  {
-    id: 'shipped-import-closure-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/shipped-import-closure.test.ts',
-    note:
-      'the packed package must carry everything its shipped scripts import: the walk derives its ' +
-      'roots from package.json `files` and follows RELATIVE import edges from every shipped module, ' +
-      'so a reachable file `files` does not cover is RED. Closes the 2026-09-10 defect where ' +
-      'wrapper/audit-code-wrapper-build.mjs began importing scripts/shared/primitives.mjs and only ' +
-      'smoke:packaged-audit-code noticed, as an ERR_MODULE_NOT_FOUND inside a temp install. ' +
-      'UNCOVERED, stated: a non-literal specifier is invisible to the reader, a bare specifier is ' +
-      'never followed (external packages, and audit-tools/shared which resolves into dist/**), and a ' +
-      'relative specifier that resolves to nothing on disk is skipped — that is a broken import, ' +
-      'which the packaged smokes catch directly, not a coverage hole.',
-  },
-  {
-    id: 'green-mechanism-declaration-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/green-mechanism-declaration.test.ts',
-  },
-  { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
-  {
-    id: 'session-registry-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/session-registry.test.ts',
-    note:
-      'session registry substrate (child-session split + closeout dirt partition): the registration ' +
-      'leg end-to-end, the explicit-id CLI, and the readSessionRegistry predicate the session-scoped ' +
-      'gates import',
-  },
-  {
-    id: 'run-hermeticity-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/run-hermeticity.test.ts',
-    note:
-      'the live-child teardown check in tests/helpers/global-setup.ts: a run whose own spawned ' +
-      'child is still alive fails with pid and command named (ledger: tests/helpers/trackedSpawn.ts). ' +
-      'UNCOVERED: a `shell: true` grandchild, since the ledger holds the pid of the cmd.exe its ' +
-      'parent actually spawned, not of what cmd.exe started; and sync spawns, which cannot straggle. ' +
-      'UNCOVERED, NEW 2026-08-30: the repo ROOT is no longer observed by any suite check — the ' +
-      'root-delta half (repoRootProblems / unexpectedRootEntries / RUN_OWNED_ROOT_ENTRIES) was ' +
-      'DELETED on the owner ruling that this project no longer produces the artifacts, which its own ' +
-      'creation commit f3cac01b had already measured (6,496 spawns, zero carrying `>`). Consequences, ' +
-      'stated rather than discovered later: npm test can now mint a suite-green stamp over a tree ' +
-      'that contains an unignored root leak; a future regression in THIS project spawn discipline ' +
-      'leaks a zero-byte root file that nothing names; and the nearest remaining reader is the ' +
-      "closeout Stop gate's session-dirt line, which is session-scoped, capped, skipped for " +
-      'unregistered child sessions, absent in CI, and cleared by committing. A leak matching an ' +
-      'ignore rule (*.log, /result.json, /temp*.json, /part*.txt, .audit-code-build.lock) is seen by ' +
-      'NOTHING at all, including the `git add -A` tree the suite-green stamp binds. ' +
-      '⚠ check-guard-reach.mjs never reads this `note` field — it validates only that `impl` is a ' +
-      'tracked file under tests/ — so this text is unenforced: read the row, never trust a green gate ' +
-      'to have checked it. Diagnosis and remedy: docs/backlog/durable-traps.md',
-  },
-  { id: 'script-argv-refusal-test', kind: 'contract-test', impl: 'tests/shared/script-argv-refusal.test.ts' },
-  { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
-  {
-    id: 'write-time-derived-gates-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/write-time-derived-gates.test.ts',
-    note:
-      'the write-time half of the backlog gates: the leg set the PostToolUse hook draws is read from ' +
-      'the LIVE guard registry (buildWriteTimeLegs), the runner returns findings as data and owns no ' +
-      'exit code, and the size-budget leg is SKIPPED at write time and announced as deferred — its ' +
-      'remedy rewrites lap-scoped baseline state. Also pins the hook end-to-end: with four legs wired ' +
-      'to failing commands it must still exit 0 and print the deferral',
-  },
-  { id: 'hook-session-start-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-session-start-guards.test.ts' },
-  { id: 'session-start-hook-test', kind: 'contract-test', impl: 'tests/audit/session-start-hook.test.ts' },
-  {
-    id: 'installer-verb-help-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/installer-verb-help.test.ts',
-    note:
-      'the installer-verb declaration and its copies: every verb of both bins answers --help without ' +
-      'installing, and the two enumerations that cannot import the module are pinned verb AND summary',
-  },
-  {
-    id: 'shipped-doc-surface-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/shipped-doc-surface.test.ts',
-    forms: [
-      { name: 'inline link target', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'relativeLinkTargets', call: 'text',
-        sample: 'read [the guide](docs/audit-pkg/operator-guide.md#supported-surfaces)' },
-      { name: 'reference-definition target', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'relativeLinkTargets', call: 'text',
-        sample: '[guide]: ./docs/audit-pkg/product.md' },
-      { name: 'heading anchor', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'headingAnchors', call: 'text',
-        sample: '## Supported surfaces' },
-      { name: 'absolute GitHub URL', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'absoluteGitHubSlugs', call: 'text',
-        sample: 'see https://github.com/owner/repo/blob/main/docs/x.md' },
-    ],
-    note:
-      'the npm tarball as a doc surface: which docs/ pages ship, README naming exactly them, no ' +
-      'relative link or fragment leaving the set, every absolute github.com slug bound to ' +
-      'package.json `repository`, and the target-directory rule stated once across the loader pair',
-  },
-  { id: 'doc-manifest-gate-test', kind: 'contract-test', impl: 'tests/shared/doc-manifest-gate.test.ts' },
-  { id: 'guard-reach-gate-test', kind: 'contract-test', impl: 'tests/shared/guard-reach-gate.test.ts' },
-  {
-    id: 'orphan-modules-relative-import-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/orphan-modules-relative-import.test.ts',
-    note:
-      'Track 2.5: drives the relative-import pass over fixture trees on disk, pinning both the ' +
-      'detection (a module whose only production edge is an unconsumed re-export chain) and each ' +
-      'exemption that keeps it from becoming a noise list — package entries, a barrel production ' +
-      'actually consumes, a production file that re-exports the name, and a module the tests never ' +
-      'reach (left to the file-level pass and knip)',
-  },
-  {
-    id: 'host-asset-plan-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/host-asset-plan.test.ts',
-    note:
-      'the declared host-asset install plan the two postinstalls execute: one row per bin (pinned ' +
-      'against package.json `bin`), derived per-tool TARGET paths, the declared-optional Codex UI ' +
-      'metadata target, the per-tool agent name, and the per-tool policy that legitimately differs ' +
-      '(template trim, frontmatter stripping). Its last case asserts each postinstall entry READS ' +
-      'the plan and hand-spells no host target path — the two-installers-drifting shape the backlog ' +
-      'entry names',
-  },
-  {
-    id: 'agents-region-gate-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/agents-region-gate.test.ts',
-    note:
-      'P64: pins check:agents-region in both polarities (equal figure fresh, different figure ' +
-      'refused naming both figures) plus the fail-closed shape when the pointer sentence is absent, ' +
-      'so a machine-wide retirement of the sentence cannot leave a green check over an ' +
-      'unrecognized region',
-  },
-  {
-    id: 'sync-spawn-fold-safety-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/sync-spawn-fold-safety.test.ts',
-    forms: [
-      { name: 'spawnSync call', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'syncSpawnHits', call: 'text',
-        sample: 'const r = spawnSync("git", ["status"]);' },
-      { name: 'sync runTracked twin', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'syncSpawnHits', call: 'text',
-        sample: 'const r = runTracked(["git", "status"], { cwd });' },
-      { name: 'execSync call', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'syncSpawnHits', call: 'text',
-        sample: 'const out = execSync("git status");' },
-    ],
-    note:
-      'INV-SSF: the fold-reachable modules (shared git helpers, the disposition extractor, the ' +
-      'analyzer-dep installer) spawn children only through the async exec twin — a synchronous child ' +
-      'starves the held file lock’s mtime heartbeat until another process steals the LIVE lock; ' +
-      'the sync twin itself requires a declared timeout at the type level (RunTrackedSyncOptions). ' +
-      'UNCOVERED: the module list is the reviewed reachability claim — a NEW fold-reachable module ' +
-      'must be added to the test by hand. The scan covers the declared audit and remediation ' +
-      'fold modules, including triage, host handoff, executable-plan storage and grounding',
-  },
-  {
-    id: 'submission-no-sizing-identity-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/submission-contract-has-no-sizing-identity.test.ts',
-    forms: [
-      { name: 'banned key on an emitted object', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'bannedSizingKeys', call: 'text',
-        sample: '{"submission_id": "s1", "shard": 2}' },
-      { name: 'banned identifier in source', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'bannedSizingIdentifierLines', call: 'text',
-        sample: 'const shard_index = 2;' },
-    ],
-    note:
-      'mechanical replacement for a backlog note: the submission core must not re-grow a packet/shard/' +
-      'provider/model/budget field, in the emitted objects OR as a source identifier',
-  },
-  {
-    id: 'lane-demand-no-execution-identity-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/lane-demand.test.ts',
-    forms: [
-      { name: 'execution-choice key on an emitted demand ranking', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'bannedLaneExecutionKeys', call: 'text',
-        sample: '{"size": "small", "complexity": "focused", "risk": "low", "model_tier": "pool/medium"}' },
-    ],
-    note:
-      'the emitted-lane demand ranking names DEMAND only (size/complexity/risk); backend, provider, ' +
-      'model and tier selection belong to the host, so a lane that names one has moved execution ' +
-      'selection into the tool. The schema is .strict() and this row pins the emitted key set',
-  },
-  {
-    id: 'submission-path-tool-owned-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/submission-path-is-tool-owned.test.ts',
-    forms: [
-      { name: 'incoming as a path segment', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'incomingLiteralLines', call: 'text',
-        sample: 'const dir = join(artifactsDir, "incoming", name);' },
-      { name: 'incoming as a rendered path', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'incomingLiteralLines', call: 'text',
-        sample: 'const line = `write the result to incoming/${id}.json`;' },
-    ],
-    note:
-      'scans all of src/ for a reintroduced host-typed drop directory — the guard that keeps the ' +
-      'tool-owned submission path from being undone one call site at a time',
-  },
-  {
-    id: 'pre-commit-staged-snapshot-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-staged-snapshot.test.ts',
-    note: 'staged-snapshot leg of the pre-commit-gate-*.test.ts family (shared fixture: pre-commit-gate-harness.ts)',
-  },
-  {
-    id: 'pre-commit-commit-detection-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-commit-detection.test.ts',
-    note: 'commit-detection + crash-recovery + live-lock leg of the pre-commit-gate family',
-  },
-  {
-    id: 'pre-commit-roundtrip-journal-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-roundtrip-journal.test.ts',
-    note:
-      'round-trip journal HEAD binding: recovery refuses + quarantines on a moved or unrecorded HEAD, ' +
-      'and history-moving verbs take the direct check instead of the materializing round-trip',
-  },
-  {
-    id: 'pre-commit-commit-creating-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-commit-creating.test.ts',
-    note: 'P9 commit-creating-subcommand leg of the pre-commit-gate family',
-  },
-  {
-    id: 'pre-commit-attestation-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-attestation.test.ts',
-    note: 'spawns the pre-commit gate AND the attest-loop-core-review hook end-to-end',
-  },
-  {
-    id: 'pre-commit-branch-strand-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-branch-strand.test.ts',
-    note: 'branch-strand refusal + fail-open announcement leg of the pre-commit-gate family',
-  },
-  {
-    id: 'pre-commit-child-session-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-child-session.test.ts',
-    note: 'Build 1 (P23) child-session commit/push refusal + push narrowness leg of the pre-commit-gate family',
-  },
-  {
-    id: 'pre-commit-target-repo-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-target-repo.test.ts',
-    note:
-      'target-repo scoping leg of the pre-commit-gate family: a commit/push into a DIFFERENT ' +
-      'repository (via cd chain, `git -C`, or the payload cwd) is out of jurisdiction — closes the ' +
-      '2026-08-19 false-RED class (an unrelated repo\'s commit blocked by audit-tools\' red index) — ' +
-      'while linked worktrees of THIS repo and unresolvable targets stay gated, fail-closed',
-  },
-  {
-    id: 'loop-core-gate-parity-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/loop-core-gate-parity.test.ts',
-    note: 'pins pattern + predicate parity between pre-commit-gate and attest-loop-core-review',
-  },
-  {
-    id: 'attest-derived-file-preflight-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/attest-derived-file-preflight.test.ts',
-    note:
-      'P19: attest scripts run the gate-shared derived-file checks before binding and refuse a tree ' +
-      'the gate would reject — and since 2026-08-30 they refuse ONLY when the worktree tree equals ' +
-      'the staged tree before and after the legs, abstaining otherwise',
-  },
-  {
-    id: 'precommit-leg-derivation-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/precommit-leg-derivation.test.ts',
-    note:
-      'P34 unit matrix over buildPreCommitLegs: every derived leg trigger reproduces (or safely ' +
-      'widens) the retired hand-coded trigger it replaced, against the LIVE registry',
-  },
-  {
-    id: 'pre-commit-derived-legs-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/pre-commit-gate-derived-legs.test.ts',
-    note: 'P34 spawn smoke: the real hook runs the derived leg loop end-to-end (block on a wired failing leg, announced skip on an unwired one)',
-  },
-  {
-    id: 'ci-trigger-paths-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/ci-trigger-paths.test.ts',
-    note: 'P26: derivation excludes declared-gap rows, keeps the always-trigger base, and the tracked ci.yml matches the generator byte-for-byte',
-  },
-  {
-    id: 'runtime-artifact-names-drift-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/runtime-artifact-names-drift.test.ts',
-    note:
-      'drift pin for the generated run-artifact name set the doc-citation gate consumes — re-runs the ' +
-      'textual extraction against the runtime-layout sources and cross-checks ARTIFACT_DEFINITIONS directly',
-  },
-  {
-    id: 'commit-gate-git-boundary-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/commit-gate-git-boundary.test.ts',
-    note:
-      'drives a REAL `git commit` in a fixture whose core.hooksPath runs commit-gate.mjs: a GOOD snapshot ' +
-      'lands, a BAD one is refused with the gate\'s own text and HEAD does not move, the staged snapshot ' +
-      '(not the worktree) is judged and the worktree restored, `commit -a` is judged on the temporary index ' +
-      'git hands the hook, a routed cherry-pick (-n, then commit) is judged on the applied tree; and pins ' +
-      'the tracked .githooks/* files — executable in the index, LF, running the gate relative to themselves, ' +
-      'pre-push delegating to the local .git/hooks/pre-push identity guard',
-  },
-  {
-    id: 'ingestion-checks-drift-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/ingestion-checks-drift.test.ts',
-    note:
-      'pins the contracts.md ingestion-check block against INGESTION_CHECKS (render from declaration, ' +
-      'tracked page byte-equal, the two former copies reduced to pointers), and pins the registry as ' +
-      'load-bearing by structural extraction: the shared scan and each host-handoff twin cite exactly ' +
-      'the checks the registry declares for them, in both directions',
-  },
-  {
-    id: 'executor-producer-declaration-test',
-    kind: 'contract-test',
-    impl: 'tests/audit/executor-artifact-production-declaration.test.ts',
-    note:
-      'pins EXECUTOR_REGISTRY[].produces against what the executor sources actually write, in both ' +
-      'directions (declared ⊇ extracted, and extracted ∪ data-declared dynamic contributors ⊇ declared), ' +
-      'plus one primary producer per registry artifact and drift of the generated render',
-  },
-  {
-    id: 'spec-mirror-drift-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/spec-mirror-drift.test.ts',
-    note:
-      'asserts the three docs against a fresh render of the registries (not against themselves, which ' +
-      'the gate already does), pins the both-way membership reconciliation red on a dropped and on an ' +
-      'invented row, and pins the splice refusals for a missing / duplicated marker pair',
-  },
-  {
-    id: 'lane-dispatch-driver-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/lane-dispatch.test.ts',
-    note:
-      'P28 wrapper half (sol-3): the shared one-item-per-call dispatch driver — one lane call per ' +
-      'item, resume drops errored rows and re-queues exactly them, preflight aborts with a stamped ' +
-      'sidecar and a typed throw, per-item log redirect before parse, finish_reason/output_bytes on ' +
-      'every lane-answered row, and the read-verbatim coverage-stamp field names/order',
-  },
-  {
-    id: 'prompt-capability-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/prompt-capability.test.ts',
-    forms: [
-      { name: 'second results-path heading', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'resultsPathDriftLines', call: 'text',
-        sample: 'const footer = "## Results path";' },
-      { name: 'results path promised below', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'resultsPathDriftLines', call: 'text',
-        sample: 'const note = "write to the results path provided below";' },
-    ],
-    note:
-      'C2: executable-plan prompts name the canonical source, current plan and prior reviews, ' +
-      'allow actual-source inspection, and restrict writes to the assigned submission. Audit fan-out ' +
-      'lanes carry their bound result path and the read-only-executor alternative. The source scan ' +
-      'recognizes literal duplicate results-path headings and dangling results-path references; ' +
-      'it does not prove every named input exists in a running session or detect arbitrary rewordings',
-  },
-  {
-    id: 'prompt-renders-its-contract-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/prompt-renders-its-contract.test.ts',
-    note:
-      'P41 (nightly 2026-08-25): typed prompt-contract registry records every known builder as ' +
-      'derived, projection, or declared-gap; derived rows render fixtures and assert required ' +
-      'top-level schema keys plus exhaustive closed enums, projection rows assert rendered field ' +
-      'tokens and schema-subset membership where a zod object exists, and declared gaps require ' +
-      'reasons. A recursive fs-only source reconciliation makes every exported /Prompt/ builder ' +
-      'claim exactly one row. The two P40 behavioral/source pins remain.',
-  },
-  {
-    id: 'conceptual-category-comment-drift-test',
-    kind: 'contract-test',
-    impl: 'tests/audit/conceptual-category-comment-drift.test.ts',
-    forms: [
-      { name: 'comment re-enumerating the category set', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'enumeratingCommentLines', call: 'text',
-        sample: '// one of: fundamental_approach, core_assumption, structural_risk' },
-    ],
-    note:
-      'P50: conceptual finding categories are single-sourced; scans tracked src/**/*.ts comment ' +
-      'lines for 3+ canonical token enumerations. Uncovered: comments naming 1-2 tokens (accepted ' +
-      'as topical discussion rather than enumeration) and non-.ts files are outside the scan',
-  },
-  {
-    id: 'review-routing-gate-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/review-routing-gate.test.ts',
-    forms: [
-      { name: 'routing declaration recognized', drive: 'export', module: 'scripts/check-review-routing.mjs',
-        exportName: 'findRoutingDeclarations', call: 'text',
-        sample: '<!-- review-routing: no-forward-work -->' },
-    ],
-    note:
-      'P09: `docs/reviews/` records are the analysis surface no gate reconciled against a work queue, ' +
-      'so a review could identify a whole program and reach nothing. The mechanism is an author-written ' +
-      'declaration checked for existence and shape, with pre-mechanism records on a shrinking ' +
-      'declared-debt baseline. Uncovered: the gate cannot tell whether the author picked the TRUE row',
-  },
 ];
 
 /** @type {ReachRow[]} */
@@ -1832,7 +1339,7 @@ export const REACH = [
       'remediate-code.mjs',
       'scripts/check-shared-primitives.mjs',
     ],
-    guardedBy: ['check:shared-primitives', 'shared-primitives-gate-test'],
+    guardedBy: ['check:shared-primitives'],
     uncovered:
       'tests/** is deliberately out of the scan set — a test oracle must not import the code it ' +
       'validates, so test-tree comparator copies are accepted; the pattern rules match SPELLINGS, ' +
@@ -1932,7 +1439,7 @@ export const REACH = [
       'scripts/shared/generate-executor-producers.mjs',
       'spec/audit/executor-producers.generated.md',
     ],
-    guardedBy: ['check:executor-producers', 'executor-producer-declaration-test'],
+    guardedBy: ['check:executor-producers'],
     uncovered:
       'the extraction reads DECLARED write sites (scopes and CLI rules in executor-write-sites.mjs) — a ' +
       'SOME-of-the-set relocation into a helper the site does not name is invisible to it, and the ' +
@@ -1957,7 +1464,7 @@ export const REACH = [
       'scripts/shared/generate-spec-mirrors.mjs',
       'scripts/shared/spec-mirror-data.mjs',
     ],
-    guardedBy: ['check:spec-mirrors', 'check:spec-artifact-prefixes', 'spec-mirror-drift-test'],
+    guardedBy: ['check:spec-mirrors', 'check:spec-artifact-prefixes'],
     note:
       'the three tables that used to hand-mirror ARTIFACT_DEFINITIONS, EXECUTOR_REGISTRY and ' +
       'ARTIFACT_DEPENDS_ON_MAP. Membership is reconciled BOTH ways — a registry row no region ' +
@@ -1979,21 +1486,19 @@ export const REACH = [
   {
     area: 'git hooks — the commit gate\'s boundary (P53)',
     files: ['.githooks/pre-commit', '.githooks/pre-merge-commit', '.githooks/pre-applypatch', '.githooks/pre-push'],
-    guardedBy: ['commit-gate-git-boundary-test'],
+    guardedBy: 'declared-gap',
     note:
       'the tracked hook files git runs through core.hooksPath: three exec commit-gate.mjs relative to ' +
       'themselves (so a linked worktree on an older branch still runs the current gate), pre-push delegates ' +
       'to the local, never-committed .git/hooks/pre-push identity guard that pointing core.hooksPath here ' +
       'would otherwise silence. check:guard-reach verifies each git-hook row\'s files exist and name the module',
     uncovered:
-      'core.hooksPath itself is a per-clone git setting: a clone in which no Claude Code session has started ' +
-      '(session-start-guards.mjs sets it) runs no commit gate, and nothing in the tree can observe that. ' +
-      'CI does not commit, so it is unaffected; a human clone is the exposed case',
+      "Legacy test witnesses were retired with the contract-suite replacement. No replacement coverage is claimed for this row.",
   },
   {
     area: 'result-ingestion check registry and its render',
     files: ['src/shared/submission/ingestionChecks.ts', 'scripts/shared/generate-ingestion-checks.mjs'],
-    guardedBy: ['check:ingestion-checks', 'vitest-gate', 'ingestion-checks-drift-test'],
+    guardedBy: ['check:ingestion-checks', 'contract-test-suite'],
     note:
       'the declared check set both host-handoff twins cite on every refusal, plus its doc render; the ' +
       'render target docs/audit-pkg/contracts.md is claimed by the shipped-doc-surface row. The ' +
@@ -2007,7 +1512,7 @@ export const REACH = [
   {
     area: 'installer-verb surface render',
     files: ['wrapper/installer-verb-help.mjs', 'scripts/shared/generate-cli-surface.mjs'],
-    guardedBy: ['check:cli-surface', 'vitest-gate', 'installer-verb-help-test'],
+    guardedBy: ['check:cli-surface', 'contract-test-suite'],
     note:
       'the declaration (verbs + summaries) both bins read, plus its doc render; the render target ' +
       'docs/audit-pkg/product.md is claimed by the shipped-doc-surface row. The two consumers that ' +
@@ -2023,7 +1528,7 @@ export const REACH = [
   {
     area: 'shipped doc surface',
     files: ['docs/audit-pkg/*.md'],
-    guardedBy: ['check:cli-surface', 'vitest-gate', 'shipped-doc-surface-test'],
+    guardedBy: ['check:cli-surface', 'contract-test-suite'],
     note:
       'package.json `files` decides which of these reach npm; tests/shared/shipped-doc-surface.test.ts ' +
       'pins the shipped set, pins README to name exactly it, refuses a relative link that leaves it, ' +
@@ -2041,22 +1546,7 @@ export const REACH = [
   {
     area: 'source',
     files: ['src/**'],
-    guardedBy: [
-      'build',
-      'check:tests',
-      'vitest-gate',
-      'check:deadcode',
-      'check:orphan-modules',
-      'check:lint',
-      'check:dup',
-      'check:depgraph',
-      'pre-commit-gate',
-      'prompt-capability-test',
-      'prompt-renders-its-contract-test',
-      'conceptual-category-comment-drift-test',
-      'check:comment-code-citations',
-      'check:invariant-glossary',
-    ],
+    guardedBy: ['build', 'check:tests', 'contract-test-suite', 'check:deadcode', 'check:orphan-modules', 'check:lint', 'check:dup', 'check:depgraph', 'pre-commit-gate', 'check:comment-code-citations', 'check:invariant-glossary'],
     uncovered:
       'the loop-core attestation half of pre-commit-gate covers only LOOP_CORE_PATTERNS prefixes ' +
       '(src/shared/loopCorePaths.ts), not every dispatch-adjacent CLI file; no gate refuses direct ' +
@@ -2072,7 +1562,7 @@ export const REACH = [
       'remediate-code.mjs',
       'scripts/shared/shipCoverage.mjs',
     ],
-    guardedBy: ['shipped-import-closure-test', 'smoke:packaged-audit-code', 'smoke:packaged-remediate-code'],
+    guardedBy: ['smoke:packaged-audit-code', 'smoke:packaged-remediate-code'],
     note:
       'the two root bins are the package launchers and package.json `files` is the manifest this pair ' +
       'of claims reads; shipCoverage.mjs is the shared walk substrate reached from the test named ' +
@@ -2082,7 +1572,7 @@ export const REACH = [
   {
     area: 'tests',
     files: ['tests/**'],
-    guardedBy: ['check:tests', 'vitest-gate', 'check:lint', 'check:dup', 'check:comment-code-citations'],
+    guardedBy: ['check:tests', 'contract-test-suite', 'check:lint', 'check:dup', 'check:comment-code-citations'],
     uncovered:
       'checkJs:false excludes the deliberate .mjs holdout(s) from the typecheck (the 563/564 floor), ' +
       'and check:lint likewise lints only tests/**/*.ts; ' +
@@ -2103,7 +1593,7 @@ export const REACH = [
     // adds is the DECLARATION each one must carry and the baseline the ratchet
     // reads. A record with no declaration is what the gate exists to catch.
     files: ['docs/reviews/**', 'docs/reviews/.routing-baseline.json', 'scripts/review-routing-data.mjs'],
-    guardedBy: ['check:review-routing', 'review-routing-gate-test'],
+    guardedBy: ['check:review-routing'],
     uncovered:
       'the declaration is checked for EXISTENCE and for naming a live row — never for truth, ' +
       'because whether a prose analysis identified work is a semantic judgment; a baselined ' +
@@ -2112,30 +1602,7 @@ export const REACH = [
   {
     area: 'hooks',
     files: ['.claude/hooks/**'],
-    guardedBy: [
-      'hook-trap-guards-test',
-      'check:comment-code-citations',
-      'guard-form-reach-test',
-      'hook-session-gates-test',
-      'hook-async-typecheck-test',
-      'write-time-derived-gates-test',
-      'hook-session-start-guards-test',
-      'session-registry-test',
-      'session-start-hook-test',
-      'doc-manifest-gate-test',
-      'pre-commit-staged-snapshot-test',
-      'pre-commit-commit-detection-test',
-      'pre-commit-commit-creating-test',
-      'pre-commit-attestation-test',
-      'pre-commit-branch-strand-test',
-      'pre-commit-child-session-test',
-      'pre-commit-target-repo-test',
-      'pre-commit-derived-legs-test',
-      'loop-core-gate-parity-test',
-      'check:loop-core-patterns',
-      'check:guard-reach',
-      'check:scripts',
-    ],
+    guardedBy: ['check:comment-code-citations', 'check:loop-core-patterns', 'check:guard-reach', 'check:scripts'],
     uncovered:
       'shell-split (the trap-guard split helper, home of bypassEnabled) has no dedicated test FILE of ' +
       'its own — its separator set and heredoc determinism are pinned inside hook-trap-guards-test, and ' +
@@ -2173,21 +1640,7 @@ export const REACH = [
       'scripts/render-closeout.mjs',
       'scripts/closeout-sections-data.mjs',
     ],
-    guardedBy: [
-      'check:guard-reach',
-      'doc-manifest-gate-test',
-      'guard-reach-gate-test',
-      'guard-form-reach-test',
-      'check:lint',
-      'check:dup',
-      // Area-granular citations (existing precedent in this row): each gate
-      // READS its own data module here — doc-manifest-data.mjs and guard-reach-data.mjs.
-      'check:doc-manifest',
-      'check:ci-trigger-paths',
-      // Parity over its own generator (scripts/shared/generate-runtime-artifact-names.mjs --check).
-      'check:runtime-artifact-names',
-      'check:scripts',
-    ],
+    guardedBy: ['check:guard-reach', 'check:lint', 'check:dup', 'check:doc-manifest', 'check:ci-trigger-paths', 'check:runtime-artifact-names', 'check:scripts'],
     uncovered:
       'check:scripts typechecks the script trees with noImplicitAny relaxed — implicit-any ' +
       'signatures pass by design, so the typed floor is narrower than src strict; ' +
@@ -2215,17 +1668,7 @@ export const REACH = [
       'src/audit/contracts/workerSchemas.ts',
       ...CONTRACT_SCHEMA_PRODUCER_SCHEMAS,
     ],
-    guardedBy: [
-      'check:contract-sites',
-      'contract-construction-sites-test',
-      // The schema-producer SOURCE and the schema files it names are also the
-      // inputs of the pre-build twin (CONTRACT_SCHEMA_PRODUCER_SCHEMAS in
-      // scripts/shared/guard-reach-derived-paths.generated.mjs), so this row is
-      // what gives check:guard-reach-paths its reach over them: editing
-      // CONTRACT_SCHEMA_PRODUCERS without re-rendering the twin goes red at
-      // commit rather than in release CI.
-      'check:guard-reach-paths',
-    ],
+    guardedBy: ['check:contract-sites', 'check:guard-reach-paths'],
     uncovered:
       'a site MARKER says a producer constructs the contract at that point — it does not prove the ' +
       'construction passes every field, so a producer spreading a partial object still compiles and ' +
@@ -2241,14 +1684,7 @@ export const REACH = [
       ...SITES_PINNED_PATHS,
       'scripts/check-sites-pinned.mjs',
     ],
-    guardedBy: [
-      'check:sites-pinned',
-      'sites-pinned-gate-test',
-      // Same reasoning as the contract row above: PINNED_PATHS and its gate
-      // script are two of the twin's sources, so citing this gate here is what
-      // gives check:guard-reach-paths its reach over them.
-      'check:guard-reach-paths',
-    ],
+    guardedBy: ['check:sites-pinned', 'check:guard-reach-paths'],
     uncovered:
       'the SITE LIST is derived from the diff, but the expected-failing TEST NAMES are ' +
       'author-supplied (read from the `// sites-pinned:` declaration), so the gate measures "the ' +
@@ -2268,23 +1704,7 @@ export const REACH = [
       'scripts/land.mjs',
       'scripts/poll-log-throttle.mjs',
     ],
-    guardedBy: [
-      'pack:smoke',
-      'smoke:packaged-audit-code',
-      'smoke:packaged-remediate-code',
-      'verify:hosts',
-      'verify:remediate-hosts',
-      'vitest-gate',
-      'check:lint',
-      'check:dup',
-      // Executes scripts/shared/derived-file-preflight.mjs directly (P34).
-      'precommit-leg-derivation-test',
-      'lane-dispatch-driver-test',
-      'check:scripts',
-      // Reads the PINS graph declared beside it, and reconciles it against the
-      // tracked tree.
-      'check:pin-obligations',
-    ],
+    guardedBy: ['pack:smoke', 'smoke:packaged-audit-code', 'smoke:packaged-remediate-code', 'verify:hosts', 'verify:remediate-hosts', 'contract-test-suite', 'check:lint', 'check:dup', 'check:scripts', 'check:pin-obligations'],
     uncovered:
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
       'poll-log-throttle run only at release/maintenance time — no build gate executes them ' +
@@ -2321,7 +1741,7 @@ export const REACH = [
   {
     area: 'script argv refusal',
     files: ['scripts/**'],
-    guardedBy: ['script-argv-refusal-test', 'check:scripts', 'check:lint', 'check:comment-code-citations'],
+    guardedBy: ['check:scripts', 'check:lint', 'check:comment-code-citations'],
     note:
       'a script that reads process.argv and does not adopt scripts/shared/argvGuard.mjs must appear in ' +
       'ARGV_GUARD_GAP inside tests/shared/script-argv-refusal.test.ts — the ratchet fails on a new ' +
@@ -2330,7 +1750,7 @@ export const REACH = [
       'implied per the durable-traps rule: 42 of the tracked scripts still read process.argv without ' +
       'the guard, and the list above is a DECLARED boundary, not a clean sweep — those scripts can ' +
       'still ignore an unrecognized flag. Migrating them is mechanical but reaches gate entry points ' +
-      'such as run-vitest-gate.mjs and profile-run.mjs, which forward variadic arguments to another ' +
+      'such as profile-run.mjs, which forward variadic arguments to another ' +
       'process; each needs its own spec, so it is its own change.',
   },
   {
@@ -2346,7 +1766,7 @@ export const REACH = [
   {
     area: 'CI workflow trigger paths',
     files: ['.github/workflows/ci.yml'],
-    guardedBy: ['check:ci-trigger-paths', 'ci-trigger-paths-test'],
+    guardedBy: ['check:ci-trigger-paths'],
     note:
       "ci.yml's two paths: blocks are GENERATED from this registry (non-declared-gap rows + the " +
       'always-trigger base) and reconciled by the gate; the rest of the yml is still unparsed locally',
@@ -2365,7 +1785,7 @@ export const REACH = [
   {
     area: 'schemas',
     files: ['schemas/**'],
-    guardedBy: ['vitest-gate'],
+    guardedBy: ['contract-test-suite'],
     note: 'generated by scripts/audit/generate-schemas.mjs; consumed by result validation and its tests',
   },
   {
@@ -2377,7 +1797,7 @@ export const REACH = [
       'smoke:packaged-remediate-code',
       'smoke:linked-audit-code',
       'smoke:linked-remediate-code',
-      'vitest-gate',
+      'contract-test-suite',
       'check:lint',
       'check:scripts',
     ],
@@ -2388,9 +1808,7 @@ export const REACH = [
       'package.json',
       'tsconfig.json',
       'tsconfig.base.json',
-      'tsconfig.test.json',
       'tsconfig.scripts.json',
-      'vitest.config.ts',
       'knip.json',
       'eslint.config.js',
       '.jscpd.json',
@@ -2399,7 +1817,7 @@ export const REACH = [
     guardedBy: [
       'build',
       'check:tests',
-      'vitest-gate',
+      'contract-test-suite',
       'check:deadcode',
       'check:guard-reach',
       'check:lint',
@@ -2419,7 +1837,7 @@ export const REACH = [
   {
     area: 'canonical AGENTS.md instruction pointer',
     files: ['AGENTS.md', 'CLAUDE.md'],
-    guardedBy: ['check:agents-region', 'agents-region-gate-test'],
+    guardedBy: ['check:agents-region'],
     note:
       'AGENTS.md opens with a stable link to the live, nonempty canonical CLAUDE.md; no instruction ' +
       'copy, byte-count or revision requires regeneration after a source edit.',
@@ -2526,7 +1944,7 @@ export const REACH = [
   {
     area: 'green-mechanism declaration',
     files: ['.claude/green-mechanism.json', 'scripts/shared/suite-green-status.mjs'],
-    guardedBy: ['green-mechanism-declaration-test'],
+    guardedBy: 'declared-gap',
     note:
       'the declaration names the repository-owned status command and the machine-wide ' +
       '~/.agent-config/verify-green.mjs executes that command for check while still refusing its ' +
@@ -2615,11 +2033,8 @@ export const GENERATED = [
   },
   {
     generator: 'scripts/render-closeout.mjs',
-    authority: 'contractTest',
-    contractTest: 'tests/shared/closeout-render.test.ts',
-    note:
-      'This renderer writes tree-bound runtime state rather than a tracked artifact, so freshness ' +
-      'is not meaningful; its rendering and refusal contract is pinned by the named test.',
+    onDemand: true,
+    reason: 'Renders checkout-specific runtime state, not a tracked artifact.',
   },
   { generator: 'scripts/shared/generate-backlog-index.mjs', authority: 'check', npmScript: 'check:backlog-index' },
   { generator: 'scripts/shared/generate-ci-trigger-paths.mjs', authority: 'check', npmScript: 'check:ci-trigger-paths' },
@@ -2655,14 +2070,14 @@ export const GENERATED = [
   {
     generator: 'scripts/shared/generate-filelock-export-surface.mjs',
     authority: 'contractTest',
-    contractTest: 'tests/shared/filelock-export-surface.test.ts',
+    contractTest: 'tests/checked-in-artifacts.test.mjs',
     artifacts: ['scripts/shared/filelock-export-surface.generated.json'],
     note: 'No --check arm by design; the contract test re-renders and byte-compares the surface.',
   },
   {
     generator: 'scripts/audit/generate-schemas.mjs',
     authority: 'contractTest',
-    contractTest: 'tests/audit/worker-schema-generation.test.ts',
+    contractTest: 'tests/checked-in-artifacts.test.mjs',
     // `schemas/*.schema.json` are the generator's real outputs, but they are also
     // hand-declared inputs elsewhere (each is a CONTRACT_SCHEMA_PRODUCERS key),
     // and this field means "written by this generator" only under a freshness
@@ -2672,17 +2087,10 @@ export const GENERATED = [
   },
   {
     generator: 'scripts/remediate/generate-auditor-contract-fixture.mjs',
-    authority: 'contractTest',
-    contractTest: 'tests/remediate/fixture-generator-drift-guard.test.ts',
-  },
-  {
-    generator: 'scripts/shared/generate-vitest-shard-baseline.mjs',
     onDemand: true,
-    reason:
-      'The shard baseline is a measurement of this machine under current load, not a deterministic ' +
-      'render of tracked source. A parity check would manufacture cross-machine timing failures; ' +
-      'rewrite it deliberately with `npm run generate:shard-baseline` when suite shape changes.',
+    reason: 'Explicit scratch-path generator for investigating auditor handoffs; it no longer checks a tracked test fixture.',
   },
+
 ];
 
 /** Project per-gate declared paths into the existing coverage partition. */

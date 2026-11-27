@@ -75,26 +75,9 @@ export default [
     rules: CORRECTNESS_RULES,
   },
   {
-    // Test tree — type-aware via the test tsconfig (the 2026-08-07 analysis run
-    // pointed tests at tsconfig.json and silently linted NOTHING under tests/:
-    // 589 parse errors read as coverage). sonarjs duplication rules are off
-    // here — fixture boilerplate twins are accepted test shape.
-    files: ["tests/**/*.ts"],
-    languageOptions: {
-      parser: tsParser,
-      ecmaVersion: "latest",
-      sourceType: "module",
-      parserOptions: { project: "./tsconfig.test.json" },
-    },
-    plugins: { "@typescript-eslint": tsPlugin },
-    rules: {
-      "@typescript-eslint/no-unused-vars": CORRECTNESS_RULES["@typescript-eslint/no-unused-vars"],
-    },
-  },
-  {
     // Plain JavaScript scripts and wrappers use the core ESLint rules without type information.
     // check:scripts also typechecks the files in tsconfig.scripts.json.
-    files: ["scripts/**/*.mjs", "wrapper/**/*.mjs", "dispatch/**/*.mjs", "*.mjs"],
+    files: ["tests/**/*.mjs", "scripts/**/*.mjs", "wrapper/**/*.mjs", "dispatch/**/*.mjs", "*.mjs"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",

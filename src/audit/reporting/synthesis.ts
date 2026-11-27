@@ -658,7 +658,7 @@ export function buildAuditFindingsReport(
  *    repaired in silence: the first theme to list the id kept it and the later
  *    theme had it stripped, so the stored narrative differed from the submitted
  *    one and nobody was told. It also made the result ORDER-DEPENDENT, which the
- *    convergence obligation (`tests/audit/synthesis-narrative-convergence.test.ts`)
+ *    convergence obligation (legacy tests/audit/synthesis-narrative-convergence.test.ts)
  *    wants the narrative free of: two semantically identical narratives supplied
  *    in different theme order would resolve the overlap differently.
  *

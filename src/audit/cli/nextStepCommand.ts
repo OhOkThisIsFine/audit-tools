@@ -547,7 +547,7 @@ function blockedStepPlan(
  *
  * Not exported, and its name deliberately avoids "Prompt": an exported symbol
  * whose name contains that substring must be registered in
- * `tests/shared/promptContractRegistry.ts` or `check`s red.
+ * legacy tests/shared/promptContractRegistry.ts or `check`s red.
  */
 function singleLaneDispatchEnvelope(opts: {
   title: string;

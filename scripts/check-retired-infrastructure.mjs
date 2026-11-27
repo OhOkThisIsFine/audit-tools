@@ -24,7 +24,7 @@
 // live instruction.
 //
 // Exit 0 clean, 1 on any unexempted mention. The recognizer is exported so
-// `tests/shared/retired-infrastructure.test.ts` can drive the REAL matcher over
+// legacy tests/shared/retired-infrastructure.test.ts can drive the REAL matcher over
 // declared samples rather than a copy of it (P51).
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";

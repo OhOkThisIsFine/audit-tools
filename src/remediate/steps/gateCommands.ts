@@ -1,5 +1,5 @@
 import { admitRemediationDirtyBaseline } from "../state/dirtyBaseline.js";
-// sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/shared/maven-command-discovery.test.ts, tests/shared/command-discovery-integration.test.ts
+// sites-pinned: tests/self-remediation-gate.test.mjs
 import { isFileMissingError } from "../../shared/io/json.js";
 import { hashContent } from "../../shared/hash.js";
 import { discoverProjectCommands } from "../../shared/tooling/testCommand.js";
@@ -29,12 +29,8 @@ export interface FinalGateCommandSpec {
   layer: "build" | "check" | "lint" | "unit";
 }
 
-/**
- * The vitest gate script the unit leg executes, repo-relative. Named once and
- * used by BOTH the scoping predicate and the command list, so the file the
- * predicate checks for is provably the file the gate runs.
- */
-const VITEST_GATE_SCRIPT = join("scripts", "shared", "run-vitest-gate.mjs");
+/** The same build-free suite used by the release, resolved relative to the checkout. */
+const CONTRACT_TEST_SCRIPT = join("scripts", "shared", "run-contract-tests.mjs");
 
 /**
  * Whether `root` is the audit-tools monorepo — the repo the tool-owned final
@@ -60,7 +56,7 @@ export function isAuditToolsMonorepo(root: string): boolean {
     existsSync(join(root, "src", "remediate")) &&
     existsSync(join(root, "audit-code.mjs")) &&
     existsSync(join(root, "remediate-code.mjs")) &&
-    existsSync(join(root, VITEST_GATE_SCRIPT))
+    existsSync(join(root, CONTRACT_TEST_SCRIPT))
   );
 }
 
@@ -484,46 +480,10 @@ export function toolOwnedFinalGateCommands(root: string, testCommand?: string[])
   return [
     { argv: ["npm", "run", "build"], build_free: false, layer: "build" },
     { argv: ["npm", "run", "check"], build_free: true, layer: "check" },
-    // The TEST-tree typecheck (tsconfig.test.json) is a distinct gate from
-    // `check` and is part of CI's `verify:checks` — an accept leg that omits it
-    // lands type-RED test files invisible to vitest and `check` (accept/reverify
-    // cluster defect 12: the 2026-08-06 run landed 4 such files, the fourth
-    // CP-NODE-26 accept regression). Build-free: it typechecks tests + src
-    // directly, no dist involved.
     { argv: ["npm", "run", "check:tests"], build_free: true, layer: "check" },
-    // BUILD-FREE unit suite at the repo root (single package — no `npm -w`, never
-    // `npm test`, which prepends a build). ONE vitest runner covers all three areas
-    // (tests/shared, tests/audit, tests/remediate) per vitest.config.ts `include` —
-    // the node:test split was retired in the single-vitest migration, so a separate
-    // `node --import tsx/esm --test` command would both be redundant with this and
-    // FAIL on the current tree (the .test.mjs files use vitest globals, not node:test).
-    //
-    // `--retry=2` is FLAKE-TOLERANCE, not flake-masking: the tool-owned gate is a
-    // ROBUSTNESS check (did the remediation's edits break the repo?), and a red
-    // HALTS the run — it pauses at the boundary until a human makes the suite
-    // green. A single transient timing flake in the target suite (e.g. a
-    // rolling-dispatch "expected 1 to be 2" race under full parallel load) would
-    // otherwise stop a healthy run and demand attention for a failure that does
-    // not reproduce. A genuinely-broken test still fails all retries → red →
-    // pause; only a test that PASSES on retry (i.e. was flaky, not broken) is
-    // spared. Gate-scoped ON PURPOSE (never vitest.config `retry`, which would
-    // mask flakes in CI / `npm test` where surfacing them is the point).
-    //
-    // Routed through `run-vitest-gate.mjs`, never a bare `npx vitest run`: a raw
-    // vitest exit code is not a verdict in this repo. It has exited 0 while
-    // reporting failures (the false-green defect) and exits 1 with ZERO failures
-    // under worker-RPC starvation (the false-RED one) — and a false RED here is
-    // not cosmetic, it is a whole-repo gate red on a healthy tree. The script
-    // decides from the token-bound outcome ledger the reporter writes and fails
-    // closed when it cannot prove the ledger belongs to this run, so its exit IS
-    // trustworthy. Declared here rather than rewritten at execution time so the
-    // command that is declared and the command that runs stay the same string.
     {
-      // Forward slashes: this is an argv token handed to a shell, not a path
-      // joined against the filesystem, and both platforms accept `/` here. The
-      // predicate above checks the same file through `join`, which is the
-      // platform-correct form for an existence test.
-      argv: ["node", "scripts/shared/run-vitest-gate.mjs", "--retry=2"],
+      // Build already ran above; use the same contracts as CI without rebuilding.
+      argv: ["node", "scripts/shared/run-contract-tests.mjs"],
       build_free: true,
       layer: "unit",
     },

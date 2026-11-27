@@ -13,7 +13,7 @@
  *     " and " is a separator instead.
  *
  * That comma/`and` difference is the ONLY intentional one, and it is what
- * `tests/shared/maintainability-split-rules.test.ts` guards. Everything else
+ * legacy tests/shared/maintainability-split-rules.test.ts guards. Everything else
  * about where a clause ENDS is the same question with the same answer, so it
  * lives here rather than in two copies that can drift.
  *

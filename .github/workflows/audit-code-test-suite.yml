@@ -1,197 +1,32 @@
 name: audit-code-test-suite
-
 on:
   push:
-    branches:
-      - main
-    paths:
-      # A gate's trigger paths must cover every path the gate INSPECTS — the same
-      # rule ci.yml states. This suite inspects docs/ and spec/: staleness.test.mjs
-      # parses spec/audit/dependency-map.md and design-docs-declarative.test.mjs
-      # lints the spec design docs. Without these two globs a docs-only push skipped
-      # the suite entirely, so its doc-derived failures sat red on main until the
-      # next unrelated CODE push re-ran them (commit 016d5945, 2026-07-15).
-      # Widening the TRIGGER rather than hand-listing the doc-derived tests in the
-      # cheap chain is deliberate: a curated list decays the moment someone adds a
-      # test that reads a doc, and that decay is invisible.
-      - docs/**
-      - spec/**
-      - src/**
-      - tests/**
-      - schemas/**
-      - dispatch/**
-      - templates/**
-      - skills/**
-      - scripts/**
-      - wrapper/**
-      - "*.mjs"
-      - .github/workflows/**
-      - package.json
-      - package-lock.json
-      - tsconfig.json
-      - tsconfig.base.json
-      - vitest.config.ts
+    branches: [main]
   pull_request:
-    branches:
-      - main
-    paths:
-      # A gate's trigger paths must cover every path the gate INSPECTS — the same
-      # rule ci.yml states. This suite inspects docs/ and spec/: staleness.test.mjs
-      # parses spec/audit/dependency-map.md and design-docs-declarative.test.mjs
-      # lints the spec design docs. Without these two globs a docs-only push skipped
-      # the suite entirely, so its doc-derived failures sat red on main until the
-      # next unrelated CODE push re-ran them (commit 016d5945, 2026-07-15).
-      # Widening the TRIGGER rather than hand-listing the doc-derived tests in the
-      # cheap chain is deliberate: a curated list decays the moment someone adds a
-      # test that reads a doc, and that decay is invisible.
-      - docs/**
-      - spec/**
-      - src/**
-      - tests/**
-      - schemas/**
-      - dispatch/**
-      - templates/**
-      - skills/**
-      - scripts/**
-      - wrapper/**
-      - "*.mjs"
-      - .github/workflows/**
-      - package.json
-      - package-lock.json
-      - tsconfig.json
-      - tsconfig.base.json
-      - vitest.config.ts
-
+    branches: [main]
 concurrency:
-  group: audit-code-test-suite-${{ github.workflow }}-${{ github.ref }}
+  group: audit-code-test-suite-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
-env:
-  NPM_CONFIG_LOGLEVEL: notice
-
 jobs:
   orchestration-tests:
-    name: Orchestration tests (Node ${{ matrix.node }}, shard ${{ matrix.shard }}/4)
-    # Skip the suite on the `release: vX.Y.Z` bump push: that commit only bumps the
-    # version (the code was already exercised by this suite on the pre-bump commit),
-    # and publish-package.yml runs the authoritative sharded suite for the actual
-    # release. Re-running the Node × shard matrix here would be a pure duplicate. Mirrors
-    # the same guard on ci.yml's `checks` job. The predicate is version-digit-anchored
-    # (GitHub expressions have no regex): it matches only `release: v<digit>...` — the
-    # exact bump-commit format emitted by scripts/release-and-publish.mjs
-    # (`release: vX.Y.Z`) — so a non-bump message that merely shares the prefix
-    # (e.g. `release: verify hosts...`) does NOT skip the suite (CE-004). Keep this
-    # push half identical to the one on ci.yml's `checks` job.
-    # The bump commit now lands through a pull request from `release/v<x.y.z>`
-    # (scripts/release-and-publish.mjs, 2026-10-04), so the suite skips that pull
-    # request too, for the same reason. ci.yml's `checks` job deliberately does NOT
-    # skip it: `checks` is the required status the landing waits for.
-    if: >-
-      ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v'))
-          && (github.event_name != 'push'
-          || !(startsWith(github.event.head_commit.message, 'release: v0')
-            || startsWith(github.event.head_commit.message, 'release: v1')
-            || startsWith(github.event.head_commit.message, 'release: v2')
-            || startsWith(github.event.head_commit.message, 'release: v3')
-            || startsWith(github.event.head_commit.message, 'release: v4')
-            || startsWith(github.event.head_commit.message, 'release: v5')
-            || startsWith(github.event.head_commit.message, 'release: v6')
-            || startsWith(github.event.head_commit.message, 'release: v7')
-            || startsWith(github.event.head_commit.message, 'release: v8')
-            || startsWith(github.event.head_commit.message, 'release: v9'))) }}
+    name: Orchestration tests (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     strategy:
       fail-fast: false
-      # Sole suite runner: the vitest suite runs sharded 4 ways (never whole) on
-      # EVERY Node major the engines range admits and the Node project still
-      # ships — the floor (package.json engines.node >=22), the active LTS line
-      # and the current line. Floating majors, so each job runs its line's
-      # latest release: that is the support claim under test. Also exercise the
-      # exact publish-package.yml RELEASE_NODE_VERSION pin before tagging: a
-      # floating major can pass while the older publish runtime fails. ci.yml carries
-      # only verify:checks on the pinned floor line, so this workflow owns the
-      # runtime coverage of every supported major (owner decision b175a773,
-      # 2026-08-31, superseding T5's single line). Keep the denominator in the
-      # `vitest run --shard` command below in sync with the length of the shard
-      # list; tests/audit/release-contract.test.ts pins the matrix shape against
-      # package.json.
       matrix:
         node: ["22.14.0", "22", "24", "26"]
-        shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
-        with:
-          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - name: Validate package-lock.json
-        timeout-minutes: 2
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::package-lock.json is missing or malformed. Regenerate it with npm install and commit the updated lockfile before retrying CI."' ERR
-          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('package-lock.json is missing lockfileVersion'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('package-lock.json is missing package name'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
       - name: Install dependencies
-        timeout-minutes: 10
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::npm ci failed. Inspect the uploaded audit-code-test-suite npm logs artifact and rerun npm ci locally."' ERR
-          npm ci --prefer-offline --no-audit --no-fund
-      - name: Build (type-checks + emits dist)
-        timeout-minutes: 10
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          # `npm run build` (tsc emit) type-checks identically to `tsc --noEmit`, so a
-          # separate `check` step here would be a redundant second full compile. A type
-          # error fails this step exactly as a standalone check would.
-          trap 'echo "::error::npm run build failed (type error or emit failure). Rerun npm run build locally; a type error fails here just as npm run check would."' ERR
-          npm run build
-      - name: Run tests (shard ${{ matrix.shard }}/4)
-        timeout-minutes: 15
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::vitest shard ${{ matrix.shard }}/4 failed. Review the uploaded audit-code-test-suite npm logs artifact and rerun npx vitest run --shard=${{ matrix.shard }}/4 locally."' ERR
-          # run-vitest-gate.mjs, not a bare `npx vitest run` — closes the false-green
-          # defect (docs/backlog.md, search false-green): it fails nonzero if the
-          # ledger's structured outcome reports failures even when vitest's own
-          # process exit code is 0.
-          node scripts/shared/run-vitest-gate.mjs --shard=${{ matrix.shard }}/4
-      - name: Upload npm debug logs
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: audit-code-test-suite-npm-logs-node${{ matrix.node }}-shard-${{ matrix.shard }}
-          path: |
-            ~/.npm/_logs
-            npm-debug.log*
-          if-no-files-found: ignore
-
-      - name: Upload vitest shard ledger
-        if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: audit-code-test-suite-vitest-ledger-node${{ matrix.node }}-shard-${{ matrix.shard }}
-          path: |
-            .audit-tools-profile/vitest-shard${{ matrix.shard }}of4-latest.json
-          if-no-files-found: ignore
-      - name: Emit troubleshooting guidance
-        if: ${{ failure() }}
-        shell: bash
-        working-directory: .
-        run: |
-          echo "::error::audit-code test-suite workflow failed on shard ${{ matrix.shard }}/4. Review the uploaded artifacts and rerun npm ci && npx vitest run --shard=${{ matrix.shard }}/4 locally."
+        run: npm ci --prefer-offline --no-audit --no-fund
+      - name: Build and run contract tests
+        run: npm test

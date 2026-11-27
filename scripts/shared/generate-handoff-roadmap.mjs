@@ -328,7 +328,7 @@ export const HANDWRITTEN_CREEP_RULES = [
 // Ninety therefore passes the largest legitimate shape with ~30% headroom while
 // refusing the recurrence with ~15% margin, and NEITHER edge moves when the
 // prose is rewrapped. Both measurements are pinned in
-// `tests/shared/handoff-roadmap.test.ts`, so a bound that drifts into either
+// legacy tests/shared/handoff-roadmap.test.ts, so a bound that drifts into either
 // the legitimate or the recurrence range fails there rather than silently
 // stopping catching anything.
 //

@@ -29,7 +29,7 @@ then verify each candidate against current HEAD before deleting it. [[orphan-mod
   mutation signal appears.)* **Forward constraint:** any future proposal channel for analyzer ids
   beyond the static registry must route through the same `admitSpawn` chokepoint. (The
   consent-token-never-persisted half is pinned mechanically by
-  `tests/shared/consent-token-not-persisted.test.ts`.) [[deterministic-analyzers-own-vs-acquire]]
+  [historical consent-token-not-persisted.test.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/v0.57.16/tests/shared/consent-token-not-persisted.test.ts).) [[deterministic-analyzers-own-vs-acquire]]
   - **⬇ Live-run watch** (audit a **Rust** repo for clippy / a **Ruby** repo for rubocop, with the per-run
     consent token so the gate admits the non-default tool): the tool must actually **spawn and normalize**
     output into leads (cargo-clippy / bundle-rubocop), not skip. FAIL = "skipped" status when the ecosystem

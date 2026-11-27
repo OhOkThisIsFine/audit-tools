@@ -39,7 +39,7 @@ export interface RunTrackedOptions {
  * choice at every call site; a long out-of-hold run declares a long bound.
  * Note the bound is per spawn: sequential sync spawns inside one synchronous
  * stretch SUM against the 30s stale window, so fold-reachable work belongs on
- * {@link runTrackedAsync} regardless (`tests/shared/sync-spawn-fold-safety.test.ts`).
+ * {@link runTrackedAsync} regardless (legacy tests/shared/sync-spawn-fold-safety.test.ts).
  */
 export type RunTrackedSyncOptions = RunTrackedOptions & { timeout: number };
 

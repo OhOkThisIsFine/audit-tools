@@ -74,7 +74,7 @@ export interface ContentCoherencePolicy {
  * granularity: every task of a unit is in one component, and a component can only
  * grow past one unit through an explicit cross-unit relation. That is the whole
  * difference, and it is pinned as an invariant in
- * `tests/audit/partition-task-graph.test.ts`.
+ * legacy tests/audit/partition-task-graph.test.ts.
  *
  * Measurement (a lap-local harness: the live repo's own tracked
  * files through the archived task planner → `buildTaskAffinityGraph` →
@@ -175,7 +175,7 @@ export interface NormalizedContentCoherenceItem {
  * findings `pair_scores` alone reached 1.33 GB, exceeding V8's 512 MB string cap
  * inside `stableStringify` and wedging artifact hashing before any persist.
  * Keep this layer local; see the trace-shape contract test in
- * `tests/shared/content-coherence.test.ts`.
+ * legacy tests/shared/content-coherence.test.ts.
  */
 interface CoherenceCandidate {
   left: string;
@@ -444,7 +444,7 @@ function isEligible(
  * shared file then surfaces as a seam between them rather than disappearing into
  * one block. "A clique stays whole" without the uniform qualifier is an
  * overclaim; the two cases are pinned separately in
- * `tests/shared/content-coherence.test.ts`.
+ * legacy tests/shared/content-coherence.test.ts.
  */
 function refineAtModularityPeak(
   members: readonly string[],

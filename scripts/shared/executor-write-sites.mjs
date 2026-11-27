@@ -7,11 +7,11 @@
 // and `spec/audit/executor-producers.generated.md` renders that declaration. A
 // declaration nothing checks is prose in a `.ts` file, so this module recovers
 // the same relation from the CODE and
-// `tests/audit/executor-artifact-production-declaration.test.ts` pins the two
+// legacy tests/audit/executor-artifact-production-declaration.test.ts pins the two
 // against each other in both directions.
 //
 // ONE HOME FOR THE EXTRACTION. The write-set extraction used to live inside
-// `tests/audit/seam-dependency-map-executor-writeset-parity.test.ts` as a
+// legacy tests/audit/seam-dependency-map-executor-writeset-parity.test.ts as a
 // per-FILE regex over a hand list of 14 modules. That list was neither sound nor
 // complete (it omitted `executorRunners.ts`'s inline friction runner,
 // `charterDeltaExecutor.ts` and `intentEquivalenceExecutor.ts`, and carried a

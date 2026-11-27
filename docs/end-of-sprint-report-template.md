@@ -48,8 +48,7 @@ writes. That record binds two ways, and both matter:
   render is not your closeout. A render that predates this session is reported as another
   session's hand-back.
 
-So hand-writing the report instead is not a quiet way around the check. The behavior is pinned by
-[`tests/shared/closeout-render.test.ts`](../tests/shared/closeout-render.test.ts).
+So hand-writing the report instead is not a quiet way around the check.
 
 ## Current sections and input shape
 

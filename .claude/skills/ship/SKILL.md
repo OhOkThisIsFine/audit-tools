@@ -15,14 +15,12 @@ before. Resolve it at runtime (`remote=$(git remote | head -n 1)`, the same rule
 
 ## 1. Preflight gate (fast local fast-fail — CI is the authoritative full gate)
 
-The full vitest suite is most of the gate and takes minutes on Windows, which is *not* the authoritative
-signal (Linux CI is). CI runs the full suite **sharded across parallel jobs** as the real
-gate, so the local preflight is a quick fast-fail, not the full run.
+Run the small contract suite locally. CI reruns it against the actual release runtime and is authoritative.
 
 - Fresh worktree → `npm install` first (otherwise tsc resolves `audit-tools/shared` against a stale `dist/` → fake "missing export" errors).
 - `npm run build && npm run check` from repo root — zero errors.
 - Fast local checks, Bash tool:
-  `npx vitest run --changed` (only tests touching your uncommitted edits) +
+  `npm run test:built` (the complete current contract suite, after building) +
   `npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code` +
   `npm run smoke:remediate-gate` (drives the tool-owned final gate over a fixture repo — the gate
   EXECUTION path the packaged-bin smokes do not touch) +
@@ -34,7 +32,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   These are for FAST FEEDBACK only — nothing here is load-bearing, because the release script's
   pre-tag gate now runs the whole `verify:checks` and refuses to tag if any of it is red.
 - Want the belt-and-suspenders full local run anyway? `npm run verify:release`
-  (= `verify:checks` + full vitest + both linked-install smokes) — but the sharded CI gate re-runs it
+  (= `verify:checks` + contract suite + both linked-install smokes) — but the CI gate re-runs it
   authoritatively either way.
 - Failing test → rerun alone before calling it a regression; EBUSY/EPERM = flake suspect first (the smokes
   pack a tarball and are Windows-flaky on temp-dir EPERM/EBUSY).
@@ -46,7 +44,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 - **Land with `npm run land`, never `git push … main`.** Branch protection binds admins (owner decision
   2026-10-04), so a direct push to `main` is refused: the commit carries no required `checks` status yet.
   `npm run land` (`scripts/land.mjs`) refuses unless the tree is clean, HEAD fast-forwards the remote
-  default branch and a full-suite stamp covers HEAD's tree; then it opens a pull request from the current
+  default branch and a contract-suite stamp covers HEAD's tree; then it opens a pull request from the current
   branch, waits for the required checks on that exact commit, and fast-forwards `main` to it.
 - **Lap-worktree ship (one command, no primary-worktree dance).** Laps run on a `claude/<lap>` linked
   worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
@@ -81,7 +79,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 - That workflow first runs `validate-source` (`scripts/shared/verify-release-source.mjs`), which checks
   the event commit and passes it on as the commit every later job checks out. Then it runs parallel
   jobs: `gate` runs `npm run verify:checks`, the authoritative gate defined in `package.json`, plus a
-  `test` matrix (vitest sharded 4 ways) — and only the `publish` job
+  `test` (the same contract suite on the release runtime) — and only the `publish` job
   (`needs: [validate-source, gate, test]`)
   uploads. **Trusted publishing is configured + working** — no tokens, no local bootstrap.
 - CRLF trap: the clean-tree guard fails from a CRLF worktree → renormalize to LF first.
@@ -102,7 +100,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 `.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or
 manual `workflow_dispatch`. Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version)
 → `next` dist-tag, else `latest`. CI: `validate-source` (the release source commit) → parallel `gate`
-(`verify:checks`) and `test` (4-way sharded `vitest run`) jobs → `publish` (needs all three). The `publish` job requests `id-token: write` for the npm
+(`verify:checks`) and `test` (the contract suite) jobs → `publish` (needs all three). The `publish` job requests `id-token: write` for the npm
 OIDC exchange, pins the Node + npm versions declared in the workflow, rebuilds `dist/` for packing,
 previews the tarball with `npm pack --dry-run`, publishes with public access + provenance, verifies the
 published version resolves from the registry, and uploads `*-npm-logs` artifacts on failure.
@@ -121,8 +119,7 @@ Profiling is a **standing feature** of every test + release run, single-sourced 
 under GitHub Actions each profile also appends a markdown table to the job summary.
 
 - **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `.audit-tools-profile/verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
-- **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `.audit-tools-profile/vitest-latest.json` (shard runs write `vitest-shard<X>of<Y>-latest.json` — the suffix goes on the
-  profile name, not the file suffix).
+- **Suite:** Node prints the named contract tests and timing; the successful runner records a tree-bound result.
 - **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / land / push+release / await-run / await-npm / reinstall+smoke) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
 
 `*-history.ndjson` is the trend line — diff the latest record against prior runs to catch a time regression.

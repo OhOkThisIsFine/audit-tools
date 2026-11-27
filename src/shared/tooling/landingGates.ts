@@ -16,7 +16,7 @@
 // per-item runs, each on a gate no per-item command covers —
 //
 //   • a hand-restated `.audit-tools` literal caught only by the tree-wide
-//     `tests/shared/audit-tools-path-guard.test.ts` (`1e7a4a54` fixed it),
+//     legacy tests/shared/audit-tools-path-guard.test.ts (`1e7a4a54` fixed it),
 //   • a case-folding assertion true only on a case-insensitive volume
 //     (`011c6ae0`), and
 //   • an intra-`src/shared` import cycle a reviewer graded minor that
@@ -102,7 +102,7 @@ export interface LandingGateRole {
  * `guard` is separate from the four cheap gates because it is the EXPENSIVE
  * one: the repository's own cross-cutting test suite. It is here because a
  * guard suite is precisely the gate a module-scoped `targeted_commands` entry
- * cannot stand in for — `tests/shared/audit-tools-path-guard.test.ts` is the
+ * cannot stand in for — legacy tests/shared/audit-tools-path-guard.test.ts is the
  * live example.
  */
 export const LANDING_GATE_SCRIPT_NAMES: readonly LandingGateRole[] = [

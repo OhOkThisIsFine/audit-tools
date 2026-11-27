@@ -370,7 +370,7 @@ export type NextStepResult = (
    *
    * Present only when the fold drained a non-empty carry onto a step kind that
    * has no advisory channel of its own — the semantic-review step carries
-   * `ingestIssues`/`validationWarnings` as DATA, and every other kind states
+   * ingestIssues/validationWarnings as DATA, and every other kind states
    * this instead. OPTIONAL and shared by every variant, so the single drain
    * point (the fold's emission boundary) can attach it to whichever step the
    * drain produced.

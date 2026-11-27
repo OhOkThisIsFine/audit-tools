@@ -17,7 +17,6 @@ on:
       - "**/*.md"
       - ".agent/**"
       - ".audit-tools/nightly/proposals/**"
-      - ".claude/green-mechanism.json"
       - ".claude/hooks/**"
       - ".claude/hooks/*.mjs"
       - ".claude/hooks/loop-core-patterns.mjs"
@@ -27,10 +26,6 @@ on:
       - ".claude/skills/**"
       - ".dependency-cruiser.cjs"
       - ".gemini/**"
-      - ".githooks/pre-applypatch"
-      - ".githooks/pre-commit"
-      - ".githooks/pre-merge-commit"
-      - ".githooks/pre-push"
       - ".github/agents/**"
       - ".github/prompts/**"
       - ".github/workflows/**"
@@ -99,7 +94,6 @@ on:
       - "scripts/shared/runtime-artifact-names.generated.mjs"
       - "scripts/shared/shipCoverage.mjs"
       - "scripts/shared/spec-mirror-data.mjs"
-      - "scripts/shared/suite-green-status.mjs"
       - "skills/**"
       - "spec/audit/artifact-contract.md"
       - "spec/audit/dependency-map.generated.md"
@@ -187,8 +181,6 @@ on:
       - "tsconfig.base.json"
       - "tsconfig.json"
       - "tsconfig.scripts.json"
-      - "tsconfig.test.json"
-      - "vitest.config.ts"
       - "wrapper/**"
       - "wrapper/**/*.mjs"
       - "wrapper/*.mjs"
@@ -213,20 +205,16 @@ env:
   NPM_CONFIG_LOGLEVEL: notice
 
 jobs:
-  # ci.yml runs only the cheap deterministic chain (`checks` → verify:checks) on
-  # the one pinned line above. The vitest suite is owned by
-  # audit-code-test-suite.yml, which runs it once per supported Node major (its
-  # `matrix.node` axis is the list), each sharded 4 ways — so the suite is not
-  # re-run here. The release-time authoritative gate still lives in
-  # publish-package.yml.
+  # Contract tests are exercised by audit-code-test-suite.yml and again on
+  # the release runtime by publish-package.yml. This job checks the static
+  # and packaging prerequisites independently.
   # This `checks` job carries a release-bump skip guard: the `release: vX.Y.Z`
   # commit's authoritative gate runs on Linux in publish-package.yml, so re-running
   # it here is a pure duplicate. The predicate is version-digit-anchored (GitHub
   # expressions have no regex): it matches only `release: v<digit>...` — the exact
   # bump-commit format emitted by scripts/release-and-publish.mjs (`release: vX.Y.Z`)
   # — so a non-bump message that merely shares the prefix (e.g. `release: verify
-  # hosts...`) does NOT skip CI (CE-004). Keep this predicate identical to the one
-  # in audit-code-test-suite.yml.
+  # hosts...`) does NOT skip CI (CE-004). The separate test workflow still checks the default test command.
   checks:
     if: >-
       ${{ github.event_name != 'push'

@@ -102,7 +102,7 @@ function repoRootCeiling(): string | null {
  * must not re-home it: a `--root <X>` naming a sub-project that lives inside a
  * larger git repo means that sub-project, and marker-climbing it up to the
  * outer repo is the over-reach that resolver's doc comment rejects (pinned by
- * `tests/shared/repo-root.test.ts`). Discovery runs only where there is no
+ * legacy tests/shared/repo-root.test.ts). Discovery runs only where there is no
  * supplied root to respect, so `--root` remains the exact escape hatch for the
  * sub-project case and for running from outside the target repo entirely.
  *

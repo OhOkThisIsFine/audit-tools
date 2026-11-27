@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/doc-manifest-gate.test.ts
+// sites-pinned: tests/release-wiring.test.mjs
 // The canonical doc manifest, HELD AS DATA.
 //
 // WHY DATA AND NOT PROSE. The manifest used to be readable only as markdown, and
@@ -81,7 +81,7 @@ export const DOC_MANIFEST = [
   },
   {
     type: "ops / usage",
-    files: ["README.md"],
+    files: ["README.md", "tests/README.md"],
     check: "Do the documented commands / paths still resolve and run.",
     autoApply: "factual-stale → yes",
   },
@@ -166,18 +166,6 @@ export const DOC_MANIFEST = [
         ".audit-tools/remediation-report.md",
         "runtime run-artifact — a remediate-code run output per `CLAUDE.md`'s Artifact layout; tracked but never reviewed",
       ],
-      [
-        "tests/audit/fixtures/simple-app/README.md",
-        "test-fixture content — a sample-app README, its own concern, not a project doc",
-      ],
-      [
-        "tests/fixtures/type-coverage-2.29.7/README.md",
-        "test-fixture provenance and reproduction instructions for the pinned analyzer contract",
-      ],
-      [
-        "tests/remediate/fixtures/audit-guidance-real-mixed.md",
-        "frozen guidance input for mixed audit provenance regression tests, not a project document",
-      ],
     ],
     check: "—",
     autoApply: "—",
@@ -194,11 +182,8 @@ export const DOC_MANIFEST = [
       ".github/prompts/remediate-code.prompt.md",
     ],
     check:
-      "ONE canonical body rendered per-IDE (`CLAUDE.md` B5); **not hand-edited** — governed by renderer drift " +
-      "tests (`tests/audit/host-asset-renderer-drift.test.ts`, " +
-      "`tests/remediate/host-bootstrap-descriptors-remediate.test.ts`, " +
-      "`tests/remediate/install-repo-assets.test.ts`). Review the canonical source, not the generated copy; a " +
-      "diff = a drift-test/renderer gap, not a doc edit.",
+      "ONE canonical body rendered per-IDE (`CLAUDE.md` B5); **not hand-edited** — verified by the host checks. " +
+      "Review the canonical source, not the generated copy.",
     autoApply: "**No — renderer-owned.**",
   },
   {

@@ -7,7 +7,7 @@
 // WHY ITS OWN MODULE, and not `state.ts` which owns `deriveAuditState`.
 // `state.ts` reads as the natural home — the module that owns the scan owning its
 // projection — and that is what the item 2.1 plan recommends. It is wrong, and the
-// reason is not layering. `tests/audit/one-holistic-derivation-per-scan.test.ts`
+// reason is not layering. legacy tests/audit/one-holistic-derivation-per-scan.test.ts
 // pins the memo below by `vi.mock`-ing `orchestrator/state.js` and replacing
 // `deriveAuditState` with a counting stub. A call from `state.ts` to its own
 // `deriveAuditState` is INTRA-MODULE and no mock intercepts it, so hosting this

@@ -35,7 +35,7 @@ export const RUN_ID_SLUG_MAX_LENGTH = 48;
  * The digest half's character count, EXPORTED because it is half of a contract
  * the shared run-id grammar enforces and the two must not drift: the grammar
  * admits at most 128 characters, and a derived id is `review-` + slug + `-` +
- * this many hex characters. `tests/shared/host-handoff-core.test.ts` derives the
+ * this many hex characters. legacy tests/shared/host-handoff-core.test.ts derives the
  * worst case from these constants and pushes it through the shared boundary, so
  * raising either one past the cap reds that test rather than minting a run whose
  * own paths throw.

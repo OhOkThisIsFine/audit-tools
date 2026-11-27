@@ -38,7 +38,7 @@ const IDENTIFIER_PATTERN = /^[A-Za-z_$][\w$]*$/;
 // "No regex over repo content" is the PROPERTY, not a coincidence of these two:
 // the module's other patterns are bounded so that the property holds with them
 // present (see the super-linearity suite in
-// `tests/audit/graph-route-backtracking.test.ts`). A pattern added here later is
+// legacy tests/audit/graph-route-backtracking.test.ts). A pattern added here later is
 // bound by the same rule; these two were the sites where bounding was the wrong
 // instrument, because the match they must keep is the LONG one a bound would
 // drop.

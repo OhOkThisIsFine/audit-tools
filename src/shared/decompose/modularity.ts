@@ -210,11 +210,11 @@ export function buildAdjacency(graph: WeightedGraph): AdjacencyGraph {
  * ⚠ THE CEILING IS THEREFORE NOT RED-DETECTABLE BY ANY TIMING TEST, and this is
  * stated rather than papered over: reverting it to `nodes + 8` leaves every
  * fixture partition byte-identical and every timing figure unchanged (verified —
- * `tests/shared/decompose.test.ts` + `tests/shared/content-coherence.test.ts`,
+ * legacy tests/shared/decompose.test.ts + legacy tests/shared/content-coherence.test.ts,
  * 51 passed both ways). It cannot bite a convergent run, and a PASS BUDGET is
  * not what bounds refinement cost anyway — that is the Θ(Σ degree) Louvain call
  * over a component carrying ~n² edges, pinned by
- * `tests/shared/content-coherence.test.ts`.
+ * legacy tests/shared/content-coherence.test.ts.
  *
  * What it protects is the non-convergent case, and the form of that protection
  * is what {@link localMovingPassBudget} exists to pin: at `nodes + 8` an O(n²)

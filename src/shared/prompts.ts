@@ -42,7 +42,7 @@ export function buildCacheablePrompt(parts: CacheablePromptParts): string {
  * NEED — a context, separate or independent — and never a delegation mechanism:
  * hosts differ in how (or whether) they can open another context, and a
  * mechanism noun is an instruction a host without that mechanism cannot follow.
- * `tests/shared/host-prompt-vocabulary.test.ts` holds every string literal in
+ * legacy tests/shared/host-prompt-vocabulary.test.ts holds every string literal in
  * the shipped code to this.
  *
  * - `INDEPENDENT_CONTEXT`: a review lane that must not be judged by the agent

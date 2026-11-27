@@ -83,7 +83,7 @@ export const WorkerFindingLocationSchema = FindingLocationObjectSchema.omit({
  * `parseFindings` (which walks this same table) is what tells the worker the
  * field is not its to send, and why. Two lists would let a field be omitted from
  * the schema and never refused, or refused with the wrong reason; the table and
- * the `.omit` below are the same set, and `tests/audit/schema-contracts.test.ts`
+ * the `.omit` below are the same set, and legacy tests/audit/schema-contracts.test.ts
  * pins them together mechanically.
  */
 export const WORKER_REFUSED_FINDING_VERDICTS = {

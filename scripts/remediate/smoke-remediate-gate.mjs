@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sites-pinned: tests/shared/script-argv-refusal.test.ts, tests/remediate/arbitrary-repository-gates.test.ts
+// sites-pinned: tests/self-remediation-gate.test.mjs
 // Gate-boundary smoke: the tool-owned final gate, executed for real, against a
 // fixture repository — so a gate that cannot pass on a clean tree (or cannot
 // FAIL on a broken one) fails the RELEASE, not a dogfood run.
@@ -59,7 +59,7 @@ function assert(condition, message) {
 
 console.log("smoke:remediate-gate");
 
-// sites-pinned: tests/remediate/smoke-fixtures.test.ts
+// sites-pinned: tests/self-remediation-gate.test.mjs
 const gateFile = statSync(distGatePath, { throwIfNoEntry: false });
 if (!gateFile?.isFile() || gateFile.size === 0) {
   console.error(`  FAIL the built gate module is missing or empty at ${distGatePath} — run npm run build from ${pkgRoot}`);
@@ -98,7 +98,7 @@ function writeFixture(root) {
   // The gate runs the vitest gate script by path, not through npm — the stub
   // must exist for the scope predicate to admit this tree at all.
   writeFileSync(
-    join(root, "scripts", "shared", "run-vitest-gate.mjs"),
+    join(root, "scripts", "shared", "run-contract-tests.mjs"),
     'import { readFileSync } from "node:fs";\n' +
       'const state = JSON.parse(readFileSync(new URL("../../state.json", import.meta.url), "utf8"));\n' +
       'if (state.unit !== "pass") {\n' +
@@ -217,7 +217,7 @@ try {
     const failing = unitRed.results.filter((r) => !r.passed);
     assert(failing.length === 1, `expected one failing command, got ${failing.length}`);
     assert(
-      failing[0].argv.join(" ").includes("run-vitest-gate.mjs"),
+      failing[0].argv.join(" ").includes("run-contract-tests.mjs"),
       `the unit leg must run the vitest gate script, got: ${failing[0].argv.join(" ")}`,
     );
     assert(

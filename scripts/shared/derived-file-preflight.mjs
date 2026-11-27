@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/attest-derived-file-preflight.test.ts, tests/shared/write-time-derived-gates.test.ts, tests/shared/derived-leg-spawn.test.ts
+// sites-pinned: tests/release-wiring.test.mjs
 // Single source for the pre-commit gate's DERIVED leg set — imported by
 // `.claude/hooks/pre-commit-gate.mjs` AND both attest scripts (P19, owner
 // decision sol-1, 2026-08-12; leg DERIVATION P34+P26, owner decision
@@ -57,7 +57,7 @@ export function handoffStateTriggered({ staged }) {
 // A literal pinned in a test OUTSIDE the change's neighborhood reds only in CI.
 // Measured: a shared expectation literal lived in two files, one was updated,
 // and the second went red shard-by-shard in CI (`a8daeef9` closed that
-// instance, and `tests/helpers/precommitLegExpectations.ts` single-sourced it).
+// instance, and legacy tests/helpers/precommitLegExpectations.ts single-sourced it).
 // The open half — "nothing makes the NEXT duplicated derived literal red
 // locally" — is this.
 //
@@ -93,43 +93,11 @@ export function handoffStateTriggered({ staged }) {
 // derived literal in a test for a subject that has no `PINS` row at all — the
 // graph can only cover subjects someone declared.
 /** @type {Map<string, string[]>} */
-const PINS = new Map([
-  // `loop-core-gate-parity`, not `loop-core-paths`: the latter imports the
-  // package subpath (`audit-tools/shared`), which resolves through dist/, and
-  // the gate's legs run against a staged snapshot with no dist/ in a fresh
-  // worktree. The parity test reads the TS source by RELATIVE path and the
-  // generated hook sibling, so it is build-free — and it is the stronger pin
-  // anyway: it is the one that asserts the generated list equals the source.
-  ['src/shared/loopCorePaths.ts', ['tests/shared/loop-core-gate-parity.test.ts']],
-  [
-    'scripts/guard-reach-data.mjs',
-    [
-      'tests/shared/precommit-leg-derivation.test.ts',
-      'tests/shared/attest-derived-file-preflight.test.ts',
-      'tests/shared/guard-form-reach.test.ts',
-      'tests/shared/guard-reach-gate.test.ts',
-    ],
-  ],
-  ['src/shared/constitutionalDocPaths.ts', ['tests/shared/doc-manifest-gate.test.ts']],
-  // Curated content pins: unlisted documents are unclaimed, not proven uncovered.
-  // the roadmap block is generated from `▶`-pinned backlog entries; the closeout render reproduces it verbatim
-  ["docs/HANDOFF.md",["tests/shared/handoff-roadmap.test.ts","tests/shared/closeout-render.test.ts"]],
-  // README's Philosophy section is GENERATED from the brief's Product half, and the doc's citations are backticked so check:doc-code-citations can see them
-  ["docs/project-philosophy.md",["tests/shared/philosophy-brief-gate.test.ts","tests/shared/glossary-citations-backticked.test.ts"]],
-  // every path-shaped token in a table row is backticked, so a deleted file cannot stay green in the citation gate
-  ["docs/glossary-ids.md",["tests/shared/glossary-citations-backticked.test.ts"]],
-  // the seek index is GENERATED from docs/backlog/, and the size baseline is a ratchet
-  ["docs/backlog.md",["tests/shared/backlog-index.test.ts","tests/shared/backlog-budget-unit.test.ts"]],
-  // the routing table is RENDERED from scripts/doc-manifest-data.mjs and byte-compared
-  ["docs/doc-review-guidelines.md",["tests/shared/doc-manifest-gate.test.ts"]],
-  // routed by the manifest and named as a constitutional doc; an edit is escalate-only
-  ["docs/documentation-philosophy.md",["tests/shared/doc-manifest-gate.test.ts"]],
-  // AGENTS.md's generated region states CLAUDE.md's current size, and CLAUDE.md is routed + constitutional
-  ["CLAUDE.md",["tests/shared/agents-region-gate.test.ts","tests/shared/doc-manifest-gate.test.ts"]],
-  // the generated region must state CLAUDE.md's current size
-  ["AGENTS.md",["tests/shared/agents-region-gate.test.ts"]],
-  // the Philosophy section is a generated render of the brief, and the README sample-report block is a registered generated artifact (scripts/check-readme-sample-report.mjs)
-  ["README.md",["tests/shared/philosophy-brief-gate.test.ts","tests/shared/generated-artifact-registry.test.ts"]],
+// The staged snapshot uses the existing declarative check legs. No additional
+// test-file pin is claimed unless it is present and can run without a build.
+export const PINS = new Map([
+  ["scripts/guard-reach-data.mjs", ["tests/release-wiring.test.mjs"]],
+  ["scripts/doc-manifest-data.mjs", ["tests/release-wiring.test.mjs"]],
 ]);
 
 /** Does `text` import the built package (the `dist/`-backed subpath)? */
@@ -205,7 +173,7 @@ export function reconcilePinObligations(tracked, readText, pins = PINS) {
  */
 export function legCommand(leg) {
   return leg.testPath
-    ? { kind: 'test', command: `node scripts/shared/run-vitest-gate.mjs ${leg.testPath}` }
+    ? { kind: 'test', command: `node --test ${leg.testPath}` }
     : { kind: 'npm', command: `npm run ${leg.script}${leg.args?.length ? ` -- ${leg.args.join(' ')}` : ''}` };
 }
 

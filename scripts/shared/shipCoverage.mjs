@@ -28,7 +28,7 @@
 // which resolves into `dist/**` and is covered as a directory), and a relative
 // specifier that resolves to NO file on disk is skipped rather than reported —
 // that is a broken import, which the packaged smokes catch directly, not a
-// coverage hole. `tests/shared/shipped-import-closure.test.ts` is the guard.
+// coverage hole. legacy tests/shared/shipped-import-closure.test.ts is the guard.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';

@@ -23,7 +23,7 @@
 // dependency of the package, so importing zod here would put the gate behind a
 // build — exactly the dependency the pre-commit legs are built to avoid. Zod's
 // own type vocabulary is mirrored below as plain data instead, and
-// `tests/shared/contract-construction-sites.test.ts` drives the real `ZodObject`
+// legacy tests/shared/contract-construction-sites.test.ts drives the real `ZodObject`
 // values through the same walker, so the shapes cannot drift from the schemas
 // they describe without a test going red.
 //

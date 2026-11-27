@@ -30,8 +30,8 @@ The `src/shared` area (imported as `audit-tools/shared`) single-sources step con
 | Source area | bin / slash command | Role |
 |---|---|---|
 | `src/shared` | — | Contracts, IO, content-coherence planning, session intent, execution records, validation. Imported as `audit-tools/shared`. |
-| `src/audit` | `audit-code` / `/audit-code` | Audit orchestrator. Tests: vitest (`tests/audit/*.test.ts`). |
-| `src/remediate` | `remediate-code` / `/remediate-code` | Remediation orchestrator. Tests: vitest (`tests/remediate/*.test.ts`). |
+| `src/audit` | `audit-code` / `/audit-code` | Audit orchestrator. Tests: contract suite (`tests/*.test.mjs`). |
+| `src/remediate` | `remediate-code` / `/remediate-code` | Remediation orchestrator. Tests: contract suite (`tests/*.test.mjs`). |
 
 ## Commands
 
@@ -41,27 +41,19 @@ All TypeScript (ES2022, NodeNext, strict), Node 22+. From repo root:
 npm install                       # install deps
 npm run build                     # tsc → dist/
 npm run check                     # typecheck only (no emit)
-npm run check:tests               # typecheck the TEST tree too (tsconfig.test.json; in verify:checks)
+npm run check:tests               # syntax-check the Node contract files
 npm run check:scripts             # typecheck the .mjs trees (scripts/, wrapper/, .claude/hooks/, dispatch/, the two root entries — tsconfig.scripts.json; in verify:checks, pre-commit leg)
-npm test                          # build + vitest (audit + shared + remediate)
+npm test                          # build + contract tests
 npm run staged:legs               # the commit gate's derived legs for the staged set, without committing
 
-npx vitest run tests/audit/<file>.test.ts            # single audit test
-npx vitest run tests/remediate/<file>.test.ts        # single remediate test
+node --test tests/<name>.test.mjs  # focused contract test after building
 ```
 
-One runner: **vitest** across all three areas (`tests/audit`, `tests/shared`, `tests/remediate`),
-all `.test.ts` except the one permanent holdout `tests/shared/shared-tests-invariants.test.mjs`
-(a `.ts` guard cannot detect its own exclusion from the typecheck gate). `node:assert/strict` is
-still permitted as an assertion library (it runs fine under vitest) for the control-flow assertions
-(`assert.throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that have no clean `expect` equivalent.
+The default suite uses Node's test runner. See the coverage notes in [tests/README.md](tests/README.md).
 
 **Always run `npm install` first** in a fresh clone or worktree — missing `node_modules` → `audit-tools/shared` resolves a stale `dist/` → misleading "no exported member" type errors.
 
 ### audit-code (`src/audit`)
-
-Tests use vitest (`test`/`describe`/`it` + `expect`); `node:assert/strict` may still appear for
-control-flow assertions. Nested subtests use `describe`/`it`, not `t.test`.
 
 ### remediate-code (`src/remediate`)
 

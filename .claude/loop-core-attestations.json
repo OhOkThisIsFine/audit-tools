@@ -482,6 +482,27 @@
         "src/audit/reporting/criticalFlowFallbackPrompt.ts": "bacda78481a44508d215c5d7160ea80d4d587ffc"
       }
     },
+    "585db4eb811349ff": {
+      "reviewed_by": "independent Audit Tools challenge reviewer",
+      "attester_class": "agent",
+      "checked": "Compared exact staged blobs to HEAD a2ebce2 on all six loop-core paths; each changed only one comment line. Looked for runtime changes and unreported loss of a live witness. Legacy references name removed tests; no alternate coverage is claimed.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "f1ca2c4201f8c3eb535d2f2e377d9dbec671438c",
+        "ran_at": "2026-11-27T20:43:45.642Z"
+      },
+      "attested_at": "2026-11-27T20:43:45.901Z",
+      "vouches": {
+        "src/audit/cli/nextStepCommand.ts": "66d8a19f32bac1baf17587f89c176477a80d4c88",
+        "src/audit/cli/nextStepHelpers.ts": "94b8a5bb8082d4ec88f5d789e54007c24f3c19b9",
+        "src/audit/orchestrator/executors.ts": "0582860164f4d86216f4fa2c5417445f30b8cc6c",
+        "src/audit/orchestrator/obligationDerive.ts": "8ba90e555a94301cd8aeb26e47a871335af9982a",
+        "src/shared/loopCorePaths.ts": "21612630d5b3e5d8d3b25c04bb6a8122097b0516",
+        "src/shared/submission/ingestionChecks.ts": "4c4e28794f0cd862f0b8f8c31c84a779698876c8"
+      }
+    },
     "58a44ca3a3caea9d": {
       "reviewed_by": "claude-opus-5-5",
       "attester_class": "agent",
@@ -1041,10 +1062,10 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "d9632808536dd1ea"
+      "review": "585db4eb811349ff"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "d9632808536dd1ea"
+      "review": "585db4eb811349ff"
     },
     "src/audit/cli/prompts.ts": {
       "review": "3ac795cb6300b0c0"
@@ -1149,7 +1170,7 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/executors.ts": {
-      "review": "e36223304299f9c6"
+      "review": "585db4eb811349ff"
     },
     "src/audit/orchestrator/fileIntegrity.ts": {
       "review": "42e42270e8c264c9"
@@ -1212,7 +1233,7 @@
       "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/obligationDerive.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "585db4eb811349ff"
     },
     "src/audit/orchestrator/obligationPolicy.ts": {
       "review": "3e7d0736a83209a4"
@@ -1425,7 +1446,7 @@
       "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/loopCorePaths.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "585db4eb811349ff"
     },
     "src/shared/observability/rootLogObservations.ts": {
       "review": "d46e8dfc8b0eeb7e"
@@ -1449,7 +1470,7 @@
       "review": "e36223304299f9c6"
     },
     "src/shared/submission/ingestionChecks.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "585db4eb811349ff"
     },
     "src/shared/submission/submissionClassifier.ts": {
       "review": "0c6c1b84455cdb39"

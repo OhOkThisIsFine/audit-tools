@@ -35,7 +35,7 @@ export interface ExecutorDefinition {
    * INVOCATION happened to write (a subset — the acquisition executor declares
    * its results artifact only when a tool actually contributed). This is the
    * superset the code may produce; the two are pinned against each other by
-   * `tests/audit/executor-artifact-production-declaration.test.ts`.
+   * legacy tests/audit/executor-artifact-production-declaration.test.ts.
    *
    * Ordered by artifact fileName, then role (content-derived stable key, as
    * `LIFECYCLE_PRODUCTIONS` and `EXECUTOR_WRITE_SITES` are) — pinned by DECL-9.
