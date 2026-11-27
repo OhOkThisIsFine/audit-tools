@@ -60,36 +60,35 @@ describe("StateStore", () => {
     expect(loadedState!.status).toBe(mockState.status);
   });
 
-  it("concurrent saves serialize correctly — last write wins", async () => {
+  it("serializes overlapping saves and retains the last completed write", async () => {
     const store = new StateStore(TEST_DIR);
-
-    // Fire 10 concurrent saves with distinct statuses. This exercises LOCK
-    // serialization, so the fixtures use only completeness-FREE statuses —
-    // implementing/triage/closing states now require a persisted plan/items
-    // (INV-RSM-STATE-COMPLETE) and would fail load validation as bare shells.
-    const statuses: RemediationState["status"][] = [
-      "pending",
-      "planning",
-      "waiting_for_clarification",
-      "waiting_for_clarification",
-      "complete",
-      "planning",
-      "waiting_for_clarification",
-      "planning",
-      "complete",
-      "pending",
-    ];
-    const results = await Promise.allSettled(
-      statuses.map((status) => store.saveState({ status })),
+    const statuses = ["pending", "planning", "waiting_for_clarification"] as const;
+    let active = 0;
+    let peak = 0;
+    const writes: string[] = [];
+    const withFileLock = fileLock.withFileLock;
+    const lock = vi.spyOn(fileLock, "withFileLock").mockImplementation(
+      (path, write, timeoutMs, logger, options) =>
+        withFileLock(path, async (lockContext) => {
+          peak = Math.max(peak, ++active);
+          try {
+            const result = await write(lockContext);
+            writes.push((JSON.parse(await readFile(join(TEST_DIR, "state.json"), "utf8")) as RemediationState).status);
+            return result;
+          } finally {
+            active--;
+          }
+        }, timeoutMs, logger, options),
     );
-    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
-
-    // Final state must be one of the valid statuses — no corruption, no crash
-    const loaded = await store.loadState();
-    expect(loaded).not.toBeNull();
-    expect(statuses).toContain(loaded!.status);
+    try {
+      await Promise.all(statuses.map((status) => store.saveState({ status })));
+      expect(peak).toBe(1);
+      expect([...writes].sort()).toEqual([...statuses].sort());
+      expect(await store.loadState()).toMatchObject({ status: writes.at(-1) });
+    } finally {
+      lock.mockRestore();
+    }
   });
-
   it("refuses a fresh held lock, preserving the holder and last saved state", async () => {
     const store = new StateStore(TEST_DIR);
     await store.saveState({ status: "planning" });
