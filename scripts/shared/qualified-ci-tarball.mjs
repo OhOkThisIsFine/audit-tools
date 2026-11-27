@@ -1,13 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isScriptEntry } from "./primitives.mjs";
+import { hashContent, isScriptEntry } from "./primitives.mjs";
 
 // ci.yml and publish-package.yml share the Linux verify:checks recipe. Bump this
 // namespace if the recipe changes incompatibly; older artifacts then miss.
 const recipe = "qualified-ci-npm-v1-node22.14.0";
-const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const json = text => JSON.parse(text.toString());
 const positiveId = n => Number.isSafeInteger(n) && n > 0;
 const readGit = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -22,7 +20,7 @@ function prefix(sha, attempt) {
 }
 
 function verifyPackageBytes(bytes, digest, source, readPackedPackage) {
-  if (sha256(bytes) !== digest) throw new Error("CI tarball SHA-256 mismatch");
+  if (hashContent(bytes) !== digest) throw new Error("CI tarball SHA-256 mismatch");
   const packed = readPackedPackage();
   if (packed.name !== source.name || packed.version !== source.version) {
     throw new Error("CI tarball does not match the verified package name and version");
@@ -95,7 +93,7 @@ export async function retrieveQualification({
   if (!/^sha256:[a-f0-9]{64}$/u.test(artifact.digest)) throw new Error("Invalid CI artifact digest");
   const zip = await request("/actions/artifacts/" + artifact.id + "/zip", { archive: true });
   if (!zip) return null; // GitHub may expire/delete the artifact during download.
-  if (zip.length !== artifact.size_in_bytes || "sha256:" + sha256(zip) !== artifact.digest) {
+  if (zip.length !== artifact.size_in_bytes || "sha256:" + hashContent(zip) !== artifact.digest) {
     throw new Error("CI artifact archive bytes do not match GitHub's digest");
   }
 
@@ -166,7 +164,7 @@ async function main() {
   if (process.version !== "v22.14.0") throw new Error("CI qualification requires Node.js 22.14.0");
   if (!input) throw new Error("Missing CI qualification path");
   if (mode === "--emit" && candidate && sha === process.env.GITHUB_SHA && positiveId(Number(runAttempt))) {
-    write("name", prefix(sha, runAttempt) + sha256(readFileSync(input)));
+    write("name", prefix(sha, runAttempt) + hashContent(readFileSync(input)));
     return;
   }
   if (mode !== "--retrieve" || sha !== process.env.VERIFIED_RELEASE_SHA) {
