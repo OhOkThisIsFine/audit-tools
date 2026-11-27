@@ -26,12 +26,12 @@ describe(CONTRACT_NAME, () => {
     for (const id of DEFAULT_ACQUIRED_ANALYZER_IDS) expect(consent.decisions[id]).toBe("declined");
   });
 
-  it("carries a refusal onto the next emission while accepting a different bound answer", async () => {
+  it("carries a refusal across emissions, then clears it on repair", async () => {
     await withTempRepo(async root => {
       const artifactsDir = join(root, ".audit-tools", "audit");
       const workload = await readQuestionWorkload(await advanceToDispatchReady(root));
-      const [acceptedItem, rejectedItem] = workload.work_items;
-      if (!acceptedItem || !rejectedItem) throw new Error("fixture needs at least two issued questions");
+      const [acceptedItem, rejectedItem, sentinel] = workload.work_items;
+      if (!acceptedItem || !rejectedItem || !sentinel) throw new Error("fixture needs three issued questions");
 
       const [good, toReject] = await submitQuestions(root, [acceptedItem, rejectedItem]);
       const unissuedRevision = "synthetic-unissued-revision-must-not-leak";
@@ -39,26 +39,39 @@ describe(CONTRACT_NAME, () => {
         ...toReject, revision_id: unissuedRevision,
       }));
 
-      const next = await callNextStep(root, artifactsDir);
-      expect(next).toMatchObject({
-        step_kind: "dispatch_review",
-        progress: {
-          summary: expect.stringContaining("Could not accept 1 saved question result."),
-          pending_tasks: workload.work_items.length - 1,
-        },
-      });
-      const nextWorkload = JSON.parse(await readFile(next.artifact_paths.host_workload, "utf8")) as typeof workload;
-      expect(nextWorkload.run_id).toBe(workload.run_id);
-      expect(nextWorkload.work_items.map(({ binding }) => binding.assignment.assignment_id)).toEqual(
-        workload.work_items.slice(1).map(({ binding }) => binding.assignment.assignment_id),
-      );
-      expect(await readAcceptedAnswers(artifactsDir, workload.run_id)).toEqual([good]);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const next = await callNextStep(root, artifactsDir);
+        expect(next).toMatchObject({
+          step_kind: "dispatch_review",
+          progress: {
+            summary: expect.stringContaining("Could not accept 1 saved question result."),
+            pending_tasks: workload.work_items.length - 1,
+          },
+        });
+        const nextWorkload = JSON.parse(await readFile(next.artifact_paths.host_workload, "utf8")) as typeof workload;
+        expect(nextWorkload.run_id).toBe(workload.run_id);
+        expect(nextWorkload.work_items.map(({ binding }) => binding.assignment.assignment_id)).toEqual(
+          workload.work_items.slice(1).map(({ binding }) => binding.assignment.assignment_id),
+        );
+        expect(await readAcceptedAnswers(artifactsDir, workload.run_id)).toEqual([good]);
 
-      const prompt = await readFile(next.artifact_paths.current_prompt, "utf8");
-      expect(prompt).toContain("## Saved results not accepted");
-      expect(prompt).toContain("`" + rejectedItem.binding.assignment.assignment_id + "`: Bound answer rejected: Binding mismatch.");
-      expect(prompt).not.toContain("`" + acceptedItem.binding.assignment.assignment_id + "`: Bound answer rejected: Binding mismatch.");
-      expect(prompt).not.toContain(unissuedRevision);
+        const prompt = await readFile(next.artifact_paths.current_prompt, "utf8");
+        expect(prompt).toContain("## Saved results not accepted");
+        expect(prompt).toContain("`" + rejectedItem.binding.assignment.assignment_id + "`: Bound answer rejected: Binding mismatch.");
+        expect(prompt).not.toContain("`" + acceptedItem.binding.assignment.assignment_id + "`: Bound answer rejected: Binding mismatch.");
+        expect(prompt).not.toContain(unissuedRevision);
+      }
+
+      await writeFile(resolve(root, rejectedItem.result_path), JSON.stringify(toReject));
+      const repaired = await callNextStep(root, artifactsDir);
+      expect(repaired.step_kind).toBe("dispatch_review");
+      const remaining = JSON.parse(await readFile(repaired.artifact_paths.host_workload, "utf8")) as typeof workload;
+      expect(remaining.run_id).toBe(workload.run_id);
+      expect(remaining.work_items.map(({ binding }) => binding.assignment.assignment_id)).toEqual(
+        workload.work_items.slice(2).map(({ binding }) => binding.assignment.assignment_id),
+      );
+      expect(await readAcceptedAnswers(artifactsDir, workload.run_id)).toEqual([good, toReject]);
+      expect(await readFile(repaired.artifact_paths.current_prompt, "utf8")).not.toContain("## Saved results not accepted");
     });
 });
 });

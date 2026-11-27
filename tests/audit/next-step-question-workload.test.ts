@@ -222,22 +222,41 @@ test("interrupted workload and step publication resume the same frozen snapshot"
     expect(handoff).toContain("or substitute self-review for any step that requires independence");
     expect(handoff).toContain("retain the exact query, its returned status or stderr, and the frozen source identity");
     expect(handoff).not.toContain(initial.artifact_paths.host_workload);
+    expect(handoff).toMatch(/Read only the routing metadata at:/u);
+    expect(handoff).toMatch(/next-step/u);
+    expect(handoff).not.toMatch(/merge-and-ingest|\bprovider\b|\bmodel(?:_id)?\b|\broute\b|\bquota\b/iu);
+    expect(initial.run_id).toBeTruthy();
+    expect(initial.artifact_paths.host_workload).toMatch(/host-workload\.json$/u);
+    expect(initial.artifact_paths.review_routing).toMatch(/review-routing\.json$/u);
+    expect(initial.artifact_paths.host_result_map).toBeUndefined();
     expect(initial.step_kind).toBe("dispatch_review");
     expect(initial.allowed_commands).toHaveLength(1);
     expect(initial.allowed_commands[0]).toMatch(/next-step/u);
     expect(initial.artifact_paths.dispatch_plan).toBeUndefined();
     expect(initial.artifact_paths.dispatch_quota).toBeUndefined();
-    await expect(runCommand(["next-step", "--guidance", "Do a different audit"], { cwd: root }))
-      .rejects.toThrow(/active question review cannot change guidance/u);
     const readJson = async (path: string) => JSON.parse(await readFile(path, "utf8"));
     const artifacts = initial.artifacts_dir;
+    const currentStep = await readJson(join(artifacts, "steps", "current-step.json"));
+    expect(currentStep.step_kind).toBe("dispatch_review");
+    expect(currentStep.artifact_paths.host_workload).toBe(initial.artifact_paths.host_workload);
+    await expect(runCommand(["next-step", "--guidance", "Do a different audit"], { cwd: root }))
+      .rejects.toThrow(/active question review cannot change guidance/u);
     const snapshot = join(artifacts, "run-snapshot.json");
     const frozenBytes = await readFile(snapshot, "utf8");
     const workload = await readJson(initial.artifact_paths.host_workload) as {
-      source_root: string; source_files: unknown[]; work_items: WorkItem[];
+      run_id: string; source_root: string; source_files: unknown[]; work_items: WorkItem[];
     };
     expect(initial.progress?.pending_tasks).toBe(workload.work_items.length);
-    for (const item of workload.work_items) expect(handoff).not.toContain(item.binding.question.question_id);
+    expect(workload.run_id).toBe(initial.run_id);
+    const resultDir = join(root, ".audit-tools", "audit", "runs", workload.run_id, "host-results");
+    const destinations = new Set(workload.work_items.map(item => resolve(root, item.result_path)));
+    expect(destinations.size).toBe(workload.work_items.length);
+    for (const { binding: { assignment, question }, result_path } of workload.work_items) {
+      expect(handoff).not.toContain(question.question_id);
+      expect(assignment).toMatchObject({ question_id: question.question_id, revision_id: question.revision_id, snapshot_id: question.snapshot_id });
+      expect(assignment.assignment_id).toMatch(/^review-/u);
+      expect(dirname(resolve(root, result_path))).toBe(resultDir);
+    }
     const [answered, pending] = workload.work_items;
     expect(answered).toBeDefined();
     expect(pending).toBeDefined();
