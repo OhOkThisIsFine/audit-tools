@@ -39,6 +39,8 @@ export default defineConfig({
     // ledger under .audit-tools-profile/ and a CI job-summary table. Profiling the
     // suite is a standing feature, not an opt-in flag.
     reporters: ["default", "./scripts/shared/vitest-timing-reporter.mjs"],
+    // Keep failing-test logs without printing successful fixture chatter.
+    silent: "passed-only",
     // No time limit on a test or a hook (owner decision, 2026-11-07). A fixed cap
     // was a number nobody measured, and under full-suite load it fired on correct
     // tests. A hung test stops at the CI job limit (`timeout-minutes`).
