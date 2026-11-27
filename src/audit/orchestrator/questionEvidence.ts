@@ -153,9 +153,17 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
   const current = [...currentDependencies, ...[...sourceFiles].map(([key, fingerprint]) =>
     ({ kind: "source" as const, key, fingerprint }))];
   const sourceRoot = await realpath(input.sourceRoot);
-  const cache = new Map<string, readonly string[] | undefined>();
-  async function loadFrozen(path: string): Promise<readonly string[] | undefined> {
-    if (cache.has(path)) return cache.get(path);
+  const cache = new Map<string, Promise<readonly string[] | undefined>>();
+  function loadFrozen(path: string): Promise<readonly string[] | undefined> {
+    const existing = cache.get(path);
+    if (existing) return existing;
+    // Runtime receipt references are checked concurrently, including multiple
+    // spans in one file. Share the pending read, not just its settled value.
+    const pending = readFrozen(path);
+    cache.set(path, pending);
+    return pending;
+  }
+  async function readFrozen(path: string): Promise<readonly string[] | undefined> {
     let source: readonly string[] | undefined;
     const fingerprint = sourceFiles.get(path);
     if (fingerprint) {
@@ -172,7 +180,6 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
         // Missing or unreadable frozen source cannot anchor a receipt.
       }
     }
-    cache.set(path, source);
     return source;
   }
   async function isFrozenRef(ref: ReviewEvidence["source_refs"][number]): Promise<boolean> {

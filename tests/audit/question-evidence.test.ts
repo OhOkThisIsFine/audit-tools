@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashContent } from "../../src/shared/hash.js";
@@ -17,6 +17,11 @@ import {
 import type { ReviewDependency, ReviewEvidence } from "../../src/shared/types/reviewQuestion.js";
 import { admitSpawn } from "../../src/shared/analyzers/acquisitionEngine.js";
 import { EXTERNAL_ANALYZER_CANDIDATES } from "../../src/shared/analyzers/candidates.js";
+
+vi.mock("node:fs/promises", async (load) => {
+  const fs = await load<typeof import("node:fs/promises")>();
+  return { ...fs, readFile: vi.fn(fs.readFile) };
+});
 
 const members = (names: string[], rule = "registration-rule-v1") =>
   fingerprintDiscoveredSet("registered-commands", rule, names);
@@ -63,6 +68,40 @@ describe("question evidence reuse", () => {
     const noConditions = await collectQuestionEvidence({ snapshot_id: "frozen", sourceRoot, sourceFiles,
       runtimeReceipts: [receipt] });
     expect(noConditions).toEqual([]);
+  });
+
+  it("reads one frozen file once for concurrent receipt refs without merging their checks", async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), "question-evidence-receipt-"));
+    const content = "first\nsecond\n";
+    const ref = (start_line: number) => ({ path: "a.ts", start_line });
+    try {
+      await writeFile(join(sourceRoot, "a.ts"), content);
+      const beforeReads = vi.mocked(readFile).mock.calls.length;
+      const record = {
+        ...evidence, dependencies: [],
+        source_refs: [ref(1)],
+        observations: [
+          { ...evidence.observations![0]!, source_refs: [ref(1), ref(2)] },
+          { ...evidence.observations![1]!, source_refs: [ref(2)] },
+        ],
+      };
+      const inputs = {
+        snapshot_id: evidence.snapshot_id, sourceRoot,
+        sourceFiles: new Map([["a.ts", hashContent(content)]]),
+        currentDependencies: [fingerprintExecutionConditions("conditions", record.execution!)],
+      };
+      const collected = await collectQuestionEvidence({
+        ...inputs, runtimeReceipts: [{ conditions_key: "conditions", record }],
+      });
+      expect(collected).toHaveLength(1);
+      expect(collected[0]?.source_refs).toEqual([ref(1), ref(2)]);
+      expect(vi.mocked(readFile).mock.calls.length - beforeReads).toBe(1);
+      expect(await collectQuestionEvidence({
+        ...inputs, runtimeReceipts: [{ conditions_key: "conditions", record: { ...record, source_refs: [ref(4)] } }],
+      })).toEqual([]);
+    } finally {
+      await rm(sourceRoot, { recursive: true, force: true });
+    }
   });
 
   it("reuses exact portable calibration, not a changed version or a copied fingerprint", () => {
