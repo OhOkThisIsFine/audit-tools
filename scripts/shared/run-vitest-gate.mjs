@@ -147,12 +147,8 @@ if (vitestExit !== 0) {
   }
   console.error(
     `[vitest-gate] vitest exited ${vitestExit}, but this run's own ledger reports ` +
-      `${transportRecord.outcome.passed} passed / 0 failed and stderr carries a vitest-worker ` +
+      `${transportRecord.outcome.passed} passed / 0 failed and all ${transportRecord.vitestErrors.total} structured Vitest errors match the ` +
       `RPC timeout — a REPORTER-TRANSPORT fault, not a test failure. Treating as PASS.`,
-  );
-  console.error(
-    "[vitest-gate] (if this becomes frequent, raise the worker RPC timeout — a suite that " +
-      "routinely reports red while green is the same false-signal class as a false green.)",
   );
   // FALL THROUGH to the single success boundary below rather than exiting here.
   // A tolerated run is full evidence by construction — the predicate already

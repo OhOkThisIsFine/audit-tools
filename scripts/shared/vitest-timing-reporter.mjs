@@ -33,6 +33,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeProfileLedger } from "./profile.mjs";
 import { shardSuffix } from "./vitestShard.mjs";
+import { summarizeVitestErrors } from "./vitestGateVerdict.mjs";
 import { compareCodeUnits } from './primitives.mjs';
 
 // tests/<area>/... → area subtotal bucket.
@@ -392,7 +393,15 @@ export function updateFlakeBaseline({
 }
 
 export default class TimingReporter {
-  onFinished(files = []) {
+  scheduledFiles;
+
+  onTestRunStart(specifications) {
+    // Vitest 3's run-start list is pre-shard. Without a selected inventory a
+    // shard is not eligible for recovery from a nonzero result.
+    this.scheduledFiles = shardSuffix(process.argv) ? undefined : new Set(specifications.map(spec => spec.taskId));
+  }
+
+  onFinished(files = [], errors) {
     if (!Array.isArray(files) || files.length === 0) return;
 
     const perFile = files.map((file) => {
@@ -490,6 +499,11 @@ export default class TimingReporter {
         [...perFile].sort((a, b) => (a.rel < b.rel ? -1 : 1)).map((f) => [f.rel, Math.round(f.total)]),
       ),
       outcome,
+      vitestErrors: summarizeVitestErrors(errors),
+      completeFileCoverage: !!this.scheduledFiles?.size &&
+        files.length === this.scheduledFiles.size &&
+        new Set(files.map(file => file.id)).size === files.length &&
+        files.every(file => this.scheduledFiles.has(file.id) && ["pass", "skip", "todo"].includes(file.result?.state)),
       // Per-failure classification against the tracked baseline. Advisory to the
       // gate today — it rides in the ledger so a lap can answer "is this mine?"
       // from the run's own record instead of re-running the suite on main.

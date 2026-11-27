@@ -17,7 +17,22 @@
  * nonzero with zero COUNTED failures, precisely because its tests never ran,
  * and that must stay red.
  */
-export const HARNESS_FAULT = /\[vitest-worker\]:\s*Timeout calling "on[A-Za-z]+"/;
+export const HARNESS_FAULT = /^\[vitest-worker\]: Timeout calling "onTaskUpdate"$/;
+
+/** Count all structured Vitest errors, without persisting their message or stack. */
+export function summarizeVitestErrors(errors) {
+  if (!Array.isArray(errors)) return undefined;
+  return {
+    total: errors.length,
+    taskUpdateTimeouts: errors.filter(error => {
+      if (!error || error.type !== "Unhandled Error" || !HARNESS_FAULT.test(error.message ?? "")) return false;
+      // Vitest serializes the caught Error. The originating frame distinguishes
+      // its worker transport from an unrelated rejection with identical text.
+      const frame = String(error.stack ?? error.stackStr ?? "").split(/\r?\n/).find(line => /^\s*at /.test(line));
+      return !!frame && /at (?:Object\.)?onTimeoutError \(.+[/\\]vitest[/\\]dist[/\\]chunks[/\\]rpc\.[^/\\]+\.js:\d+:\d+\)$/.test(frame);
+    }).length,
+  };
+}
 
 /**
  * Whether a NONZERO vitest exit should be downgraded to a pass.
@@ -35,7 +50,9 @@ export const HARNESS_FAULT = /\[vitest-worker\]:\s*Timeout calling "on[A-Za-z]+"
  *     skips is what keeps that from laundering a red into a green. A ledger
  *     lacking the field is from an older reporter and cannot prove the absence —
  *     it keeps the red.
- *   - the stderr signature — an unrecognized nonzero exit keeps its exit code.
+ *   - the reporter saw terminal results for every selected file and captured a
+ *     nonempty structured error set, all specifically onTaskUpdate timeouts.
+ *   - stderr corroborates the signature and at least one test actually passed.
  *
  * @param {{record: unknown, token: string, stderrText: string}} input
  * @returns {boolean}
@@ -48,7 +65,11 @@ export function isReporterTransportFault({ record, token, stderrText }) {
   if (!outcome || typeof outcome !== "object") return false;
   if (outcome.failed !== 0) return false;
   if (outcome.unfinished !== 0) return false;
-  return HARNESS_FAULT.test(stderrText ?? "");
+  if (!Number.isInteger(outcome.passed) || outcome.passed <= 0) return false;
+  if (typedRecord.completeFileCoverage !== true) return false;
+  const errors = typedRecord.vitestErrors;
+  if (!Number.isInteger(errors?.total) || errors.total <= 0 || errors.taskUpdateTimeouts !== errors.total) return false;
+  return (stderrText ?? "").split(/\r?\n/).some(line => HARNESS_FAULT.test(line.trim().replace(/^Error: /, "")));
 }
 
 // ─── Failure attribution ───────────────────────────────────────────────────

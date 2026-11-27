@@ -16,7 +16,7 @@
  * version ("nonzero but nothing failed ⇒ pass") would swallow a real red.
  */
 import { test, expect } from "vitest";
-import { isReporterTransportFault, HARNESS_FAULT } from "../../scripts/shared/vitestGateVerdict.mjs";
+import { isReporterTransportFault, summarizeVitestErrors, HARNESS_FAULT } from "../../scripts/shared/vitestGateVerdict.mjs";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
@@ -29,7 +29,12 @@ const RPC_TIMEOUT_STDERR = `
 Error: [vitest-worker]: Timeout calling "onTaskUpdate"
  ❯ Object.onTimeoutError node_modules/vitest/dist/chunks/rpc.js:53:10
 `;
-const greenLedger = { runToken: TOKEN, outcome: { passed: 7400, failed: 0, skipped: 4, unfinished: 0 } };
+const rpcError = {
+  message: '[vitest-worker]: Timeout calling "onTaskUpdate"',
+  type: "Unhandled Error",
+  stack: 'Error: [vitest-worker]: Timeout calling "onTaskUpdate"\n    at Object.onTimeoutError (file:///repo/node_modules/vitest/dist/chunks/rpc.-pEldfrD.js:53:10)',
+};
+const greenLedger = { vitestErrors: summarizeVitestErrors([rpcError]), completeFileCoverage: true, runToken: TOKEN, outcome: { passed: 7400, failed: 0, skipped: 4, unfinished: 0 } };
 
 test("downgrades a nonzero exit when THIS run's ledger is green and stderr shows the RPC fault", () => {
   expect(
@@ -78,7 +83,7 @@ test("keeps the red when a leaf never REPORTED, even though nothing was counted 
   // "deliberately skipped", and it is what must keep this red.
   expect(
     isReporterTransportFault({
-      record: { runToken: TOKEN, outcome: { passed: 7399, failed: 0, skipped: 4, unfinished: 1 } },
+      record: { ...greenLedger, runToken: TOKEN, outcome: { passed: 7399, failed: 0, skipped: 4, unfinished: 1 } },
       token: TOKEN,
       stderrText: RPC_TIMEOUT_STDERR,
     }),
@@ -91,7 +96,7 @@ test("keeps the red when the ledger predates the unfinished counter", () => {
   // release. Fail closed.
   expect(
     isReporterTransportFault({
-      record: { runToken: TOKEN, outcome: { passed: 7400, failed: 0, skipped: 4 } },
+      record: { ...greenLedger, runToken: TOKEN, outcome: { passed: 7400, failed: 0, skipped: 4 } },
       token: TOKEN,
       stderrText: RPC_TIMEOUT_STDERR,
     }),
@@ -109,10 +114,21 @@ test("keeps the red when there is no usable ledger at all", () => {
 
 test("the harness signature matches the observed form and not arbitrary prose", () => {
   expect(HARNESS_FAULT.test('[vitest-worker]: Timeout calling "onTaskUpdate"')).toBe(true);
-  expect(HARNESS_FAULT.test('[vitest-worker]: Timeout calling "onCollected"')).toBe(true);
+  expect(HARNESS_FAULT.test('[vitest-worker]: Timeout calling "onCollected"')).toBe(false);
   // Test NAMES are author-chosen prose and must never trip it — the same
   // shortcut that produced two false hits when the gate grepped stdout.
   expect(HARNESS_FAULT.test('✓ handles a Timeout calling "onTaskUpdate" gracefully')).toBe(false);
+});
+
+test.each([
+  { vitestErrors: summarizeVitestErrors([rpcError, { message: "Unrelated unhandled error" }]) },
+  { vitestErrors: summarizeVitestErrors([{ ...rpcError, type: "Unhandled Rejection" }]) },
+  { vitestErrors: summarizeVitestErrors([{ ...rpcError, stack: "Error\n    at user-test (/repo/user.test.js:1:1)" }]) },
+  { vitestErrors: undefined },
+  { completeFileCoverage: false },
+])("keeps nonzero when the structured classification or file coverage is unproven: %j", (override) => {
+  expect(isReporterTransportFault({ record: { ...greenLedger, ...override }, token: TOKEN, stderrText: RPC_TIMEOUT_STDERR }))
+    .toBe(false);
 });
 
 test("the full-suite gate owns isolated reruns, observation recording, and repeated-failure repair dispatch", () => {
@@ -141,6 +157,8 @@ interface GateCase {
   mutateTree?: boolean;
   reportFromChild?: boolean;
   traceLedgerReads?: boolean;
+  structuredErrors?: string[];
+  missingFile?: boolean;
 }
 
 test("the gate consumes the reporter's shard-specific ledger in both CLI spellings", () => {
@@ -149,6 +167,16 @@ test("the gate consumes the reporter's shard-specific ledger in both CLI spellin
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stamp, null);
   }
+});
+
+test.each([
+  { label: "transport errors only", structuredErrors: [rpcError.message, rpcError.message], expected: 0 },
+  { label: "mixed unhandled errors", structuredErrors: [rpcError.message, "unhandled cleanup failure"], expected: 1 },
+  { label: "missing scheduled file", structuredErrors: [rpcError.message], missingFile: true, expected: 1 },
+])("real reporter and gate classify $label", ({ expected, ...options }) => {
+  const result = runGateCase({ ...options, status: 1, reportFromChild: true, stderr: RPC_TIMEOUT_STDERR });
+  assert.equal(result.status, expected, result.stderr);
+  assert.equal(Boolean(result.stamp), expected === 0);
 });
 
 function runGateCase(scenario: GateCase) {
@@ -177,7 +205,12 @@ function runGateCase(scenario: GateCase) {
     put("node_modules/vitest/vitest.mjs", scenario.reportFromChild
       ? `import Reporter from "../../scripts/shared/vitest-timing-reporter.mjs";
         process.env.GITHUB_STEP_SUMMARY = "";
-        new Reporter().onFinished([{ filepath: "tests/real.test.ts", tasks: [{ type: "test", name: "real", result: { state: "pass" } }] }]);`
+        const reporter = new Reporter();
+        reporter.onTestRunStart([{ taskId: "file-a" }, ...(${Boolean(scenario.missingFile)} ? [{ taskId: "file-b" }] : [])]);
+        reporter.onFinished([{ id: "file-a", filepath: "tests/real.test.ts", result: { state: "pass" }, tasks: [{ type: "test", name: "real", result: { state: "pass" } }] }],
+          ${JSON.stringify(scenario.structuredErrors ?? [])}.map(message => ({ ...${JSON.stringify(rpcError)}, message })));
+        if (${JSON.stringify(scenario.stderr ?? "")}) process.stderr.write(${JSON.stringify(scenario.stderr ?? "")});
+        process.exitCode = ${JSON.stringify(scenario.status ?? 0)};`
       : 'throw new Error("must be intercepted");');
     // Not a lock test: fail loudly if an abnormal exit reaches observations.
     put("dist/shared/io/fileLock.js", 'export function withFileLock() { throw new Error("unexpected load-only observation"); }');
@@ -209,6 +242,8 @@ cp.spawnSync = (command, args, options) => {
       const profile = path.join(__dirname, ".audit-tools-profile");
       fs.mkdirSync(profile, { recursive: true });
       fs.writeFileSync(path.join(profile, "vitest-latest.json"), JSON.stringify({
+        vitestErrors: scenario.stderr?.includes('Timeout calling "onTaskUpdate"') ? { total: 1, taskUpdateTimeouts: 1 } : undefined,
+        completeFileCoverage: !scenario.missingFile,
         runToken: ledger === "fresh" ? options.env.VITEST_GATE_TOKEN : "previous-run",
         outcome: { passed: 2, failed: scenario.failed ?? 0, skipped: 0, total: 2 + (scenario.failed ?? 0) + (scenario.unfinished ?? 0),
           unfinished: scenario.unfinished ?? 0,
