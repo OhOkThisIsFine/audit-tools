@@ -189,6 +189,8 @@ export const ExternalAnalyzerToolStatusSchema = z
     tool: z.string(),
     command: z.string().optional(),
     version: z.string().optional(),
+    /** Same scope/config receipt as the individual comparable analyzer leads. */
+    comparison_fingerprint: z.string().optional(),
     stage: z.enum(["resolve", "install", "scan", "parse"]).optional(),
     resolved: z.boolean(),
     status: z.enum(EXTERNAL_ANALYZER_TOOL_STATUSES),

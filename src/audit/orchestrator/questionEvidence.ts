@@ -203,6 +203,7 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
         schema_version: "audit-tools/question-review/v1", evidence_id, snapshot_id, kind: "source",
         status: "observed", source_refs: [ref],
         dependencies: [{ kind: "source", key: ref.path, fingerprint: sourceFiles.get(ref.path)! }],
+        ...(p.comparison_fingerprint ? { analyzer_provenance: p } : {}),
         description: "An analyzer flagged this frozen source span; inspect the source before interpreting the lead.",
       });
     }

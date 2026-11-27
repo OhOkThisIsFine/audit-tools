@@ -26,12 +26,15 @@ const OUTPUT_DIR = join(REPO_DIR, ".audit-tools");
 const FLAGGED_SOURCE = ["function dup() {", "  return 1;", "}"].join("\n");
 const FIXED_SOURCE = ["function dup() {", "  return 2;", "}"].join("\n");
 
+let comparisonFingerprint: string;
+
 function provenanceFor(source: string): AnalyzerLeadProvenance {
   return {
     analyzer_id: "fake-analyzer",
     rule: "fake-rule",
     path: "src/dup.ts",
     snippet_hash: hashAnalyzerSnippet(source, 1, 3)!,
+    comparison_fingerprint: comparisonFingerprint,
   };
 }
 
@@ -52,6 +55,7 @@ function fakeCandidate(): ExternalAnalyzerCandidate {
     },
     purpose: "test fake",
     buildArgv: (prefix) => [...prefix, "--scan"],
+    comparisonScope: () => ({ paths: ["src/dup.ts"], configurationFingerprint: "fixture-default-rules" }),
     parse: () => [
       {
         path: "src/dup.ts",
@@ -124,6 +128,11 @@ beforeEach(async () => {
   execSync("git config user.name Test", { cwd: REPO_DIR });
   writeFileSync(join(REPO_DIR, "initial.txt"), "hello");
   execSync("git add . && git commit -m init", { cwd: REPO_DIR });
+  writeFileSync(join(REPO_DIR, "src", "dup.ts"), FLAGGED_SOURCE);
+  const original = await acquisitionEngine.runExternalAnalyzer(fakeCandidate(), REPO_DIR, { run: fakeRun });
+  comparisonFingerprint = original.results.results[0]!.provenance!.comparison_fingerprint!;
+  expect(comparisonFingerprint).toBeTruthy();
+  await rm(join(REPO_DIR, "src", "dup.ts"));
 });
 
 afterEach(async () => {
@@ -151,6 +160,50 @@ describe("verifyAnalyzerLeads (unit)", () => {
       analyzer_id: "fake-analyzer",
     });
     expect(outcome.persisting).toEqual([]);
+  });
+});
+
+describe("mechanical analyzer absence requires comparable evidence", () => {
+  const comparable = () => fakeCandidate().comparisonScope!("", {})!;
+  it.each([
+    { kind: "legacy evidence", reason: /original analyzer evidence/ },
+    { kind: "changed rules", reason: /scope\/config changed/ },
+    { kind: "changed scope", reason: /scope\/config changed/ },
+    { kind: "partial output", reason: /incomplete coverage/ },
+    { kind: "explicitly skipped path", reason: /did not report scanning src\/dup\.ts/ },
+  ])("skips absence rather than calling it clear: $kind", async ({ kind, reason }) => {
+    const provenance = provenanceFor(FLAGGED_SOURCE);
+    const candidate = fakeCandidate();
+    candidate.parse = () => [];
+    if (kind === "legacy evidence") delete provenance.comparison_fingerprint;
+    if (kind === "changed rules") candidate.comparisonScope = () => ({ ...comparable(), configurationFingerprint: "different-rules" });
+    if (kind === "changed scope") candidate.comparisonScope = () => ({ ...comparable(), paths: ["src/other.ts"] });
+    if (kind === "explicitly skipped path") candidate.parse = () => ({
+      items: [], reported_coverage: { scanned: ["src/other.ts"], skipped: ["src/dup.ts"] },
+    });
+    if (kind === "partial output") {
+      writeFileSync(join(REPO_DIR, "src", "dup.ts"), FIXED_SOURCE);
+      candidate.parse = () => ({ items: [{ path: "src/dup.ts", line_start: 1, summary: "other finding" }], dropped_rows: 1 });
+    }
+    const outcome = await verifyAnalyzerLeads({
+      state: makeState(provenance), root: REPO_DIR, overrides: { candidates: [candidate], run: fakeRun },
+    });
+    expect(outcome.statuses[0]!.status).toBe(kind === "partial output" ? "findings" : "success");
+    expect(outcome.verdicts.F1).toMatchObject({ status: "skipped", reason: expect.stringMatching(reason) });
+  });
+
+  it("does not stamp comparison evidence on a lead outside the declared scan scope", async () => {
+    writeFileSync(join(REPO_DIR, "src", "dup.ts"), FLAGGED_SOURCE);
+    const candidate = fakeCandidate();
+    candidate.comparisonScope = () => ({ ...comparable(), paths: ["src/other.ts"] });
+    const original = await acquisitionEngine.runExternalAnalyzer(candidate, REPO_DIR, { run: fakeRun });
+    expect(original.results.results[0]!.provenance).toMatchObject({ path: "src/dup.ts" });
+    expect(original.results.results[0]!.provenance?.comparison_fingerprint).toBeUndefined();
+    const outcome = await verifyAnalyzerLeads({
+      state: makeState(provenanceFor(FLAGGED_SOURCE)), root: REPO_DIR,
+      overrides: { candidates: [candidate], run: fakeRun },
+    });
+    expect(outcome.verdicts.F1?.status).toBe("lead_persists");
   });
 });
 
@@ -210,7 +263,8 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
     { input: FLAGGED_SOURCE, present: true, expected: "triage", verdict: "lead_persists" },
     { input: FIXED_SOURCE, present: true, expected: "complete", verdict: "verified_mechanically" },
     { input: FIXED_SOURCE, present: false, expected: "triage", verdict: "skipped" },
-  ] as const)("requires every original analyzer obligation to clear: $verdict", async ({ input, present, expected, verdict }) => {
+    { input: FLAGGED_SOURCE, present: true, changedScope: true, expected: "triage", verdict: "skipped" },
+  ] as const)("requires every original analyzer obligation to clear: $verdict", async ({ input, present, expected, verdict, ...scenario }) => {
     writeFileSync(join(REPO_DIR, "src", "dup.ts"), input);
     const state = makeState(provenanceFor("a distinct earlier reported snippet"));
     const finding = state.plan!.findings[0]!;
@@ -236,19 +290,26 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
         analyzer_id: present ? "fake-analyzer" : "unavailable-analyzer",
       }),
     ];
+    const candidate = fakeCandidate();
+    const changedScope = "changedScope" in scenario && scenario.changedScope;
+    if (changedScope) {
+      candidate.parse = () => [];
+      candidate.comparisonScope = () => ({ paths: ["src/other.ts"], configurationFingerprint: "fixture-default-rules" });
+    }
     await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, {
       skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
-      analyzerLeadVerifyOverrides: { candidates: [fakeCandidate()], run: fakeRun },
+      analyzerLeadVerifyOverrides: { candidates: [candidate], run: fakeRun },
     });
     expect(next.status).toBe(expected);
     const originalVerdicts = next.source_verifications?.F1?.mechanical_obligation_verifications;
     expect(originalVerdicts).toMatchObject([
-      { source_finding_id: "original-a", obligation_id: "verify-original-a", status: "verified_mechanically" },
+      { source_finding_id: "original-a", obligation_id: "verify-original-a", status: changedScope ? "skipped" : "verified_mechanically" },
       { source_finding_id: "original-b", obligation_id: "verify-original-b", status: verdict },
     ]);
+    if (changedScope) expect(next.items!.F1.failure_reason).toMatch(/scope\/config changed/);
     if (expected === "complete") {
       const outcomes = JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
       expect(outcomes.outcomes.find((item: { finding_id: string }) => item.finding_id === "F1")

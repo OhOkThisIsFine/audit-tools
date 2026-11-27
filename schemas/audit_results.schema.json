@@ -327,6 +327,9 @@
                 },
                 "snippet_hash": {
                   "type": "string"
+                },
+                "comparison_fingerprint": {
+                  "type": "string"
                 }
               },
               "required": [

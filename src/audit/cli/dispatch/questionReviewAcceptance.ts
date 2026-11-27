@@ -100,7 +100,14 @@ export function acceptQuestionReview(answers: readonly ReviewAcceptedAnswer[], b
     for (const ref of finding.source_refs) bindSource(ref);
     for (const obligation of finding.verification) if (obligation.kind === "assertion") {
       for (const ref of obligation.source_refs) bindSource(ref);
-    } else if (obligation.kind === "analyzer") bindSource({ path: obligation.provenance.path });
+    } else if (obligation.kind === "analyzer") {
+      bindSource({ path: obligation.provenance.path });
+      if (obligation.provenance.comparison_fingerprint && !finding.evidence_ids.some(id => {
+        const issued = evidence.get(id);
+        return issued?.status === "observed" && issued.analyzer_provenance &&
+          stableStringify(issued.analyzer_provenance) === stableStringify(obligation.provenance);
+      })) throw new Error("Analyzer comparison receipt must come from cited issued evidence");
+    }
     for (const id of links) {
       if (observations.get(id)?.kind !== "unverified") claimedObservations.add(id);
     }

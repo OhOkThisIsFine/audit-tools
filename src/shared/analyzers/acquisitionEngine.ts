@@ -2,6 +2,7 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { hashContent } from "../hash.js";
 import {
   resolveSpawnDeadline,
   runTrackedAsync,
@@ -179,6 +180,17 @@ export interface ExternalAnalyzerCandidate {
    * silent scan of nothing.
    */
   discoverInputs?(root: string): Promise<AnalyzerInputDiscovery>;
+  /**
+   * Optional negative-evidence receipt: exactly the repo-relative paths this
+   * invocation covers and a digest of its effective tool version, rules,
+   * options and environment.
+   * Omit when any of those inputs cannot be established; a command or version
+   * match alone is not authority to say a lead is gone.
+   */
+  comparisonScope?(root: string, context: AnalyzerInvocationContext): {
+    paths: readonly string[];
+    configurationFingerprint: string;
+  } | undefined;
   /** Private, engine-owned file report. Raw output/error snippets are withheld. */
   managedReport?: boolean;
   /** Do not persist raw child stdout/stderr excerpts; retain parsed status and notes. */
@@ -761,6 +773,23 @@ export async function runExternalAnalyzer(
       const afterArgv = expiredOutcome();
       if (afterArgv) return afterArgv;
       const command = argv.join(" ");
+      const captureComparison = () => {
+        try {
+          const observed = candidate.comparisonScope?.(root, context);
+          if (!observed?.configurationFingerprint || !observed.paths.length) return undefined;
+          const paths = [...new Set(observed.paths)].sort();
+          return {
+            paths: new Set(paths),
+            fingerprint: hashContent(JSON.stringify([
+              candidate.id, candidate.runner, candidate.spec, observed.configurationFingerprint, paths,
+            ])),
+          };
+        } catch {
+          // Missing comparison authority does not discard real positive leads.
+          return undefined;
+        }
+      };
+      const observedComparison = captureComparison();
       let result: RunTrackedResult;
       try {
         result = await run(
@@ -864,6 +893,19 @@ export async function runExternalAnalyzer(
           normalizerDroppedItems = diagnostics.dropped_items;
         },
       });
+      const comparison = observedComparison && observedComparison.fingerprint === captureComparison()?.fingerprint
+        ? observedComparison
+        : undefined;
+      if (comparison) {
+        const scanned = parsed.reported_coverage && new Set(parsed.reported_coverage.scanned);
+        const skipped = parsed.reported_coverage && new Set(parsed.reported_coverage.skipped);
+        for (const item of normalized.results) {
+          if (item.provenance && comparison.paths.has(item.path) &&
+              (!scanned || (scanned.has(item.path) && !skipped?.has(item.path)))) {
+            item.provenance.comparison_fingerprint = comparison.fingerprint;
+          }
+        }
+      }
       const edges = normalizeGenericExternalEdges(items);
       if (edges.length > 0) normalized.graph_edges = edges;
 
@@ -876,6 +918,7 @@ export async function runExternalAnalyzer(
         exit_code: result.status,
         ...(droppedRows > 0 ? { dropped_rows: droppedRows } : {}),
         ...(parsed.reported_coverage ? { reported_coverage: parsed.reported_coverage } : {}),
+        ...(comparison ? { comparison_fingerprint: comparison.fingerprint } : {}),
         ...(sourceReadFailures > 0 ? { source_read_failures: sourceReadFailures } : {}),
         ...stderrSnippet,
         duration_ms: result.duration_ms,

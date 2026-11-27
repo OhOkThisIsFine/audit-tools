@@ -1906,7 +1906,7 @@ export function buildRemediationReportMarkdown(
   if (mechanical.length > 0) {
     const count = (status: string) =>
       mechanical.filter((o) => o.mechanical_verification!.status === status).length;
-    reportContent += `\nMechanical re-verify (analyzer-born findings): ${count("verified_mechanically")} verified by analyzer re-run, ${count("lead_persists")} lead(s) persisting, ${count("skipped")} skipped (analyzer unavailable/unadmitted).\n`;
+    reportContent += `\nMechanical re-verify (analyzer-born findings): ${count("verified_mechanically")} verified by analyzer re-run, ${count("lead_persists")} lead(s) persisting, ${count("skipped")} skipped (coverage or comparable scope/config not established).\n`;
   }
 
   const combined = closeSuiteEvidence(combinedTest);
@@ -2285,8 +2285,8 @@ export async function runClosePhase(
   }
 
   // 2b. Item C — mechanical re-verify of analyzer-born leads: re-run the same
-  // pinned analyzer per provenance-carrying resolved item and check the exact
-  // content-anchored identity no longer fires. Attribution is exact, so a
+  // analyzer per provenance-carrying resolved item and verify absence only when
+  // scan coverage and scope/config remain comparable. Attribution is exact, so a
   // persisting lead re-blocks only ITS item (objective evidence to triage) —
   // never the whole resolved set the way a suite-level red must.
   const analyzerVerify = await verifyAnalyzerLeads({

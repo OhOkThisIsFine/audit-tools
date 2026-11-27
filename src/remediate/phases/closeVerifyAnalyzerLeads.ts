@@ -15,6 +15,7 @@ import {
   type AnalyzerPolicy,
   type MechanicalVerification,
 } from "audit-tools/shared";
+import { isDegradedExternalAnalyzerStatus } from "../../shared/analyzers/types.js";
 import type { MechanicalObligationVerification } from "../../shared/types/remediationOutcome.js";
 import { isVerifiedCompleteStatus } from "../state/itemStatus.js";
 import type { RemediationState } from "../state/store.js";
@@ -26,8 +27,8 @@ import type { RemediationState } from "../state/store.js";
  * rather than a lead, because "this exact provenance identity no longer fires"
  * is a fact, not a judgment.
  *
- * Instance-level semantics: pass = the finding's {analyzer_id, rule, path,
- * snippet_hash} identity is absent from the re-run's provenance set. Residual
+ * Pass requires absence of the exact {analyzer_id, rule, path, snippet_hash}
+ * identity under comparable scope/config and trustworthy coverage. Residual
  * findings elsewhere in the file do not fail it. Unlike the suite legs (which
  * re-block ALL resolved items on red), a persisting lead re-blocks only ITS
  * item — attribution is exact.
@@ -179,15 +180,35 @@ export async function verifyAnalyzerLeads(params: {
       continue;
     }
 
-    const firedKeys = new Set(
-      outcome!.results.results
-        .map((result) => result.provenance)
-        .filter((p): p is AnalyzerLeadProvenance => p !== undefined)
-        .map(analyzerProvenanceKey),
-    );
+    const results = outcome!.results.results;
+    const firedKeys = new Set(results.flatMap(result => result.provenance
+      ? [analyzerProvenanceKey(result.provenance)]
+      : []));
+    const degraded = isDegradedExternalAnalyzerStatus(status);
+    const scanned = status.reported_coverage && new Set(status.reported_coverage.scanned);
+    const skipped = status.reported_coverage && new Set(status.reported_coverage.skipped);
+    const unanchoredPaths = new Set(results.filter(result => !result.provenance).map(result => result.path));
     for (const target of bucket) {
-      record(target, firedKeys.has(analyzerProvenanceKey(target.provenance))
-        ? { status: "lead_persists", analyzer_id: analyzerId }
+      const { path, comparison_fingerprint: original } = target.provenance;
+      if (firedKeys.has(analyzerProvenanceKey(target.provenance))) {
+        record(target, { status: "lead_persists", analyzer_id: analyzerId });
+        continue;
+      }
+      const reason = degraded
+        ? "analyzer rerun has incomplete coverage"
+        : scanned && (!scanned.has(path) || skipped?.has(path))
+          ? `analyzer did not report scanning ${path}`
+          : unanchoredPaths.has(path)
+            ? `analyzer returned an unanchored result for ${path}`
+            : !original
+              ? "original analyzer evidence has no comparable scope/config receipt"
+              : !status.comparison_fingerprint
+                ? "analyzer rerun could not establish comparable scope/config"
+                : original !== status.comparison_fingerprint
+                  ? "analyzer scope/config changed since the original evidence"
+                  : undefined;
+      record(target, reason
+        ? { status: "skipped", analyzer_id: analyzerId, reason }
         : { status: "verified_mechanically", analyzer_id: analyzerId });
     }
   }

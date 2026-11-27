@@ -22,6 +22,8 @@ export const AnalyzerLeadProvenanceSchema = z
     path: z.string(),
     /** `hashAnalyzerSnippet` digest of the normalized flagged span. */
     snippet_hash: z.string(),
+    /** Optional receipt for the analyzer-controlled config and input paths. */
+    comparison_fingerprint: z.string().optional(),
   })
   .strict();
 export type AnalyzerLeadProvenance = z.infer<typeof AnalyzerLeadProvenanceSchema>;

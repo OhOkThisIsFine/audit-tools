@@ -126,6 +126,7 @@ const ANALYZER_LEAD_PROVENANCE_SHAPE = {
   rule: str(true),
   path: str(),
   snippet_hash: str(),
+  comparison_fingerprint: str(true),
 };
 const FINDING_GROUNDING_SHAPE = { status: str(), reason: str(true) };
 const CONTENT_COHERENCE_TRACE_SHAPE = {

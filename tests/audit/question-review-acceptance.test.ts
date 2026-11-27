@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { indexQuestionDependencies, projectQuestionReview, reviewAnswerDisposition, type AuditQuestionBinding } from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
+import { acceptQuestionReview, indexQuestionDependencies, projectQuestionReview, reviewAnswerDisposition, type AuditQuestionBinding } from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
 import { adjudicateAuditQuestionResult, consolidateAuditQuestionFindings, ingestAuditQuestionResults, publishAuditQuestionWorkload, readAuditQuestionLedger, readAuditQuestionWorkload, reopenAuditQuestions, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, questionReopenDependencies, type ReviewAcceptedAnswer, type ReviewEvidence, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
@@ -44,6 +44,29 @@ async function fixture(run: (root: string) => Promise<void>) {
 }
 
 describe("question review acceptance", () => {
+  it("only accepts comparison receipts matching the analyzer lead in cited issued evidence", () => {
+    const binding = makeBinding("a");
+    const answer = submission("a", "findings");
+    const provenance = { analyzer_id: "fixture", path: ref.path, snippet_hash: "original", comparison_fingerprint: "measured" };
+    const lead: ReviewEvidence = { schema_version: v, evidence_id: "lead", snapshot_id: identity.snapshot_id,
+      kind: "source", source_refs: [ref], dependencies: [source], status: "observed",
+      description: "Synthetic analyzer lead", analyzer_provenance: provenance };
+    binding.evidence = [lead];
+    binding.assignment.available_evidence_ids = [lead.evidence_id];
+    answer.evidence_ids = [lead.evidence_id];
+    const finding = answer.answer.findings[0]!;
+    finding.evidence_ids = [lead.evidence_id];
+    const obligation = { kind: "analyzer" as const, obligation_id: "recheck", provenance };
+    finding.verification = [{ ...obligation, provenance: { ...provenance, snippet_hash: "different" } }];
+    expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/must come from cited issued evidence/);
+    finding.verification = [obligation];
+    finding.evidence_ids = [];
+    expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/must come from cited issued evidence/);
+    finding.evidence_ids = [lead.evidence_id];
+    expect(acceptQuestionReview([], binding, answer, "now").record.submission.answer.findings[0]!.verification)
+      .toEqual([obligation]);
+  });
+
   it("projects the same current and stale history using one shared frozen-source index", () => {
     const { question } = makeBinding("a");
     const answers: ReviewAcceptedAnswer[] = [{ schema_version: v, accepted_at: "2026-01-01T00:00:00Z",

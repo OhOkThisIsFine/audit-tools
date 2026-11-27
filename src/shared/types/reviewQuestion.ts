@@ -140,6 +140,7 @@ export const ReviewEvidenceSchema = z.strictObject({
   dependencies: z.array(ReviewDependencySchema),
   status: z.enum(["observed", "unavailable", "not_run"]),
   description: value,
+  analyzer_provenance: AnalyzerLeadProvenanceSchema.optional(),
   observations: z.array(z.strictObject({
     observation_id: id,
     statement: value,
