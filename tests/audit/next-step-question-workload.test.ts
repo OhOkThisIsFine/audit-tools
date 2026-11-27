@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
-import { DEFAULT_ACQUIRED_ANALYZER_IDS } from "../helpers/analyzerConsentFixture.js";
-import { prepareFixtureRun } from "../helpers/functionalPreflightFixture.js";
+import { issueReviewFixture } from "./helpers/issued-review-fixture.js";
+import { submitQuestions } from "./helpers/question-completion-harness.js";
+import { submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
@@ -11,7 +12,6 @@ import { captureConsole } from "./helpers/captureConsole.mjs";
 import { runCli } from "../../src/audit/cli.js";
 import { callNextStep } from "./helpers/completion-harness.js";
 import { walkStepsUntilTerminal } from "./helpers/step-driver.js";
-import { submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
 import { packageVersion } from "./helpers/wrapper-harness.js";
 import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questionReviewReport.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
@@ -31,33 +31,13 @@ function prepareWorkload(root: string, artifactsDir = join(root, ".audit-tools",
   });
 }
 
-test("snapshot-bound questions feed standalone synthesis only after accepted answers", async () => {
+test("wrapper packets, batch preparation and graph reads stay bound to their issued workload", async () => {
   await withTempRepo(async (root) => {
     const neighbor = "src/neighbor/isolated.ts";
-    await mkdir(dirname(join(root, neighbor)), { recursive: true });
-    await writeFile(join(root, "src/neighbor/helper.ts"), "export const value = 1;\n");
-    await writeFile(join(root, neighbor), "import { value } from './helper.js';\nexport const unrelated = value;\n");
     const artifactsDir = join(root, "custom audit artifacts");
     const artifactArgs = ["--artifacts-dir", artifactsDir];
-    await prepareFixtureRun(root, { artifactsDir, declinedAnalyzerIds: DEFAULT_ACQUIRED_ANALYZER_IDS, preflight: true });
-    const step = await prepareWorkload(root, artifactsDir);
-    const handoff = await readFile(step.prompt_path, "utf8");
-    expect(handoff).toContain("Read only the routing metadata");
-    expect(handoff).toContain("The command returns a prompt_path, not the prompt.");
-    expect(handoff).toContain("With delegation, pass that file directly to the reviewer harness");
-    expect(handoff).toContain("If the host truly cannot delegate, prepare exactly one pending assignment");
-    expect(handoff).toContain("run the continuation once to ingest it, then stop for fresh context");
-    expect(handoff).toContain("or substitute self-review for any step that requires independence");
-    expect(handoff).toContain("retain the exact query, its returned status or stderr, and the frozen source identity");
-    expect(handoff).not.toContain(step.artifact_paths.host_workload);
-    expect(step.step_kind).toBe("dispatch_review");
-    expect(step.allowed_commands).toHaveLength(1);
-    expect(step.allowed_commands[0]).toMatch(/next-step/u);
-    expect(step.artifact_paths.dispatch_plan).toBeUndefined();
-    expect(step.artifact_paths.dispatch_quota).toBeUndefined();
-    await expect(runCommand(["next-step", ...artifactArgs, "--guidance", "Do a different audit"], { cwd: root }))
-      .rejects.toThrow(/active question review cannot change guidance/u);
-    const workload: unknown = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8"));
+    const { workload_path, routing_path, runId } = await issueReviewFixture(root, artifactsDir);
+    const workload: unknown = JSON.parse(await readFile(workload_path, "utf8"));
     expect(workload).toMatchObject({
       contract_version: "audit-tools/question-review/v1",
       work_items: expect.arrayContaining([
@@ -71,12 +51,12 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     });
     const { work_items: workItems, source_files: sourceFiles } =
       workload as { work_items: WorkItem[]; source_files: { path: string }[] };
-    const routing = JSON.parse(await readFile(step.artifact_paths.review_routing, "utf8"));
+    const routing = JSON.parse(await readFile(routing_path, "utf8"));
     expect(routing).toEqual({
-      run_id: step.run_id,
+      run_id: runId,
       workload_sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
-      prepare_review_argv_prefix: ["prepare-review", "--root", step.repo_root,
-        "--artifacts-dir", step.artifacts_dir, "--workload-sha256", routing.workload_sha256],
+      prepare_review_argv_prefix: ["prepare-review", "--root", root.split(sep).join("/"),
+        "--artifacts-dir", artifactsDir.split(sep).join("/"), "--workload-sha256", routing.workload_sha256],
       assignments: workItems.map(({ binding }) => ({ assignment_id: binding.assignment.assignment_id })),
     });
     const prepareArgsFor = (assignmentId: string, digest: string = routing.workload_sha256) =>
@@ -90,14 +70,13 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       runCommand(prepareArgsFor(assignmentId, digest), { cwd: root });
     const readPacket = async (item: WorkItem, handle: { prompt_path: string; read_paths: { graph_sha256: string } }) => {
       const assignment_id = item.binding.assignment.assignment_id;
-      expect(handle).toEqual({ run_id: step.run_id, assignment_id, workload_sha256: routing.workload_sha256,
+      expect(handle).toEqual({ run_id: runId, assignment_id, workload_sha256: routing.workload_sha256,
         prompt_path: expect.any(String), read_paths: {
           source_root: expect.any(String), source_index: expect.any(String), submission_schema: expect.any(String),
           graph_index: expect.any(String), graph_sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
         } });
       const prompt = await readFile(handle.prompt_path, "utf8");
-      expect(handoff).not.toContain(item.binding.question.question_id);
-      expect(prompt).not.toContain(step.artifact_paths.host_workload);
+      expect(prompt).not.toContain(workload_path);
       expect(prompt).toContain("Answer only the bound question");
       expect(prompt).toMatch(/audit-code\.mjs["']? --expect-version=\S+ review-graph --graph-index /u);
       expect(prompt).toContain("--expect-version=" + packageVersion + " review-graph");
@@ -120,7 +99,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       return { handle, packet };
     };
     const first = workItems[0]!;
-    const receipt = join(step.artifacts_dir, ".fold-receipt.json");
+    const receipt = join(artifactsDir.split(sep).join("/"), ".fold-receipt.json");
     await writeFile(receipt, "{}");
     await expect(rejectPrepare(first.binding.assignment.assignment_id)).rejects.toThrow(/incomplete fold receipt/);
     await unlink(receipt);
@@ -134,7 +113,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       runCommand([...routing.prepare_review_argv_prefix.slice(0, -1), digest, "--work-items", ids], { cwd: root });
     const batch = JSON.parse((await prepareBatch(otherId + ",unissued," + firstId)).stdout);
     const second = await readPacket(other, batch.outcomes[0].packet);
-    expect(batch).toEqual({ run_id: step.run_id, workload_sha256: routing.workload_sha256, outcomes: [
+    expect(batch).toEqual({ run_id: runId, workload_sha256: routing.workload_sha256, outcomes: [
       { status: "ready", packet: second.handle },
       { status: "refused", assignment_id: "unissued", message: "Review assignment is not in the current issued workload" },
       { status: "ready", packet: selected.handle },
@@ -155,7 +134,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       .toEqual({ source_root: selected.packet.source_root, source_files: sourceFiles });
     // An already-issued workload from the previous layout still binds the
     // same digest, with the graph and optional index cache rooted in its run.
-    const legacyGraph = join(step.artifacts_dir, "runs", step.run_id, "review-graph-index", selected.packet.graph_sha256 + ".json");
+    const legacyGraph = join(artifactsDir.split(sep).join("/"), "runs", runId, "review-graph-index", selected.packet.graph_sha256 + ".json");
     await mkdir(dirname(legacyGraph), { recursive: true });
     await rename(selected.packet.graph_index, legacyGraph);
     try {
@@ -188,8 +167,8 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       !item.binding.assignment.suggested_sources.some(({ path }) => path === neighbor));
     expect(contextualRead).toBeDefined();
     const ledgerFile = join(artifactsDir, "runs", (workload as { run_id: string }).run_id, "host-accepted-results-ledger.json");
-    for (const [index, item] of workItems.entries()) {
-      const { question, assignment } = item.binding;
+    {
+      const { question, assignment } = first.binding;
       const response: ReviewSubmission = {
         schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
         submission_id: `standalone-${assignment.assignment_id}`,
@@ -197,57 +176,34 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
         snapshot_id: question.snapshot_id, revision_id: question.revision_id,
         inspected_sources: [
           ...assignment.suggested_sources.slice(0, 1),
-          ...(item === contextualRead ? [{ path: neighbor }] : []),
+          { path: neighbor },
         ], evidence_ids: [],
         limitations: ["Synthetic review did not establish the requested behavior."],
         answer: { outcome: "inconclusive", findings: [], observations: [], parts: question.requested_parts.map(part => ({
           part_id: part.part_id, outcome: "inconclusive", observation_ids: [],
         })) },
       };
-      const file = resolve(root, item.result_path);
+      const file = resolve(root, first.result_path);
       await mkdir(dirname(file), { recursive: true });
       await writeFile(file, JSON.stringify(response));
-      if (index === 0) {
-        const readLedger = () => existsSync(ledgerFile) ? readFile(ledgerFile) : undefined;
-        const ledgerBeforeRefusal = await readLedger();
-        await expect(runCommand(["force-synthesis", ...artifactArgs], { cwd: root })).rejects.toThrow(/report-ready state/);
-        expect(await readLedger()).toEqual(ledgerBeforeRefusal);
-        await writeFile(file, JSON.stringify({ ...response, answer: {
-          ...response.answer, parts: [{ part_id: "not-an-assigned-part", outcome: "inconclusive", observation_ids: [] }],
-        } }));
-        await expect(runCommand(["submit", ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: root }))
-          .rejects.toThrow(/Unknown or duplicate requested part/);
-        expect(await readLedger()).toEqual(ledgerBeforeRefusal);
-        await writeFile(file, JSON.stringify(response));
-      }
-      if (index === 0) {
-        const accepted = await runWrapper(["submit", "--root", root, ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: dirname(root) });
-        expect(JSON.parse(accepted.stdout)).toMatchObject({ disposition: "accepted", submission_id: response.submission_id });
-        await expect(rejectPrepare(assignment.assignment_id)).rejects.toThrow(/already has an accepted answer/);
-        const partiallyAccepted = JSON.parse((await prepareBatch(firstId + "," + otherId)).stdout);
-        expect(partiallyAccepted.outcomes).toEqual([
-          { status: "refused", assignment_id: firstId, message: "Review assignment already has an accepted answer." },
-          { status: "ready", packet: second.handle },
-        ]);
-      } else {
-        // Later answers only fill the real durable ledger for synthesis; CLI argv,
-        // stdout and rejection have already been exercised above.
-        const accepted = await submitWorkItemResult({
-          root, artifactsDir: step.artifacts_dir, workItemId: assignment.assignment_id, source: JSON.stringify(response),
-        });
-        expect(accepted).toMatchObject({ disposition: "accepted", submission_id: response.submission_id });
-      }
+      const readLedger = () => existsSync(ledgerFile) ? readFile(ledgerFile) : undefined;
+      const ledgerBeforeRefusal = await readLedger();
+      await writeFile(file, JSON.stringify({ ...response, answer: {
+        ...response.answer, parts: [{ part_id: "not-an-assigned-part", outcome: "inconclusive", observation_ids: [] }],
+      } }));
+      await expect(runCommand(["submit", ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: root }))
+        .rejects.toThrow(/Unknown or duplicate requested part/);
+      expect(await readLedger()).toEqual(ledgerBeforeRefusal);
+      await writeFile(file, JSON.stringify(response));
+      const accepted = await runWrapper(["submit", "--root", root, ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: dirname(root) });
+      expect(JSON.parse(accepted.stdout)).toMatchObject({ disposition: "accepted", submission_id: response.submission_id });
+      await expect(rejectPrepare(assignment.assignment_id)).rejects.toThrow(/already has an accepted answer/);
+      const partiallyAccepted = JSON.parse((await prepareBatch(firstId + "," + otherId)).stdout);
+      expect(partiallyAccepted.outcomes).toEqual([
+        { status: "refused", assignment_id: firstId, message: "Review assignment already has an accepted answer." },
+        { status: "ready", packet: second.handle },
+      ]);
     }
-    const ledgerBefore = await readFile(ledgerFile, "utf8");
-    const { stdout } = await runCommand(["synthesize", ...artifactArgs], { cwd: root });
-    expect(JSON.parse(stdout)).toMatchObject({ selected_executor: "synthesis_executor" });
-    const working = join(artifactsDir, "audit-findings.json");
-    const report = QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(working, "utf8")));
-    expect(report.question_review.questions).toHaveLength(workItems.length);
-    expect(report.question_review.completion).toBe("incomplete");
-    expect(await readFile(ledgerFile, "utf8")).toBe(ledgerBefore);
-    const next = await runCommand(["next-step", ...artifactArgs], { cwd: root });
-    expect(JSON.parse(next.stdout).step_kind).toBe("synthesis_narrative");
   });
 });
 
@@ -257,6 +213,22 @@ test("interrupted workload and step publication resume the same frozen snapshot"
   await withTempRepo(async (root) => {
     const initial = await prepareWorkload(root);
     expect(initial.step_kind).toBe("dispatch_review");
+    const handoff = await readFile(initial.prompt_path, "utf8");
+    expect(handoff).toContain("Read only the routing metadata");
+    expect(handoff).toContain("The command returns a prompt_path, not the prompt.");
+    expect(handoff).toContain("With delegation, pass that file directly to the reviewer harness");
+    expect(handoff).toContain("If the host truly cannot delegate, prepare exactly one pending assignment");
+    expect(handoff).toContain("run the continuation once to ingest it, then stop for fresh context");
+    expect(handoff).toContain("or substitute self-review for any step that requires independence");
+    expect(handoff).toContain("retain the exact query, its returned status or stderr, and the frozen source identity");
+    expect(handoff).not.toContain(initial.artifact_paths.host_workload);
+    expect(initial.step_kind).toBe("dispatch_review");
+    expect(initial.allowed_commands).toHaveLength(1);
+    expect(initial.allowed_commands[0]).toMatch(/next-step/u);
+    expect(initial.artifact_paths.dispatch_plan).toBeUndefined();
+    expect(initial.artifact_paths.dispatch_quota).toBeUndefined();
+    await expect(runCommand(["next-step", "--guidance", "Do a different audit"], { cwd: root }))
+      .rejects.toThrow(/active question review cannot change guidance/u);
     const readJson = async (path: string) => JSON.parse(await readFile(path, "utf8"));
     const artifacts = initial.artifacts_dir;
     const snapshot = join(artifacts, "run-snapshot.json");
@@ -264,6 +236,8 @@ test("interrupted workload and step publication resume the same frozen snapshot"
     const workload = await readJson(initial.artifact_paths.host_workload) as {
       source_root: string; source_files: unknown[]; work_items: WorkItem[];
     };
+    expect(initial.progress?.pending_tasks).toBe(workload.work_items.length);
+    for (const item of workload.work_items) expect(handoff).not.toContain(item.binding.question.question_id);
     const [answered, pending] = workload.work_items;
     expect(answered).toBeDefined();
     expect(pending).toBeDefined();
@@ -288,6 +262,11 @@ test("interrupted workload and step publication resume the same frozen snapshot"
         part_id, outcome: "inconclusive", observation_ids: [], reason: "No observation in this fixture.",
       })) },
     };
+    const ledgerFile = join(artifacts, "runs", initial.run_id, "host-accepted-results-ledger.json");
+    const readLedger = () => existsSync(ledgerFile) ? readFile(ledgerFile) : undefined;
+    const ledgerBeforeRefusal = await readLedger();
+    await expect(runCommand(["force-synthesis"], { cwd: root })).rejects.toThrow(/report-ready state/);
+    expect(await readLedger()).toEqual(ledgerBeforeRefusal);
     const answerPath = resolve(root, answered!.result_path);
     await mkdir(dirname(answerPath), { recursive: true });
     await writeFile(answerPath, JSON.stringify(answer));
@@ -333,5 +312,22 @@ test("interrupted workload and step publication resume the same frozen snapshot"
     const currentPacket = JSON.parse((await runWrapper(
       [...resumedRouting.prepare_review_argv_prefix, "--work-item", pending!.binding.assignment.assignment_id], { cwd: root })).stdout);
     expect(await readFile(currentPacket.prompt_path, "utf8")).toBe(await readFile(oldPacket.prompt_path, "utf8"));
+
+    for (const submission of await submitQuestions(root, resumedWorkload.work_items)) {
+      const accepted = await submitWorkItemResult({
+        root, artifactsDir: artifacts, workItemId: submission.assignment_id, source: JSON.stringify(submission),
+      });
+      expect(accepted.disposition).toBe("accepted");
+    }
+    const ledgerBefore = await readFile(ledgerFile);
+    const { stdout } = await runCommand(["synthesize"], { cwd: root });
+    expect(JSON.parse(stdout)).toMatchObject({ selected_executor: "synthesis_executor" });
+    const report = QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(join(artifacts, "audit-findings.json"), "utf8")));
+    expect(report.question_review.questions).toHaveLength(workload.work_items.length);
+    expect(report.question_review.completion).toBe("incomplete");
+    expect(report.question_review.accepted.some(({ submission }) => submission.submission_id === answer.submission_id)).toBe(true);
+    expect(await readFile(ledgerFile)).toEqual(ledgerBefore);
+    const next = await runCommand(["next-step"], { cwd: root });
+    expect(JSON.parse(next.stdout).step_kind).toBe("synthesis_narrative");
   });
 });

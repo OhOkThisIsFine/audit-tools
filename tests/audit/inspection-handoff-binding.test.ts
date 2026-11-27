@@ -15,19 +15,16 @@ import { submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
 import { deriveLaneDemand } from "../../src/shared/types/stepContract.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 import type { AuditTask } from "../../src/audit/types.js";
-import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { issueReviewFixture } from "./helpers/issued-review-fixture.js";
 
 test("issued question assignments bind their scope, submission and fallback path", async () => {
   await withTempRepo(async (root) => {
-    const step = await advancePastDesignReview(root);
-    expect(step.step_kind).toBe("dispatch_review");
-    const workloadPath = step.artifact_paths.host_workload;
-    const artifactsDir = join(root, ".audit-tools", "audit");
+    const { artifactsDir, runId, workload_path: workloadPath, routing_path } = await issueReviewFixture(root);
     const workloadBytes = await readFile(workloadPath, "utf8");
-    const { run_id: runId } = JSON.parse(workloadBytes) as { run_id: string };
     const boundary = { root, artifactsDir, runId };
     const workload = await readAuditQuestionWorkload(boundary);
-    const { workload_sha256: workloadSha256 } = JSON.parse(await readFile(step.artifact_paths.review_routing, "utf8"));
+    const { workload_sha256: workloadSha256 } = JSON.parse(await readFile(routing_path, "utf8"));
     const { prompt_path: promptPath } = await prepareAuditQuestionReview({ ...boundary, workloadSha256,
       assignmentId: workload.work_items[0]!.binding.assignment.assignment_id });
     const prompt = await readFile(promptPath, "utf8");
@@ -38,7 +35,6 @@ test("issued question assignments bind their scope, submission and fallback path
     expect(prompt).toMatch(/bound file `(?:[A-Z]:)?\//u);
 
     expect(workload.work_items.length).toBeGreaterThan(1);
-    expect(step.progress?.pending_tasks).toBe(workload.work_items.length);
     const resultDir = join(artifactsDir, "runs", runId, "host-results");
     const destinations = workload.work_items.map(({ result_path, binding }) => {
       expect(isAbsolute(result_path)).toBe(false);

@@ -24,18 +24,19 @@ vi.mock("audit-tools/shared", async original => {
 });
 afterEach(async () => { vi.restoreAllMocks(); requests.length = 0; await cleanupHostHandoffFixtures(); });
 
-const failures = ["nonzero", "null", "error-zero", "throw", "timeout", "overflow", "truncated", "empty-interior"] as const;
+// The shared path-query tests exhaust the transport verdicts and NUL framing.
+// Here each real caller needs one reported process failure and one malformed
+// successful response, not a fresh Git repository for the full cross product.
+const failures = ["error-zero", "truncated"] as const;
 function failQuery(match: (argv: string[]) => boolean, failure: typeof failures[number]) {
   const real = tracked.runTrackedAsync;
   return vi.spyOn(tracked, "runTrackedAsync").mockImplementation(async (argv, options) => {
     if (!match(argv)) return real(argv, options);
     expect(options?.maxBuffer).toBe(64 * 1024 * 1024);
-    if (failure === "throw") throw new Error("synthetic transport throw");
-    const error = failure === "error-zero" || failure === "timeout" || failure === "overflow"
-      ? Object.assign(new Error(failure), { code: failure === "timeout" ? "ETIMEDOUT" : "ENOBUFS" }) : undefined;
-    return { argv, duration_ms: 0, status: failure === "nonzero" ? 1 : failure === "null" ? null : 0,
-      stdout: failure === "truncated" ? "partial.ts" : failure === "empty-interior" ? "own.ts\0\0" : "partial.ts\0",
-      stderr: "synthetic failure", ...(error ? { error } : {}) };
+    return { argv, duration_ms: 0, status: 0,
+      stdout: failure === "truncated" ? "partial.ts" : "partial.ts\0",
+      stderr: "synthetic failure",
+      ...(failure === "error-zero" ? { error: new Error("synthetic process error") } : {}) };
   });
 }
 

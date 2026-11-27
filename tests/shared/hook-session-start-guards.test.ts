@@ -58,6 +58,7 @@ describe('session-start-guards: finished agent worktrees are reported, never rem
   let base: string;
   let repo: string;
   let pass: { code: number | null; stdout: string }; // the ONE pass every assertion below reads
+  let preservedWorktrees: ReadonlySet<string>;
   const wt = (name: string): string => join(base, name);
 
   const listedPaths = (): string[] =>
@@ -66,7 +67,7 @@ describe('session-start-guards: finished agent worktrees are reported, never rem
       .filter((l) => l.startsWith('worktree '))
       .map((l) => l.slice('worktree '.length).trim().replace(/\\/g, '/').toLowerCase());
 
-  const isListed = (path: string): boolean => listedPaths().includes(resolve(path).replace(/\\/g, '/').toLowerCase());
+  const isListed = (path: string): boolean => preservedWorktrees.has(resolve(path).replace(/\\/g, '/').toLowerCase());
 
   beforeAll(() => {
     base = mkdtempSync(join(tmpdir(), 'wtstale-'));
@@ -112,17 +113,28 @@ describe('session-start-guards: finished agent worktrees are reported, never rem
     writeFileSync(join(wt('buildonly'), 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
     backdate(wt('buildonly'));
 
-    // ONE pass, read by every case below. A pass per case would not be
-    // independent: the guard's own `git status` probe rewrites the per-worktree
-    // index, which resets the idle clock the next pass reads.
+    // The hook sees a SessionStart for the linked checkout while its project
+    // dir names main. One pass proves that registration leaves the report
+    // working, the active checkout is excluded, and all worktrees survive.
+    git(repo, 'worktree', 'add', '-q', wt('incwd'), '-b', 'wt-incwd');
+    backdate(wt('incwd'));
+    const inherited = { ...process.env };
+    delete inherited.AUDIT_TOOLS_CHILD_SESSION;
     const r = spawnSyncHidden(process.execPath, [GUARDS], {
       cwd: repo,
       encoding: 'utf8',
+      input: JSON.stringify({
+        hook_event_name: 'SessionStart',
+        session_id: `stale-cwd-${process.pid}`,
+        source: 'startup',
+        cwd: wt('incwd'),
+      }),
       timeout: 120_000,
       windowsHide: true,
-      env: { ...process.env, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: repo },
+      env: { ...inherited, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: repo },
     });
     pass = { code: r.status, stdout: r.stdout ?? '' };
+    preservedWorktrees = new Set(listedPaths());
   });
 
   afterAll(() => {
@@ -179,50 +191,9 @@ describe('session-start-guards: finished agent worktrees are reported, never rem
   });
 
   it('does not report the worktree the session works in, even when the project dir is another checkout', () => {
-    // The incident: CLAUDE_PROJECT_DIR named the main checkout while the session
-    // worked in a linked worktree, so the self-skip protected the wrong tree.
-    git(repo, 'worktree', 'add', '-q', wt('incwd'), '-b', 'wt-incwd');
-    backdate(wt('incwd'));
-    const inherited = { ...process.env };
-    delete inherited.AUDIT_TOOLS_CHILD_SESSION;
-    const r = spawnSyncHidden(process.execPath, [GUARDS], {
-      cwd: repo,
-      encoding: 'utf8',
-      input: JSON.stringify({
-        hook_event_name: 'SessionStart',
-        session_id: `stale-cwd-${process.pid}`,
-        source: 'resume',
-        cwd: wt('incwd'),
-      }),
-      timeout: 120_000,
-      windowsHide: true,
-      env: { ...inherited, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: repo },
-    });
-    expect(r.status).toBe(0);
+    expect(pass.stdout).not.toMatch(/incwd/);
     expect(existsSync(wt('incwd'))).toBe(true);
-    expect(r.stdout ?? '').not.toMatch(/incwd/);
-  });
-
-  it('still reports with a SessionStart payload on stdin — the registration leg runs first and must not break this leg', () => {
-    git(repo, 'worktree', 'add', '-q', wt('landed2'), '-b', 'wt-landed2');
-    backdate(wt('landed2'));
-    const inherited = { ...process.env };
-    delete inherited.AUDIT_TOOLS_CHILD_SESSION; // a child env must not skip registration here
-    const r = spawnSyncHidden(process.execPath, [GUARDS], {
-      cwd: repo,
-      encoding: 'utf8',
-      input: JSON.stringify({
-        hook_event_name: 'SessionStart',
-        session_id: `stale-payload-${process.pid}`,
-        source: 'startup',
-      }),
-      timeout: 120_000,
-      windowsHide: true,
-      env: { ...inherited, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: repo },
-    });
-    expect(r.status).toBe(0);
-    expect(r.stdout ?? '').toMatch(/landed2/);
-    expect(existsSync(wt('landed2'))).toBe(true);
+    expect(isListed(wt('incwd'))).toBe(true);
   });
 });
 

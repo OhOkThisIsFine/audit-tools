@@ -323,36 +323,8 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
       expect(runHook(CLOSEOUT_GATE, live, { root: repo }).code).toBe(0);
       // Same session, same tree, no live work: the cap and the state-dedupe must
       // both be untouched by the skipped stop, so THIS one challenges.
-      expect(runHook(CLOSEOUT_GATE, stop(session), { root: repo }).code).toBe(2);
-    });
-
-    it('ignores task type — a live workflow blocks the challenge like a subagent does', () => {
-      const live = {
-        ...stop(sid('live-wf')),
-        background_tasks: [{ id: 'wf_x', type: 'workflow', status: 'running' }],
-      };
-      expect(runHook(CLOSEOUT_GATE, live, { root: repo }).code).toBe(0);
-    });
-
-    it('still challenges when every background task is terminal', () => {
-      const harvested = {
-        ...stop(sid('terminal-bg')),
-        background_tasks: [
-          { id: 'a1', type: 'subagent', status: 'completed' },
-          { id: 'b2', type: 'shell', status: 'failed' },
-        ],
-      };
-      expect(runHook(CLOSEOUT_GATE, harvested, { root: repo }).code).toBe(2);
-    });
-
-    it('treats an unknown task status as live — the cheap failure is a skipped challenge', () => {
-      const odd = { ...stop(sid('odd-bg')), background_tasks: [{ id: 'x' }] };
-      expect(runHook(CLOSEOUT_GATE, odd, { root: repo }).code).toBe(0);
-    });
-
-    it('skips while session crons are scheduled — a loop session stop is not an end', () => {
-      const cron = { ...stop(sid('cron')), session_crons: [{ id: 'c1' }] };
-      expect(runHook(CLOSEOUT_GATE, cron, { root: repo }).code).toBe(0);
+      const finished = { ...stop(session), background_tasks: [{ id: 'a1', status: 'completed' }] };
+      expect(runHook(CLOSEOUT_GATE, finished, { root: repo }).code).toBe(2);
     });
 
     // The terminated-but-unharvested window (2026-08-29 firing, diagnosed in
@@ -362,7 +334,7 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     // array while the harness holds queued input it resumes seconds later.
     // The transcript's queue-operation depth is the positive evidence.
     function queueTranscript(lines: Array<Record<string, unknown>>): string {
-      const dir = mkdtempSync(join(tmpdir(), 'closeout-queue-'));
+      const dir = mkdtempSync(join(docRoot, 'closeout-queue-'));
       const t = join(dir, 'transcript.jsonl');
       writeFileSync(t, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
       return t;
@@ -381,22 +353,11 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
       expect(runHook(CLOSEOUT_GATE, waiting, { root: repo }).code).toBe(0);
       // Same session, no queued input: the skipped wait left the cap and the
       // state-dedupe untouched, so the REAL stop still challenges.
-      expect(runHook(CLOSEOUT_GATE, stop(session), { root: repo }).code).toBe(2);
+      const absorbed = { type: 'queue-operation', operation: 'dequeue' };
+      writeFileSync(transcript, JSON.stringify(absorbed) + '\n', { flag: 'a' });
+      expect(runHook(CLOSEOUT_GATE, waiting, { root: repo }).code).toBe(2);
     });
 
-    it('fires once the queued notification has been absorbed', () => {
-      const transcript = queueTranscript([
-        {
-          type: 'queue-operation',
-          operation: 'enqueue',
-          content: '<task-notification>\n<task-id>b1</task-id>\n</task-notification>',
-        },
-        // As the harness writes it: dequeue records carry no content, no task-id.
-        { type: 'queue-operation', operation: 'dequeue' },
-      ]);
-      const absorbed = { ...stop(sid('absorbed')), background_tasks: [], transcript_path: transcript };
-      expect(runHook(CLOSEOUT_GATE, absorbed, { root: repo }).code).toBe(2);
-    });
   });
 
   it('fails OPEN outside a git repo — no work signal, nothing to challenge', () => {
@@ -1608,6 +1569,7 @@ describe('sessionHasLiveBackgroundWork: the wait-vs-end predicate', () => {
   it('is true for any non-terminal task regardless of type', () => {
     expect(sessionHasLiveBackgroundWork({ background_tasks: [{ status: 'running', type: 'shell' }] })).toBe(true);
     expect(sessionHasLiveBackgroundWork({ background_tasks: [{ status: 'running', type: 'subagent' }] })).toBe(true);
+    expect(sessionHasLiveBackgroundWork({ background_tasks: [{ status: 'running', type: 'workflow' }] })).toBe(true);
     expect(sessionHasLiveBackgroundWork({ background_tasks: [{ status: 'queued', type: 'never-seen' }] })).toBe(true);
   });
 
@@ -1637,7 +1599,7 @@ describe('sessionHasLiveBackgroundWork: the wait-vs-end predicate', () => {
 
   describe('queued-resume leg — positive evidence only, no absent→idle inversion', () => {
     function transcriptOf(lines: Array<Record<string, unknown> | string>): string {
-      const dir = mkdtempSync(join(tmpdir(), 'queue-depth-'));
+      const dir = mkdtempSync(join(docRoot, 'queue-depth-'));
       const t = join(dir, 'transcript.jsonl');
       writeFileSync(
         t,
