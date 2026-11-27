@@ -21,7 +21,7 @@ import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewQue
 
 /** Same argv validation, dispatch and persisted artifacts, without a fresh Node process. */
 async function runCommand(argv: string[], { cwd }: { cwd: string }) {
-  const result = await captureConsole(() => runCli(["node", "audit-code", ...argv, "--root", cwd]));
+  const result = await captureConsole(() => runCli(["node", "audit-code", ...argv, ...(argv.includes("--root") ? [] : ["--root", cwd])]));
   if (result.code !== 0) throw new Error(result.stderr.trim());
   return result;
 }
@@ -80,8 +80,15 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
         "--artifacts-dir", step.artifacts_dir, "--workload-sha256", routing.workload_sha256],
       assignments: workItems.map(({ binding }) => ({ assignment_id: binding.assignment.assignment_id })),
     });
-    const prepare = (assignmentId: string, digest: string = routing.workload_sha256) =>
-      runWrapper([...routing.prepare_review_argv_prefix.slice(0, -1), digest, "--work-item", assignmentId], { cwd: root });
+    const prepareArgsFor = (assignmentId: string, digest: string = routing.workload_sha256) =>
+      [...routing.prepare_review_argv_prefix.slice(0, -1), digest, "--work-item", assignmentId];
+    // The wrapper's release-bound invocation becomes part of successful
+    // packet bytes. Keep real launches for those byte comparisons, not for
+    // pure validation failures that cannot write a packet.
+    const prepare = (assignmentId: string) =>
+      runWrapper(prepareArgsFor(assignmentId), { cwd: root });
+    const rejectPrepare = (assignmentId: string, digest?: string) =>
+      runCommand(prepareArgsFor(assignmentId, digest), { cwd: root });
     const loadPacket = async (item: WorkItem) => {
       const assignment_id = item.binding.assignment.assignment_id;
       const { stdout } = await prepare(assignment_id);
@@ -118,23 +125,25 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     const first = workItems[0]!;
     const receipt = join(step.artifacts_dir, ".fold-receipt.json");
     await writeFile(receipt, "{}");
-    await expect(prepare(first.binding.assignment.assignment_id)).rejects.toThrow(/incomplete fold receipt/);
+    await expect(rejectPrepare(first.binding.assignment.assignment_id)).rejects.toThrow(/incomplete fold receipt/);
     await unlink(receipt);
     const selected = await loadPacket(first);
     const other = workItems[1]!;
     const second = await loadPacket(other);
     const firstId = first.binding.assignment.assignment_id;
     const otherId = other.binding.assignment.assignment_id;
-    const prepareBatch = (ids: string, digest = routing.workload_sha256) =>
-      runWrapper([...routing.prepare_review_argv_prefix.slice(0, -1), digest, "--work-items", ids], { cwd: dirname(root) });
+    const prepareBatch = (ids: string) =>
+      runWrapper([...routing.prepare_review_argv_prefix, "--work-items", ids], { cwd: dirname(root) });
+    const rejectPrepareBatch = (ids: string, digest = routing.workload_sha256) =>
+      runCommand([...routing.prepare_review_argv_prefix.slice(0, -1), digest, "--work-items", ids], { cwd: root });
     const batch = JSON.parse((await prepareBatch(otherId + ",unissued," + firstId)).stdout);
     expect(batch).toEqual({ run_id: step.run_id, workload_sha256: routing.workload_sha256, outcomes: [
       { status: "ready", packet: second.handle },
       { status: "refused", assignment_id: "unissued", message: "Review assignment is not in the current issued workload" },
       { status: "ready", packet: selected.handle },
     ] });
-    await expect(prepareBatch(firstId + "," + firstId)).rejects.toThrow(/distinct review assignment IDs/);
-    await expect(prepareBatch(firstId, "0".repeat(64))).rejects.toThrow(/fingerprint is not current/);
+    await expect(rejectPrepareBatch(firstId + "," + firstId)).rejects.toThrow(/distinct review assignment IDs/);
+    await expect(rejectPrepareBatch(firstId, "0".repeat(64))).rejects.toThrow(/fingerprint is not current/);
     expect(second.handle.prompt_path).not.toBe(selected.handle.prompt_path);
     expect(second.packet.source_index).toBe(selected.packet.source_index);
     expect(second.packet.graph_index).toBe(selected.packet.graph_index);
@@ -176,8 +185,8 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     const windowsPrompt = await readFile(JSON.parse(overridden.stdout).prompt_path, "utf8");
     expect(windowsPrompt).toContain((process.platform === "win32" ? "& " : "")
       + "'C:/Program Files/Dev Tools/audit-code.cmd' --expect-version=" + packageVersion + " review-graph");
-    await expect(prepare("unissued")).rejects.toThrow(/not in the current issued workload/);
-    await expect(prepare(first.binding.assignment.assignment_id, "0".repeat(64))).rejects.toThrow(/fingerprint is not current/);
+    await expect(rejectPrepare("unissued")).rejects.toThrow(/not in the current issued workload/);
+    await expect(rejectPrepare(first.binding.assignment.assignment_id, "0".repeat(64))).rejects.toThrow(/fingerprint is not current/);
     expect(sourceFiles).toContainEqual(expect.objectContaining({ path: neighbor }));
     const contextualRead = workItems.find(item =>
       !item.binding.assignment.suggested_sources.some(({ path }) => path === neighbor));
@@ -210,7 +219,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
         await writeFile(file, JSON.stringify({ ...response, answer: {
           ...response.answer, parts: [{ part_id: "not-an-assigned-part", outcome: "inconclusive", observation_ids: [] }],
         } }));
-        await expect(runWrapper(["submit", "--root", root, ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: dirname(root) }))
+        await expect(runCommand(["submit", ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: root }))
           .rejects.toThrow(/Unknown or duplicate requested part/);
         expect(await readLedger()).toEqual(ledgerBeforeRefusal);
         await writeFile(file, JSON.stringify(response));
@@ -218,7 +227,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       if (index === 0) {
         const accepted = await runWrapper(["submit", "--root", root, ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: dirname(root) });
         expect(JSON.parse(accepted.stdout)).toMatchObject({ disposition: "accepted", submission_id: response.submission_id });
-        await expect(prepare(assignment.assignment_id)).rejects.toThrow(/already has an accepted answer/);
+        await expect(rejectPrepare(assignment.assignment_id)).rejects.toThrow(/already has an accepted answer/);
         const partiallyAccepted = JSON.parse((await prepareBatch(firstId + "," + otherId)).stdout);
         expect(partiallyAccepted.outcomes).toEqual([
           { status: "refused", assignment_id: firstId, message: "Review assignment already has an accepted answer." },
