@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { guardArgv } from "./argvGuard.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -53,12 +54,13 @@ function trackedTests(args) {
   }
 }
 
-const args = process.argv.slice(2);
-if (args.length > 0 && (args[0] !== "--shards" || args.length < 3)) {
-  fail("usage: npm run generate:shard-baseline [-- --shards <ledger1> <ledger2> ...]");
-}
-const sharded = args.length > 0;
-const ledgers = (sharded ? args.slice(1) : [localLedger]).map(readLedger);
+const usage = "Usage: npm run generate:shard-baseline [-- --shards <ledger1> <ledger2> ...]";
+const args = guardArgv(process.argv.slice(2), {
+  name: "generate-shard-baseline", usage, flags: ["--shards"], positionals: Infinity,
+});
+const sharded = args.has("--shards");
+if (sharded ? args.positionals.length < 2 : args.positionals.length > 0) fail(usage);
+const ledgers = (sharded ? args.positionals : [localLedger]).map(readLedger);
 const first = ledgers[0];
 const seenShards = new Set();
 const merged = new Map();

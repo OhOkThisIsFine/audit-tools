@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSyncHidden, spawnSyncHidden } from "../helpers/spawn.mjs";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, test, expect, vi } from "vitest";
@@ -66,10 +66,11 @@ test("generator accepts standalone and complete older shard census, refuses bad 
   const script = join(scriptDir, "generate-vitest-shard-baseline.mjs");
   const baseline = join(scriptDir, "vitest-shard-duration-baseline.json");
   const a = "tests/a.test.ts", b = "tests/b.test.ts", c = "tests/new.test.ts";
-  const git = (args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }).trim();
+  const git = (args: string[]) => execFileSyncHidden("git", args, { cwd: root, encoding: "utf8" }).trim();
   const add = (name: string) => { writeFileSync(join(root, name), ""); git(["add", name]); };
   for (const dir of [scriptDir, profileDir, join(root, "tests")]) mkdirSync(dir, { recursive: true });
   writeFileSync(script, generator);
+  writeFileSync(join(scriptDir, "argvGuard.mjs"), readFileSync(new URL("../../scripts/shared/argvGuard.mjs", import.meta.url)));
   git(["init", "-q"]);
   add(a);
   add(b);
@@ -79,7 +80,9 @@ test("generator accepts standalone and complete older shard census, refuses bad 
     profile, gitSha, files, fileCount: Object.keys(files).length, platform: "linux", node: "v22.14.0", ci: true,
     outcome: { passed: 1, failed: 0, unfinished: 0 },
   });
-  const run = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: "utf8", windowsHide: true });
+  const run = (...args: string[]) => spawnSyncHidden(process.execPath, [script, ...args], { cwd: root, encoding: "utf8" });
+  expect(run("--help")).toMatchObject({ status: 0, stdout: expect.stringContaining("Usage:") });
+  expect(run("--shardz")).toMatchObject({ status: 2 });
   const standalone = join(profileDir, "vitest-latest.json");
   writeFileSync(standalone, JSON.stringify(ledger("vitest", { [b]: 10, [a]: 100 })));
   expect(run()).toMatchObject({ status: 0 });
