@@ -104,6 +104,23 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     } };
     const calibration = JSON.parse((await runWrapper(["next-step"], options)).stdout);
     expect(calibration.step_kind).toBe("analyzer_calibration");
+    const calibrationPrompt = await readFile(calibration.prompt_path, "utf8");
+    expect(calibrationPrompt).toContain("Diagnose failure before declaring a limitation");
+    expect(calibrationPrompt).toContain("retry only after a concrete repair or calibration");
+    expect(calibrationPrompt).toContain("Do not repeat the same attempt unchanged");
+    expect(calibrationPrompt).toContain("reruns only the named tools");
+    expect(calibrationPrompt).toContain("Success or zero findings does not prove that any particular file or rule ran");
+    expect(calibrationPrompt).toContain("Inspect their effective scope before crediting coverage");
+    expect(calibrationPrompt).toContain("Do not silently replace partial evidence");
+    expect(calibrationPrompt).toContain("The registry is not a limit");
+    expect(calibrationPrompt).toContain("respect any decline and use only authorized supplementary checks");
+    expect(calibration.allowed_commands.join(" ")).toContain("--expect-version=" + packageVersion + " import-external-analyzer");
+    const acquisitionPath = join(artifactsDir, "external_analyzer_acquisition.json").replaceAll("\\", "/");
+    expect(calibration.artifact_paths.analyzer_acquisition).toBe(acquisitionPath);
+    expect(calibrationPrompt).toContain(acquisitionPath);
+    const acquisition = JSON.parse(await readFile(acquisitionPath, "utf8"));
+    expect(acquisition.tool_statuses.filter(({ status }: { status: string }) => status === "failed"))
+      .toEqual([expect.objectContaining({ tool: "semgrep", stage: "scan" })]);
     expect(await answerHostPause(calibration)).toBe(true);
 
     // After calibration the pending critical-flow fallback remains a host gate.
@@ -128,23 +145,11 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     // the LANE file; the step prompt is the capability-neutral instruction.
     const stepPrompt = await readFile(paused.prompt_path, "utf8");
     expect(stepPrompt).toMatch(/critical-flow fallback/i);
-    const recovery = stepPrompt.indexOf("## Analyzer recovery (orchestrator only)");
-    expect(recovery).toBeGreaterThanOrEqual(0);
-    expect(recovery).toBeLessThan(stepPrompt.indexOf("# audit-code critical-flow fallback"));
-    expect(stepPrompt).toContain("semgrep (unknown version; scan)");
-    expect(stepPrompt).not.toMatch(/(?:eslint|knip) \(unknown version/);
-    expect(stepPrompt).toContain("apply a targeted fix");
-    expect(stepPrompt).toContain("Verify that the previously missed rules or queries actually ran on the affected scope.");
-    expect(stepPrompt).toContain("A syntax check alone does not recover the analyzer's missed rules.");
-    expect(stepPrompt).toContain("Before starting the next step or dispatching any work");
+    // A current calibration has already accounted for the failure. The
+    // fallback actor must not be asked to repeat the orchestrator's work.
+    expect(stepPrompt).not.toContain("## Analyzer recovery (orchestrator only)");
     expect(paused.allowed_commands.join(" ")).toContain("--expect-version=" + packageVersion + " next-step");
     expect(paused.allowed_commands.join(" ")).not.toContain("--expect-version=old");
-    expect(stepPrompt).toContain("do not repeat an unchanged attempt");
-    expect(stepPrompt).toContain("applicable repo-declared command");
-    expect(stepPrompt).toContain("not an allowlist");
-    expect(stepPrompt).toContain("honor run-specific declines");
-    expect(stepPrompt).toContain("Preserve valid findings from the partial run");
-    expect(paused.access?.read_paths).toContain(join(artifactsDir, "external_analyzer_acquisition.json").replaceAll("\\", "/"));
 
     expect(stepPrompt.replaceAll("\\", "/")).toContain(
       resultsPath.replaceAll("\\", "/"),
