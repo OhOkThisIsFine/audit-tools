@@ -59,6 +59,11 @@ describe("question review acceptance", () => {
     const obligation = { kind: "analyzer" as const, obligation_id: "recheck", provenance };
     finding.verification = [{ ...obligation, provenance: { ...provenance, snippet_hash: "different" } }];
     expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/must come from cited issued evidence/);
+    const { comparison_fingerprint: _receipt, ...legacyProvenance } = provenance;
+    finding.verification = [{ ...obligation, provenance: legacyProvenance }];
+    expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/use an assertion obligation/);
+    finding.verification = [{ kind: "assertion", obligation_id: "recheck", expected: "Resume retains pending work", source_refs: [ref] }];
+    expect(acceptQuestionReview([], binding, answer, "now").kind).toBe("accepted");
     finding.verification = [obligation];
     finding.evidence_ids = [];
     expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/must come from cited issued evidence/);
