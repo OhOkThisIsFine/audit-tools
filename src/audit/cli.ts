@@ -97,6 +97,9 @@ async function main(argv: string[]): Promise<void> {
   if (command === undefined || auditHelpRequested(argv.slice(route ? 3 : 2), route?.[2] ?? {})) {
     console.log(`Usage: audit-code ${route ? command : "<command>"} [options]`);
     if (route) console.log(`Options: ${auditArgumentNames(route[2]).join(", ")}`);
+    if (command === "next-step") {
+      console.log("--artifacts-dir must be under the audited root; for example, <root>/.audit-tools/audit.");
+    }
     console.log(
       `Available commands: ${COMMAND_ROUTES.map(([verb]) => verb).join(", ")}`,
     );

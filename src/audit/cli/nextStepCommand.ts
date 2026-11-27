@@ -9,6 +9,7 @@ import { functionalPreflightStep } from "./functionalPreflight.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 import { INDEPENDENT_CONTEXT, SEPARATE_CONTEXT_OR_SELF } from "../../shared/prompts.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/artifacts-dir-rollover.test.ts
+import { resolveContainedPath } from "../../shared/submission/submissionIdentity.js";
 import { errorMessage } from "../../shared/io/json.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { computeStaleArtifacts } from "../orchestrator/staleness.js";
@@ -310,8 +311,11 @@ async function prepareContractDispatch(opts: {
 export async function cmdNextStep(argv: string[]): Promise<void> {
   validateAuditArguments("next-step", argv[2] === "next-step" ? argv.slice(3) : argv, NEXT_STEP_ARGUMENTS);
   const root = getRootDir(argv);
+  // Question-review workloads bind repository-relative paths. Reject an
+  // unsupported destination before the backstop can write anything there.
+  const artifactsDir = resolveContainedPath(root, getArtifactsDir(argv),
+    "next-step --artifacts-dir (for example, <root>/.audit-tools/audit)");
   warnIfNotGitRepo(root);
-  const artifactsDir = getArtifactsDir(argv);
   // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): ANY throw
   // out of the body — a host-handoff abort, a mis-shaped-submission parse crash,
   // an IO failure — writes a blocked step naming the cause before propagating,

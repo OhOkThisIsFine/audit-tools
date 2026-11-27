@@ -178,6 +178,7 @@ test.concurrent.each(["--help", "-h"])(
         { cwd: tempDir },
       );
       expect(stdout).toContain("Usage: audit-code next-step [options]");
+      expect(stdout).toContain("--artifacts-dir must be under the audited root");
       await assert.rejects(() => stat(artifactsDir));
       await assert.rejects(() => stat(join(tempDir, ".audit-tools")));
     } finally {
@@ -509,4 +510,29 @@ test.concurrent("buildMergedOpenCodeProjectConfig migrates a pre-hardening bash 
   const editDenyExisting = { permission: { edit: { "*": "deny" } } };
   const mergedEditDeny = buildMergedOpenCodeProjectConfig(editDenyExisting, "/tmp/repo");
   expect(mergedEditDeny.permission.edit["*"], "user '*': 'deny' on edit is preserved (agent-scope merge keeps existing wildcard)").toBe("deny");
+});
+
+test("next-step rejects an out-of-root artifact directory before writing, but accepts a custom in-tree directory", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "audit-code-artifact-root-"));
+  try {
+    const root = join(parent, "repo");
+    const outside = join(parent, "repo-artifacts");
+    const inside = join(root, ".audit-tools", "custom-run");
+    await mkdir(root);
+    await writeFile(join(root, "main.ts"), "export const value = 1;\n");
+    const run = (artifactsDir: string) => runWrapper(
+      ["next-step", "--root", root, "--artifacts-dir", artifactsDir], { cwd: root },
+    );
+
+    await expect(run(outside)).rejects.toThrow(/next-step --artifacts-dir.*must remain beneath/i);
+    await expect(stat(outside)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(root, ".audit-tools"))).rejects.toMatchObject({ code: "ENOENT" });
+
+    await run(inside);
+    expect(JSON.parse(await readFile(join(inside, "steps", "current-step.json"), "utf8")))
+      .toMatchObject({ step_kind: "functional_preflight", status: "ready" });
+    await expect(stat(join(root, ".audit-tools", "audit"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
 });

@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join, posix, resolve, win32 } from 'node:path';
 import { ensureBuilt, shouldBuildDistForPaths, assertWorkspaceInstalled } from './audit-code-wrapper-build.mjs';
@@ -16,7 +16,6 @@ import {
 } from './audit-code-wrapper-install-hosts.mjs';
 // sites-pinned: tests/shared/installer-verb-help.test.ts
 import {
-  commandRequestsHelp,
   wantsInstallerVerbHelp,
   installerVerbHelp,
   installerVerbSummaries,
@@ -287,7 +286,7 @@ async function printPromptPath() {
 }
 
 // sites-pinned: tests/audit/cleanup.test.ts
-async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } = {}) {
+async function runDistCommand(commandName, argv) {
   const commandArgs = [...argv];
   // An absent --root is DISCOVERED (nearest ancestor owning .audit-tools/.git),
   // not defaulted to the caller's cwd verbatim: the wrapper normalizes the root
@@ -300,10 +299,6 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
   // the caller-cwd-resolved absolute path before it reaches the child (CE-001).
   setFlag(commandArgs, '--root', rootValue);
   setFlag(commandArgs, '--artifacts-dir', artifactsDir);
-
-  if (ensureArtifactsDir) {
-    await mkdir(artifactsDir, { recursive: true });
-  }
 
   await ensureBuilt();
   await run(process.execPath, [distEntry, commandName, ...commandArgs], {
@@ -370,22 +365,6 @@ export async function runAuditCodeWrapper({
 
   if (argv[0] === 'verify-install') {
     await verifyInstalledBootstrap(argv.slice(1));
-    return;
-  }
-
-  // Commands that need special wrapper handling stay explicit: the
-  // artifact-dir-bootstrapping commands pass { ensureArtifactsDir: true }
-  // because they may be the FIRST call in a fresh repo and must create the run
-  // directory before dist reads it. `mcp` needs no branch: the child inherits
-  // stdio and ensureBuilt writes to stderr, so the forwarded server's stdout
-  // stays the protocol stream.
-  const commandArgv = argv.slice(1);
-  // Help is informational: it must not create the artifacts directory.
-  // sites-pinned: tests/shared/installer-verb-help.test.ts
-  const ensureArtifactsDir = !commandRequestsHelp(argv[0], commandArgv);
-
-  if (argv[0] === 'next-step') {
-    await runDistCommand('next-step', commandArgv, { ensureArtifactsDir });
     return;
   }
 
