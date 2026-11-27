@@ -172,10 +172,27 @@ async function walkTo(root: string, artifactsDir: string, kinds: readonly string
 
 const digest = (register: Register, kind: string) => register.lanes.find((lane) => lane.kind === kind)?.packet_sha256;
 
-test("a later extraction re-authors only the lanes whose packet changed and carries the rest", async () => {
+test("unchanged charter packets need no host turn; an edit re-asks only the affected lane", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     const before = await firstExtraction(root, artifactsDir);
+
+    await staleTheRegister(artifactsDir);
+
+    // Reaching the comparison without a `charter_extraction` step on the way is
+    // the proof that no lane was re-asked.
+    const reached = await walkTo(root, artifactsDir, ["charter_extraction", "charter_comparison"], "all carried");
+    expect(reached.step_kind).toBe("charter_comparison");
+    expect(reached.stop_condition).toMatch(/independent context/);
+    expect(reached.stop_condition).toMatch(/if .*available.*stop/i);
+    expect(reached.stop_condition).not.toContain("else yourself");
+
+    const carried = await readRegister(artifactsDir);
+    expect(carried.lanes.map((lane) => [lane.kind, lane.nodes[0]?.node_id, lane.packet_sha256])).toEqual(
+      KINDS.map((kind) => [kind, `first-${kind}`, digest(before, kind)]),
+    );
+    expect(carried.evidence_coverage.map((coverage) => coverage.kind).sort()).toEqual([...KINDS].sort());
+    expect(carried.citation_validation.quote_presence_checked).toBe(true);
 
     // The run reads its frozen snapshot: the comment edit lands there. Nothing
     // else is touched — the integrity check notices the edit, intake re-runs,
@@ -201,33 +218,5 @@ test("a later extraction re-authors only the lanes whose packet changed and carr
     expect(digest(after, "stated")).not.toBe(digest(before, "stated"));
     expect(digest(after, "structural")).toBe(digest(before, "structural"));
     expect(digest(after, "revealed")).toBe(digest(before, "revealed"));
-  });
-});
-
-// The common real case: a change outside every packet (a new non-member file)
-// stales the register while all three packets stay byte-identical. No lane is
-// asked for, so no emission runs — the merge itself must write each kind's
-// coverage manifest, or the register silently loses its evidence coverage and
-// its delivered-quote check.
-test("a stale register whose every packet is unchanged carries all lanes with no host turn and keeps its evidence coverage", async () => {
-  await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-tools", "audit");
-    const before = await firstExtraction(root, artifactsDir);
-    await staleTheRegister(artifactsDir);
-
-    // Reaching the comparison without a `charter_extraction` step on the way is
-    // the proof that no lane was re-asked.
-    const reached = await walkTo(root, artifactsDir, ["charter_extraction", "charter_comparison"], "all carried");
-    expect(reached.step_kind).toBe("charter_comparison");
-    expect(reached.stop_condition).toMatch(/independent context/);
-    expect(reached.stop_condition).toMatch(/if .*available.*stop/i);
-    expect(reached.stop_condition).not.toContain("else yourself");
-
-    const after = await readRegister(artifactsDir);
-    expect(after.lanes.map((lane) => [lane.kind, lane.nodes[0]?.node_id, lane.packet_sha256])).toEqual(
-      KINDS.map((kind) => [kind, `first-${kind}`, digest(before, kind)]),
-    );
-    expect(after.evidence_coverage.map((coverage) => coverage.kind).sort()).toEqual([...KINDS].sort());
-    expect(after.citation_validation.quote_presence_checked).toBe(true);
   });
 });
