@@ -22,12 +22,13 @@ import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 async function verifyCurrentQuestionInputs(root: string, artifactsDir: string, requestedTooling?: ReviewToolingTransition) {
   const bundle = await loadArtifactBundle(artifactsDir, { requestedTooling });
   if (bundle.audit_state?.status === "complete") throw new Error("The finished report cannot be changed.");
-  if (!bundle.repo_manifest || !bundle.review_plan || computeStaleArtifacts(bundle, { emit: false }).has("review_plan.json")) {
+  const staleArtifacts = computeStaleArtifacts(bundle, { emit: false });
+  if (!bundle.repo_manifest || !bundle.review_plan || staleArtifacts.has("review_plan.json")) {
     throw new Error("The review plan is missing or stale; run next-step to refresh it.");
   }
   const sourceRoot = await readRunSourceRoot(root, artifactsDir);
   if (bundle.review_tooling_qualification) {
-    await assertQualifiedReviewStillCurrent(bundle, sourceRoot);
+    await assertQualifiedReviewStillCurrent(bundle, sourceRoot, undefined, staleArtifacts);
   } else {
     const scope = reviewSourceScope(bundle, bundle.scope);
     const admitted = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])];
@@ -35,7 +36,7 @@ async function verifyCurrentQuestionInputs(root: string, artifactsDir: string, r
       throw new Error("The frozen source changed; run next-step before submitting.");
     }
   }
-  return { bundle, sourceRoot };
+  return { bundle, sourceRoot, staleArtifacts };
 }
 
 
@@ -58,12 +59,12 @@ export async function submitWorkItemResult(params: {
     const workload = await readAuditQuestionWorkload(boundary);
     const issued = workload.work_items.find(({ binding }) => binding.assignment.assignment_id === params.workItemId);
     if (!issued) throw new Error("Review assignment is not in the current issued workload");
-    const { bundle, sourceRoot } = await verifyCurrentQuestionInputs(params.root, params.artifactsDir);
+    const { bundle, sourceRoot, staleArtifacts } = await verifyCurrentQuestionInputs(params.root, params.artifactsDir);
     if (workload.source_root !== toPosixPath(sourceRoot)) {
       throw new Error("The issued snapshot is no longer current; run next-step before submitting.");
     }
     const ledger = await readAuditQuestionLedger(boundary);
-    const { bindings } = await deriveCurrentQuestionBindings(bundle, sourceRoot, workload.source_files, ledger.reopens);
+    const { bindings } = await deriveCurrentQuestionBindings(bundle, sourceRoot, workload.source_files, ledger.reopens, staleArtifacts);
     const current = bindings.find(({ assignment }) => assignment.assignment_id === params.workItemId);
     if (!current || stableStringify(issued.binding) !== stableStringify({
       question: current.question, assignment: current.assignment, dependencies: current.dependencies,
@@ -175,8 +176,8 @@ export async function cmdConsolidateFindings(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   const root = getRootDir(argv);
   const receipt = await withActiveQuestionAdminRun(artifactsDir, async runId => {
-    const { bundle, sourceRoot } = await verifyCurrentQuestionInputs(root, artifactsDir);
-    const context = await deriveQuestionCycleUnlocked({ root, artifactsDir, sourceRoot, bundle, readOnlyRunId: runId });
+    const { bundle, sourceRoot, staleArtifacts } = await verifyCurrentQuestionInputs(root, artifactsDir);
+    const context = await deriveQuestionCycleUnlocked({ root, artifactsDir, sourceRoot, bundle, readOnlyRunId: runId, staleArtifacts });
     const disposition = await consolidateAuditQuestionFindings({ root, artifactsDir, runId,
       decision, questions: context.bindings.map(binding => binding.question),
       dependenciesByQuestion: context.dependenciesByQuestion, evidence: context.evidence });
@@ -193,8 +194,8 @@ export async function cmdReopenQuestions(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   const root = getRootDir(argv);
   const receipt = await withActiveQuestionAdminRun(artifactsDir, async runId => {
-    const { bundle, sourceRoot } = await verifyCurrentQuestionInputs(root, artifactsDir, request.tooling_transition);
-    const context = await deriveQuestionCycleUnlocked({ root, artifactsDir, sourceRoot, bundle, readOnlyRunId: runId });
+    const { bundle, sourceRoot, staleArtifacts } = await verifyCurrentQuestionInputs(root, artifactsDir, request.tooling_transition);
+    const context = await deriveQuestionCycleUnlocked({ root, artifactsDir, sourceRoot, bundle, readOnlyRunId: runId, staleArtifacts });
     const disposition = await reopenAuditQuestions({
       root, artifactsDir, runId, request, qualification: bundle.review_tooling_qualification,
       questions: context.bindings.map(({ question }) => question),

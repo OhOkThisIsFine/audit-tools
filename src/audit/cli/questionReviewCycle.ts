@@ -6,7 +6,8 @@ import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import { decideNextStep } from "../orchestrator/nextStep.js";
 import { probeScopeIndexKeyCached, type ScopeIndexMemo } from "../orchestrator/scopeIndexBaseline.js";
-import { computeStaleArtifacts } from "../orchestrator/staleness.js";
+import { hashArtifactValue } from "../../shared/artifactFreshness.js";
+import { computeStaleArtifacts, type StaleArtifactSet } from "../orchestrator/staleness.js";
 import { ingestAuditQuestionResults, readAuditQuestionLedger } from "./dispatch/hostHandoff.js";
 import { indexQuestionDependencies, projectQuestionReview, type AuditQuestionBinding } from "./dispatch/questionReviewAcceptance.js";
 import { ensureQuestionReviewRunIdUnlocked } from "./questionReviewSession.js";
@@ -19,6 +20,7 @@ interface QuestionCycleOptions {
   artifactsDir: string;
   bundle: ArtifactBundle;
   readOnlyRunId?: string;
+  staleArtifacts?: StaleArtifactSet;
 }
 
 /** The same source/evidence binding for dispatch, report and direct submit. */
@@ -27,6 +29,7 @@ export async function deriveCurrentQuestionBindings(
   sourceRoot: string,
   verifiedSourceFiles?: AuditQuestionBinding["sourceFiles"],
   reopens: readonly ReviewReopenEvent[] = [],
+  knownStale?: StaleArtifactSet,
 ) {
   const plan = bundle.review_plan;
   if (!plan) throw new Error("Question review requires the active plan");
@@ -35,9 +38,18 @@ export async function deriveCurrentQuestionBindings(
     const fingerprint = scope.files.get(path)?.hash;
     return fingerprint ? [[path, fingerprint] as const] : [];
   }));
+  const markerName = "external_analyzer_acquisition.json";
+  const marker = bundle.external_analyzer_acquisition;
+  const markerMetadata = bundle.artifact_metadata?.artifacts[markerName];
+  let analyzerStatuses: NonNullable<typeof marker>["tool_statuses"] | undefined;
+  if (marker?.enabled && marker.tool_statuses.some(status => status.comparison_fingerprint) &&
+      markerMetadata?.content_hash === hashArtifactValue(markerName, marker)) {
+    const stale = knownStale ?? computeStaleArtifacts(bundle, { emit: false });
+    if (!stale.has(markerName) && !stale.deferred.has(markerName)) analyzerStatuses = marker.tool_statuses;
+  }
   const evidence = await collectQuestionEvidence({
     snapshot_id: plan.snapshot_id, sourceRoot, sourceFiles, analyzerResults: bundle.external_analyzer_results ?? [],
-    analyzerStatuses: bundle.external_analyzer_acquisition?.tool_statuses,
+    analyzerStatuses,
   });
   const bindings = await questionWorkloadBindings(bundle, sourceRoot, evidence, verifiedSourceFiles, reopens);
   return { bindings, evidence, sourceFiles };
@@ -52,7 +64,7 @@ export async function deriveQuestionCycleUnlocked(options: QuestionCycleOptions)
   const runId = options.readOnlyRunId ?? await ensureQuestionReviewRunIdUnlocked(artifactsDir);
   const boundary = { root, artifactsDir, runId };
   const ledger = await readAuditQuestionLedger(boundary);
-  const { bindings, evidence, sourceFiles } = await deriveCurrentQuestionBindings(bundle, sourceRoot, undefined, ledger.reopens);
+  const { bindings, evidence, sourceFiles } = await deriveCurrentQuestionBindings(bundle, sourceRoot, undefined, ledger.reopens, options.staleArtifacts);
   const currentAssignmentIds = new Set(bindings.map(({ assignment }) => assignment.assignment_id));
   const ledgerOnly = { ...ledger, accepted_count: 0, issues: [] };
   const ingestion = options.readOnlyRunId !== undefined ? ledgerOnly
@@ -82,9 +94,11 @@ export function assertQualifiedReviewObligation(obligation: string | null): void
 
 /** The tooling receipt authorizes a review continuation, never fresh acquisition.
  * Use the unchanged DAG and probe the same tracked corpus as normal advance. */
-export async function assertQualifiedReviewStillCurrent(bundle: ArtifactBundle, sourceRoot: string, memo?: ScopeIndexMemo) {
+export async function assertQualifiedReviewStillCurrent(
+  bundle: ArtifactBundle, sourceRoot: string, memo?: ScopeIndexMemo, knownStale?: StaleArtifactSet,
+) {
   if (!bundle.review_tooling_qualification) return;
-  const stale = computeStaleArtifacts(bundle, { emit: false });
+  const stale = knownStale ?? computeStaleArtifacts(bundle, { emit: false });
   const derivedReports = new Set(["audit-findings.json", "audit-report.md", "synthesis-narrative.json"]);
   if ([...stale, ...stale.deferred].some(name => !derivedReports.has(name))) {
     throw new Error("Qualified question review has stale non-report inputs; refusing to reacquire evidence.");

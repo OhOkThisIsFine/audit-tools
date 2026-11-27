@@ -2,6 +2,9 @@ import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { deriveCurrentQuestionBindings, deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
+import { hashAnalyzerSnippet } from "../../src/shared/analyzers/provenance.js";
 import { hashContent } from "audit-tools/shared";
 
 import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
@@ -172,6 +175,54 @@ test("partial analyzer recovery is additive and replay leaves native receipts an
   expect(recovered.updated.audit_report).toBeUndefined();
   const empty = runExternalAnalyzerImportExecutor(recovered.updated, { tool: "fixture", results: [] });
   expect(empty.updated).toBe(recovered.updated);
+});
+
+test("question binding withholds a stamped native receipt once its acquisition is stale", async () => {
+  const root = await mkdtemp(join(tmpdir(), "audit-stale-receipt-"));
+  const path = "src/workflow.ts";
+  const body = "const text = 'review this';\n";
+  try {
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, path), body);
+    const provenance = { analyzer_id: "fixture", path, snippet_hash: hashAnalyzerSnippet(body, 1)!,
+      comparison_fingerprint: "measured" };
+    const bundle = buildQuestionPlanArtifacts({
+      repo_manifest: { repository: { name: "fixture" }, generated_at: "2026-11-27T00:00:00Z",
+        files: [{ path, language: "typescript", size_bytes: body.length, hash: hashContent(body) }] },
+      file_disposition: { files: [{ path, status: "included" }] },
+      surface_manifest: { surfaces: [{ id: "workflow", kind: "interface", entrypoint: path }] },
+      external_analyzer_results: [{ tool: "fixture", results: [{ id: "lead", category: "behavior",
+        severity: "low", path, line_start: 1, summary: "Approximate candidate", provenance }] }],
+      external_analyzer_acquisition: { enabled: true, tool_statuses: [{ tool: "fixture", resolved: true,
+        status: "findings", exit_code: 0, comparison_fingerprint: "measured" }] },
+    }, fullAuditScope()).updated;
+    bundle.artifact_metadata = computeArtifactMetadata(bundle);
+    const fresh = await deriveCurrentQuestionBindings(bundle, root);
+    expect(fresh.evidence).toHaveLength(1);
+    expect(fresh.evidence[0]?.analyzer_provenance).toEqual(provenance);
+    const staleBundle: ArtifactBundle = { ...bundle, file_disposition: { files: [
+      { path, status: "included" }, { path: "unrelated.txt", status: "excluded" },
+    ] } };
+    const stale = computeStaleArtifacts(staleBundle, { emit: false });
+    expect(stale.has("external_analyzer_acquisition.json")).toBe(true);
+    const verifyAdvisoryOnly = async (target: ArtifactBundle, knownStale?: typeof stale) => {
+      const review = await deriveCurrentQuestionBindings(target, root, undefined, [], knownStale);
+      expect(review.evidence).toHaveLength(1);
+      expect(review.evidence[0]?.evidence_id).toBe(fresh.evidence[0]?.evidence_id);
+      expect(review.evidence[0]?.analyzer_provenance).toBeUndefined();
+    };
+    const readOnly = await deriveQuestionCycleUnlocked({ root, sourceRoot: root, artifactsDir: join(root, "audit"),
+      bundle: staleBundle, readOnlyRunId: "fixture-run" });
+    expect(readOnly.evidence).toHaveLength(1);
+    expect(readOnly.evidence[0]?.analyzer_provenance).toBeUndefined();
+    await verifyAdvisoryOnly(staleBundle); // shared fallback used by dispatch and standalone synthesis
+    await verifyAdvisoryOnly(staleBundle, stale); // submission passes its existing staleness result
+    await verifyAdvisoryOnly({ ...bundle, artifact_metadata: undefined });
+    const marker = bundle.external_analyzer_acquisition!;
+    await verifyAdvisoryOnly({ ...bundle, external_analyzer_acquisition: {
+      ...marker, tool_statuses: marker.tool_statuses.map(status => ({ ...status, version: "unrecorded" })),
+    } });
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("deriveAuditState keeps explicit pending follow-up tasks actionable after coverage is complete", () => {
