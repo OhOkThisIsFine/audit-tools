@@ -102,7 +102,17 @@ test.skipIf(process.platform !== "win32")("terminating only npm ends the exact g
       });
       ${idle};
     `);
-    npm = spawnHidden(process.execPath, [npmCli, "test", "--", "sample.test.ts"], { cwd: root, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    // This is an independent package invocation, not another command in the
+    // outer npm test lifecycle. On Windows, Node sorts case variants of env
+    // names and passes only the first. An inherited NPM_PACKAGE_JSON or
+    // NPM_LIFECYCLE_EVENT would beat the lowercase value nested npm supplies.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+      !/^npm_(?:package_|lifecycle_)/i.test(key) &&
+      key.toUpperCase() !== "AUDIT_TOOLS_ISOLATED_LOAD_DIAGNOSTIC",
+    ));
+    npm = spawnHidden(process.execPath, [npmCli, "test", "--", "sample.test.ts"], {
+      cwd: root, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+    });
     let npmOutput = "";
     npm.stdout!.on("data", chunk => { npmOutput += chunk; });
     npm.stderr!.on("data", chunk => { npmOutput += chunk; });
