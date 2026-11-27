@@ -369,7 +369,6 @@ describe("runClosePhase", () => {
     expect(next.closing_plan!.closing_action_preview).toBeUndefined();
     expect(existsSync(TEST_DIR)).toBe(false);
 
-    const { existsSync } = await import("node:fs");
     expect(existsSync(join(OUTPUT_DIR, "remediation-report.md"))).toBe(true);
     expect(existsSync(join(OUTPUT_DIR, "remediation-state.complete.json"))).toBe(true);
     const completeState = JSON.parse(
@@ -696,7 +695,6 @@ describe("runClosePhase", () => {
     expect(next.status).toBe("complete");
     expect(existsSync(TEST_DIR)).toBe(true);
 
-    const { existsSync, readFileSync } = await import("node:fs");
     const reportPath = join(OUTPUT_DIR, "remediation-report.md");
     expect(existsSync(reportPath)).toBe(true);
 
