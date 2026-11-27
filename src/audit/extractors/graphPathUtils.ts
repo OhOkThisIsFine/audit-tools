@@ -3,7 +3,9 @@ import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { compareCodeUnits, normalizeGraphPath } from "audit-tools/shared";
 
-// Retain the extractor entry point for the shared normalizer in `src/shared/graph/graphPaths.ts`.
+// `normalizeGraphPath` is single-sourced in `audit-tools/shared` (the shared
+// continuity scorer needs it too). Re-exported here so all 28 audit import sites
+// that read it from this module are unchanged.
 export { normalizeGraphPath };
 
 // No "" entry: `resolveCandidate` tries the bare path first.
