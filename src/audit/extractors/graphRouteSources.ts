@@ -6,7 +6,7 @@ import { pythonLogicalLines, splitPythonImportList, resolvePythonModuleSpecifier
 
 /** Search the original text so match indices stay in original UTF-16 offsets. */
 function closingTagOffset(content: string, name: string, cursor: number): number {
-  const closing = new RegExp("</" + name, "gi");
+  const closing = new RegExp("</" + name + "(?=[\\t\\n\\f\\r />])", "gi");
   closing.lastIndex = cursor;
   return closing.exec(content)?.index ?? -1;
 }

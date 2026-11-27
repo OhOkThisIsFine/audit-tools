@@ -380,6 +380,32 @@ for (const extension of ["vue", "svelte", "astro"]) {
   });
 }
 
+test("component raw-text elements close only on the exact tag name", () => {
+  const content = [
+    '<style>.before::after { content: "</stylesheet>"; }',
+    '<script>router.get("/not-a-script", handler)</script>',
+    '</StYlE >',
+    '<script>',
+    'const example = "</scripture>";',
+    'router.get("/real", handler)',
+    '</ScRiPt\t>',
+  ].join("\n");
+  expect(extractRegisteredRouteEvidence("src/App.vue", content, new Map()).routes).toEqual([
+    { method: "GET", path: "/real", handler: "src/App.vue" },
+  ]);
+});
+
+test("conventional routes ignore commented method exports", () => {
+  const file = "app/settings/route.ts";
+  const comments = "// export function GET() {}\n/* export const POST = handler; */\n";
+  expect(extractConventionalRouteEvidence(file, comments)).toEqual([
+    { path: "/settings", handler: file },
+  ]);
+  expect(extractConventionalRouteEvidence(file, comments + "export /* note */ async function PUT() {}")).toEqual([
+    { path: "/settings", handler: file, method: "PUT" },
+  ]);
+});
+
 test("component script offsets survive case-expanding Unicode before adjacent tags", () => {
   const content = "<div>" + "İ".repeat(24) + "</div>" +
     '<SCRIPT>router.get("/first", handler)</SCRIPT>' +

@@ -600,7 +600,7 @@ export function extractConventionalRouteEvidence(
   const routes: RouteEdge[] = [];
   if (content) {
     ROUTE_METHOD_EXPORT_PATTERN.lastIndex = 0;
-    for (const match of content.matchAll(ROUTE_METHOD_EXPORT_PATTERN)) {
+    for (const match of maskCommentSpans(content, fromPath).matchAll(ROUTE_METHOD_EXPORT_PATTERN)) {
       const method = match[1];
       if (method) {
         routes.push({
