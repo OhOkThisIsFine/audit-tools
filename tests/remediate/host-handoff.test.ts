@@ -1144,80 +1144,25 @@ describe("malformed runtime plans cannot replace reviewed authority", () => {
   });
 });
 
-describe("the remediate ingest is pure with respect to persisted state", () => {
-  it("returns a new state, leaves the caller's object untouched, and writes no state.json", async () => {
+describe("missing and rejected results are distinct, machine-readable statuses", () => {
+  it("reports an unreturned item as pending and a malformed result as rejected", async () => {
     const { boundary, root, artifactsDir, runId, state, handoff } =
       await prepareFixture();
-    const first = handoff.workload.work_items[0]!;
-    const firstPath = expectContained(root, first.result_path, "first result");
-    await mkdir(resolve(firstPath, ".."), { recursive: true });
-    await writeFile(firstPath, JSON.stringify(await validResult(root, runId, first)), "utf8");
-    const before = JSON.parse(JSON.stringify(state)) as CurrentState;
-
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
-    );
-    expect(summary.state.items[first.id]!.status).toBe("resolved");
-    expect(summary.state).not.toBe(state);
-    // Deep-equal against the pre-call snapshot: this fails the moment the live
-    // object is edited in place instead of a structuredClone.
-    expect(state).toEqual(before);
-    // Persistence is the caller's. The module must not have written state.json.
-    expect(existsSync(join(artifactsDir, "state.json"))).toBe(false);
-  });
-
-  it("reports a zero-accept ingest as unfinished, not as completion and not as an error", async () => {
-    const { boundary, root, artifactsDir, runId, state, handoff } =
-      await prepareFixture();
+    const [first, second] = handoff.workload.work_items;
+    const path = expectContained(root, first!.result_path, "first result");
+    await writeFile(path, "{ not json", "utf8");
     const summary = requireIngested(
       await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
     );
     expect(summary.accepted_count).toBe(0);
     expect(summary.state_changed).toBe(false);
-    expect([...summary.pending_work_item_ids].sort()).toEqual(
-      handoff.workload.work_items.map((item) => item.id).sort(),
-    );
-    expect(summary.issues.length).toBe(handoff.workload.work_items.length);
-    for (const issue of summary.issues) {
-      expect(issue.code).toBe("submission_missing");
-      expect(issue.work_item_id).toBeTruthy();
-      expect(issue.result_path).toBeTruthy();
-    }
-  });
-});
-
-// The step prompt listed MISSING results in the same section, with the same
-// shape, as rejections — so a host parser had to special-case the message text
-// "no result file exists", and the two situations whose remedies are OPPOSITE
-// (patience vs. a repair) read identically. The split is on the CODE.
-describe("missing and rejected results are distinct, machine-readable statuses", () => {
-  it("classifies an item with nothing at its bound path as awaiting_result, not as a rejection", async () => {
-    const { boundary, root, artifactsDir, runId, state, handoff } =
-      await prepareFixture();
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
-    );
-    expect(summary.work_item_outcomes.size).toBe(handoff.workload.work_items.length);
-    for (const item of handoff.workload.work_items) {
-      expect(summary.work_item_outcomes.get(item.id)).toBe("awaiting_result");
-    }
-  });
-
-  it("classifies a written-but-refused item as rejected", async () => {
-    const { boundary, root, artifactsDir, runId, state, handoff } =
-      await prepareFixture();
-    const first = handoff.workload.work_items[0]!;
-    const firstPath = expectContained(root, first.result_path, "first result");
-    await mkdir(resolve(firstPath, ".."), { recursive: true });
-    await writeFile(firstPath, "{ not json", "utf8");
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
-    );
-    expect(summary.work_item_outcomes.get(first.id)).toBe("rejected");
-    // The distinction is on the CODE, so a reader never parses the message.
-    const issue = summary.issues.find((entry) => entry.work_item_id === first.id);
-    expect(issue?.code).toBe("submission_malformed");
-    expect(issue?.code).not.toBe("submission_missing");
+    expect([...summary.pending_work_item_ids].sort()).toEqual([first!.id, second!.id].sort());
+    expect(summary.work_item_outcomes.get(first!.id)).toBe("rejected");
+    expect(summary.work_item_outcomes.get(second!.id)).toBe("awaiting_result");
+    expect(summary.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ work_item_id: first!.id, code: "submission_malformed" }),
+      expect.objectContaining({ work_item_id: second!.id, code: "submission_missing", result_path: expect.any(String) }),
+    ]));
   });
 
   // The measured friction, verbatim: "a host worker landed sound edits but wrote
@@ -1225,9 +1170,10 @@ describe("missing and rejected results are distinct, machine-readable statuses",
   // hand. A work item whose commit exists but whose result is missing should
   // surface as explicit partial progress, never disappear as null."
   it("surfaces a LANDED commit with no result as missing_result_with_commit, not as absent progress", async () => {
-    const { boundary, root, artifactsDir, runId, state, handoff, baselineCommit } =
+    const { boundary, root, artifactsDir, runId, state, handoff } =
       await prepareFixture();
     const first = handoff.workload.work_items[0]!;
+    const before = structuredClone(state);
     // Land the commit the item asked for, exactly as an accepted run would —
     // then remove the result file, which is the state the friction describes.
     const landed = await landCommit(root, first.allowed_files[0]!);
@@ -1242,6 +1188,11 @@ describe("missing and rejected results are distinct, machine-readable statuses",
       await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
     );
     expect(accepting.accepted_count).toBe(1);
+    expect(accepting.completed_work_item_ids).toContain(first.id);
+    expect(accepting.issues.filter(issue => issue.work_item_id === first.id)).toEqual([]);
+    expect(accepting.state).not.toBe(state);
+    expect(state).toEqual(before);
+    expect(existsSync(join(artifactsDir, "state.json"))).toBe(false);
     const findingId = first.id;
     expect(accepting.state.items[findingId]!.host_landed_commit).toBe(landed);
     expect(accepting.state.items[findingId]!.status).not.toBe("pending");
@@ -1269,22 +1220,6 @@ describe("missing and rejected results are distinct, machine-readable statuses",
     // different facts and must not be conflated in either direction.
     const issue = missing.issues.find((entry) => entry.work_item_id === first.id);
     expect(issue?.code).toBe("submission_missing");
-    expect(baselineCommit).toBeTruthy();
-  });
-
-  it("the same item with NO landed commit stays awaiting_result — the commit is what makes it progress", async () => {
-    // The discriminating half: without it, `missing_result_with_commit` could be
-    // returned for anything missing and the distinction would mean nothing.
-    const { boundary, root, artifactsDir, runId, state, handoff } =
-      await prepareFixture();
-    const first = handoff.workload.work_items[0]!;
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
-    );
-    expect(summary.work_item_outcomes.get(first.id)).toBe("awaiting_result");
-    expect(summary.work_item_outcomes.get(first.id)).not.toBe(
-      "missing_result_with_commit",
-    );
   });
 });
 
@@ -1354,55 +1289,33 @@ describe("an empty scan is not a pass", () => {
     return validateArtifacts(artifactsDir, root);
   }
 
-  it("reports what it examined, so a clean run is distinguishable from an unscanned one", async () => {
+  it("distinguishes empty, valid, malformed and skipped observations", async () => {
     const { root, artifactsDir, runId, handoff } = await prepareFixture();
-    const first = handoff.workload.work_items[0]!;
-    const firstPath = expectContained(root, first.result_path, "first result");
-    await mkdir(resolve(firstPath, ".."), { recursive: true });
-    await writeFile(firstPath, JSON.stringify(await validResult(root, runId, first)), "utf8");
-
-    const result = await validate(artifactsDir, root);
-    // The discovery filter joins on the filenames submissionIdentity MINTS: a
-    // result written at the bound path is found by the scan that validates it.
-    // Both previous filters matched zero files a live run produces, so this
-    // count was structurally 0 and `ok` meant nothing.
-    expect(result.scan.submissions_discovered).toBe(1);
-    expect(result.scan.submissions_validated).toBe(1);
-    expect(
-      result.issues.filter((issue) => /host submission/iu.test(issue)),
-      "a well-formed submission raises no submission issue",
-    ).toEqual([]);
-  });
-
-  it("flags a corrupt submission that sits at the bound path", async () => {
-    const { root, artifactsDir, runId, handoff } = await prepareFixture();
-    const first = handoff.workload.work_items[0]!;
-    const firstPath = expectContained(root, first.result_path, "first result");
-    await mkdir(resolve(firstPath, ".."), { recursive: true });
-    const { contract_version: _dropped, ...corrupt } = await validResult(root, runId, first);
-    await writeFile(firstPath, JSON.stringify(corrupt), "utf8");
-
-    const result = await validate(artifactsDir, root);
-    expect(result.scan.submissions_discovered).toBe(1);
-    expect(result.status).toBe("error");
-    expect(result.issues.join("\n")).toMatch(/unsupported contract_version/iu);
-  });
-
-  it("distinguishes a genuinely empty run from one whose submissions went unscanned", async () => {
-    const { root, artifactsDir } = await prepareFixture();
-    // A prepared run with no submissions yet: nothing discovered, and that is
-    // reported as zero rather than silently read as a clean pass.
     const empty = await validate(artifactsDir, root);
-    expect(empty.scan.submissions_discovered).toBe(0);
-    expect(empty.scan.submissions_validated).toBe(0);
-    expect(
-      empty.issues.filter((issue) => /no host submissions were discovered/iu.test(issue)),
-      "nothing on disk is not a broken join",
-    ).toEqual([]);
-    // Preparation has a real canonical plan/source pair, so its single
-    // executable-plan gate ran even though no host submission exists yet.
-    expect(empty.scan.gates_evaluated).toBe(1);
-    expect(empty.scan.gates_skipped).toBe(0);
+    expect(empty.scan).toMatchObject({
+      submissions_discovered: 0, submissions_validated: 0, gates_evaluated: 1, gates_skipped: 0,
+    });
+    expect(empty.issues.join("\n")).not.toMatch(/no host submissions were discovered/iu);
+
+    const first = handoff.workload.work_items[0]!;
+    const path = expectContained(root, first.result_path, "first result");
+    const answer = await validResult(root, runId, first);
+    await writeFile(path, JSON.stringify(answer), "utf8");
+    const valid = await validate(artifactsDir, root);
+    expect(valid.scan).toMatchObject({ submissions_discovered: 1, submissions_validated: 1 });
+    expect(valid.issues.join("\n")).not.toMatch(/host submission/iu);
+
+    const { contract_version: _dropped, ...corrupt } = answer;
+    await writeFile(path, JSON.stringify(corrupt), "utf8");
+    const invalid = await validate(artifactsDir, root);
+    expect(invalid.scan.submissions_discovered).toBe(1);
+    expect(invalid.status).toBe("error");
+    expect(invalid.issues.join("\n")).toMatch(/unsupported contract_version/iu);
+
+    const { executionPlanPaths } = await import("../../src/remediate/contractPipeline/executionPlan.js");
+    await rm(executionPlanPaths(artifactsDir).source);
+    const skipped = await validate(artifactsDir, root);
+    expect(skipped.scan).toMatchObject({ gates_evaluated: 0, gates_skipped: 1 });
   });
 
   /**
@@ -1459,22 +1372,38 @@ describe("an empty scan is not a pass", () => {
     };
   }
 
-  it("does not call an ACCEPTED submission stale once its block leaves the frontier", async () => {
-    const { root, artifactsDir } = await acceptThenReprepare();
+  it("validates accepted history, an unissued submission, and the next run on one repository", async () => {
+    const { root, artifactsDir, runId, submissionDir, accepted } = await acceptThenReprepare();
+    const history = await validate(artifactsDir, root);
+    expect(history.scan.submissions_discovered).toBe(2);
+    expect(history.issues.join("\n")).not.toMatch(/Stale host submission/u);
 
-    const result = await validate(artifactsDir, root);
-    // The live workload names only block-dependent now. Joining on it alone
-    // reported BOTH accepted submissions as stale — a 100% false-positive rate
-    // for every run that got past its first dependency level.
-    expect(result.scan.submissions_discovered).toBe(2);
-    expect(
-      result.issues.filter((issue) => /Stale host submission/u.test(issue)),
-      "an accepted submission is recorded history, not a stale file",
-    ).toEqual([]);
-  });
+    const item = accepted.state.plan.units[0]!;
+    // A well-formed result for a prompt no workload ever issued: the unknown
+    // digest is what makes it reference nothing.
+    const unissued: HostWorkItem = {
+      id: item.id,
+      source_finding_ids: [...item.source_finding_ids],
+      obligation_ids: [...item.requirement_ids],
+      allowed_files: [...item.allowed_files],
+      baseline_commit: BASELINE_COMMIT,
+      prompt: { sha256: "0".repeat(64), text: "" },
+      required_tests: [...(item.required_tests ?? [])],
+      result_path: "",
+      token_estimate: 1800,
+    };
+    const orphanPath = join(submissionDir, `${"a".repeat(64)}.json`);
+    await writeFile(
+      orphanPath,
+      JSON.stringify(resultShape(runId, unissued, AFTER_COMMIT)),
+      "utf8",
+    );
 
-  it("does not re-fabricate stale flags for a PREVIOUS run's accepted submissions", async () => {
-    const { root, artifactsDir } = await acceptThenReprepare();
+    const withOrphan = await validate(artifactsDir, root);
+    expect(withOrphan.scan.submissions_discovered).toBe(3);
+    expect(withOrphan.issues.join("\n")).toMatch(/Stale host submission/u);
+    await rm(orphanPath);
+
     // Nothing deletes a finished run's directory, so run 2 in the same repo finds
     // run 1's accepted submissions still on disk — and every record a stale check
     // can join against (state.json, the ledger) describes run 2 only. Scanning
@@ -1510,48 +1439,6 @@ describe("an empty scan is not a pass", () => {
     // Run 2 has written no submissions of its own, and run 1's are out of scope.
     expect(result.scan.submissions_discovered).toBe(0);
     expect(result.status).toBe("ok");
-  });
-
-  it("counts a gate that could not run as skipped, not as a silent pass", async () => {
-    const { root, artifactsDir } = await prepareFixture();
-    const { executionPlanPaths } = await import("../../src/remediate/contractPipeline/executionPlan.js");
-    await rm(executionPlanPaths(artifactsDir).source);
-    const result = await validate(artifactsDir, root);
-    expect(result.scan.gates_evaluated).toBe(0);
-    expect(result.scan.gates_skipped).toBe(1);
-  });
-
-  it("flags a submission that no host workload references", async () => {
-    // Planted INTO the accept-then-reprepare tree, not into a bare prepared run:
-    // the widened join must still refuse a file that matches no live work item
-    // AND no recorded acceptance. Against the bare fixture this passed for the
-    // wrong reason — nothing had been accepted, so the new leg contributed an
-    // empty set and could not have been exercised at all.
-    const { root, artifactsDir, runId, submissionDir, accepted } =
-      await acceptThenReprepare();
-    const item = accepted.state.plan.units[0]!;
-    // A well-formed result for a prompt no workload ever issued: the unknown
-    // digest is what makes it reference nothing.
-    const unissued: HostWorkItem = {
-      id: item.id,
-      source_finding_ids: [...item.source_finding_ids],
-      obligation_ids: [...item.requirement_ids],
-      allowed_files: [...item.allowed_files],
-      baseline_commit: BASELINE_COMMIT,
-      prompt: { sha256: "0".repeat(64), text: "" },
-      required_tests: [...(item.required_tests ?? [])],
-      result_path: "",
-      token_estimate: 1800,
-    };
-    await writeFile(
-      join(submissionDir, `${"a".repeat(64)}.json`),
-      JSON.stringify(resultShape(runId, unissued, AFTER_COMMIT)),
-      "utf8",
-    );
-
-    const result = await validate(artifactsDir, root);
-    expect(result.scan.submissions_discovered).toBe(3);
-    expect(result.issues.join("\n")).toMatch(/Stale host submission/u);
   });
 });
 
@@ -1838,17 +1725,6 @@ describe("landing gates", () => {
       // gate that must not run here must not appear there either.
       expect(item.prompt.text).not.toContain(JSON.stringify(gate));
     }
-  });
-
-  it("emits no landing-gate command block in the item prompt, and points at the close instead", async () => {
-    // Red under the inverse of the prompt half: restore the removed block that
-    // enumerated the discovered gates and told the host to run each of them on
-    // this item's landed tree.
-    const { root, boundary, baselineCommit } = await rootWithScripts({
-      "check:lint": "eslint .",
-    });
-    const state = currentState();
-    const item = await preparedBlockA(root, boundary, baselineCommit, state);
     // ONE line, naming the boundary that runs them.
     expect(item.prompt.text).toMatch(
       /Do not run the landing gates\. The close phase runs them once, on the merged tree\./i,
@@ -1949,10 +1825,12 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
   // file-level `resultShape`, `splitPrompt` and `TEMPLATE_LEAD`.
 
   it("ends each worker prompt with a template whose identity values the tool filled in", async () => {
-    const { runId, handoff } = await prepareFixture();
+    const { root, artifactsDir, runId, handoff } = await prepareFixture();
     expect(handoff.workload.contract_version).toBe(
       "remediation-host-workload/v2",
     );
+    const normalize = (path: string) => resolve(path).replaceAll("\\", "/").replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
+    const workerRoot = normalize(root);
     for (const item of handoff.workload.work_items) {
       const { body, template } = splitPrompt(item);
       // The digest covers the text above the template, exactly.
@@ -1969,17 +1847,6 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
       });
       expect(item.prompt.text).toContain(item.result_path);
       expect(item.prompt.text).not.toMatch(/frontier|later dependency level|digest/iu);
-    }
-  });
-
-  it("states one delivery rule: the submit_result tool first, a file-write tool without it, never a shell", async () => {
-    // Owner decision 2026-11-07 (the remediate twin of audit line 2): a result
-    // written through a shell can lose a backslash, and the tool checks a
-    // submitted result before it writes the bound file.
-    const { root, artifactsDir, handoff } = await prepareFixture();
-    const normalize = (path: string) => resolve(path).replaceAll("\\", "/").replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
-    const workerRoot = normalize(root);
-    for (const item of handoff.workload.work_items) {
       const text = item.prompt.text;
       expect(text).toContain(
         `When HEAD contains your commit, submit this JSON with the submit_result tool (root: ${workerRoot}, artifacts_dir: ${normalize(artifactsDir)}, work_item_id: ${item.id}). ` +
@@ -1988,22 +1855,6 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
       expect(text).toContain("If no edit should land, submit this JSON instead.");
       expect(text).not.toContain("write this JSON to");
     }
-  });
-
-  it("accepts a slim result for a real landed commit", async () => {
-    const { boundary, root, artifactsDir, runId, state, handoff } = await prepareFixture();
-    const item = handoff.workload.work_items[0]!;
-    const landed = await landCommit(root, item.allowed_files[0]!);
-    await writeFile(
-      expectContained(root, item.result_path, "result"),
-      JSON.stringify(resultShape(runId, item, landed)),
-      "utf8",
-    );
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
-    );
-    expect(summary.issues.filter((issue) => issue.work_item_id === item.id)).toEqual([]);
-    expect(summary.completed_work_item_ids).toContain(item.id);
   });
 
   it("refuses the old fields, a host-chosen result_id, the baseline as landed_commit, and an empty commit", async () => {
