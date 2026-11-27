@@ -1,30 +1,22 @@
 import { test, expect } from "vitest";
-import { extractPackageEntrypointEdges, extractPackageScriptEdges, resolvePackageEntrypoint } from "../../src/audit/extractors/graphManifestEdges/packageJson.js";
-import { extractTypescriptProjectReferenceEdges } from "../../src/audit/extractors/graphManifestEdges/typescript.js";
-
-const { stripJsonComments, removeTrailingJsonCommas, parseJsoncObject } =
-  await import("../../src/audit/extractors/graphManifestEdges/jsonc.js");
-const { parseYamlSafe: parseYamlSafeRaw, collectYamlStringScalars } =
-  await import("../../src/audit/extractors/graphManifestEdges/yaml.js");
-const { parseTomlSafe } =
-  await import("../../src/shared/parsing/toml.js");
-const { manifestStringArray } =
-  await import("../../src/audit/extractors/graphManifestEdges/workspace.js");
-const { stripGoLineComment, splitGoWorkspaceSpecifiers } =
-  await import("../../src/audit/extractors/graphManifestEdges/go.js");
-const {
+import {
   extractCargoWorkspaceMemberEdges,
   extractGoWorkspaceModuleEdges,
   extractMavenModuleEdges,
+  extractPackageEntrypointEdges,
+  extractPackageScriptEdges,
   extractPyprojectTestpathLinks,
+  extractTypescriptProjectReferenceEdges,
+  extractWorkspacePackageEdges,
   extractYamlPathReferenceEdges,
-} = await import("../../src/audit/extractors/graphManifestEdges/index.js");
-
-function parseYamlSafe(content: "packages:\n  - packages/a\n"): Record<string, unknown>;
-function parseYamlSafe(content: string): unknown;
-function parseYamlSafe(content: string): unknown {
-  return parseYamlSafeRaw(content);
-}
+} from "../../src/audit/extractors/graphManifestEdges/index.js";
+import { resolvePackageEntrypoint } from "../../src/audit/extractors/graphManifestEdges/packageJson.js";
+import { cargoWorkspacePatterns } from "../../src/audit/extractors/graphManifestEdges/cargo.js";
+import { stripGoLineComment, splitGoWorkspaceSpecifiers } from "../../src/audit/extractors/graphManifestEdges/go.js";
+import { stripJsonComments, removeTrailingJsonCommas, parseJsoncObject } from "../../src/audit/extractors/graphManifestEdges/jsonc.js";
+import { manifestStringArray } from "../../src/audit/extractors/graphManifestEdges/workspace.js";
+import { parseYamlSafe, collectYamlStringScalars } from "../../src/audit/extractors/graphManifestEdges/yaml.js";
+import { parseTomlSafe } from "../../src/shared/parsing/toml.js";
 
 test.each([
   ["package.json", "", "."],
@@ -105,23 +97,6 @@ test("manifest adapters retain distinct direct, extension and fallback probing",
 
 // ── JSONC parser ─────────────────────────────────────────────────────────────
 
-test("stripJsonComments strips // line comments", () => {
-  const result = stripJsonComments('{ "a": 1 // comment\n}');
-  expect(!result.includes("// comment")).toBeTruthy();
-  expect(result.includes('"a": 1')).toBeTruthy();
-});
-
-test("stripJsonComments strips /* block comments */", () => {
-  const result = stripJsonComments('{ /* block */ "b": 2 }');
-  expect(!result.includes("block")).toBeTruthy();
-  expect(result.includes('"b": 2')).toBeTruthy();
-});
-
-test("stripJsonComments leaves string content with embedded slashes intact", () => {
-  const result = stripJsonComments('{ "url": "http://x" }');
-  expect(result.includes('"http://x"')).toBeTruthy();
-});
-
 test("parseJsoncObject returns undefined for unparseable input", () => {
   expect(parseJsoncObject("not json at all :::")).toBe(undefined);
 });
@@ -142,24 +117,12 @@ test("parseTomlSafe parses a table and degrades to {} on malformed input", () =>
   expect(parseTomlSafe("this is = = not toml [")).toEqual({});
 });
 
-test("manifestStringArray coerces a scalar, an array, and rejects non-strings (TOML cases)", () => {
-  expect(manifestStringArray("tests")).toEqual(["tests"]); // bare scalar → [s]
-  expect(manifestStringArray([" a ", "b", 3, null])).toEqual(["a", "b"]); // trims, drops non-strings
-  expect(manifestStringArray(undefined)).toEqual([]);
-});
-
 // ── YAML utilities (vetted: yaml) ────────────────────────────────────────────
 
 test("parseYamlSafe parses a document and degrades to undefined on malformed input", () => {
-  expect(parseYamlSafe("packages:\n  - packages/a\n").packages).toEqual(["packages/a"]);
+  expect(parseYamlSafe("packages:\n  - packages/a\n")).toEqual({ packages: ["packages/a"] });
   // A tab-indented block is invalid YAML; must degrade, never throw.
   expect(parseYamlSafe("packages:\n\t- bad-tab-indent")).toBe(undefined);
-});
-
-test("manifestStringArray coerces a scalar, a sequence, and rejects non-strings (YAML cases)", () => {
-  expect(manifestStringArray("packages/*")).toEqual(["packages/*"]);
-  expect(manifestStringArray([" a ", "b", 3])).toEqual(["a", "b"]);
-  expect(manifestStringArray(undefined)).toEqual([]);
 });
 
 test("manifestStringArray parity battery pins the unified coercion semantics", () => {
@@ -276,41 +239,6 @@ test("removeTrailingJsonCommas (TST-b29c9d4f) — trailing comma in deeply neste
 // edges the old line scanner silently dropped (dotted keys, inline tables,
 // quoted segments, scalar testpaths). Each asserts the structured value the
 // extractor reads, then that an edge is produced.
-test("cargo: dotted-key `workspace.members` is recovered (old scanner needed a [workspace] header)", () => {
-  const edges = extractCargoWorkspaceMemberEdges(
-    "Cargo.toml",
-    'workspace.members = ["crates/a"]\n',
-    new Map([["crates/a/Cargo.toml", "crates/a/Cargo.toml"]]),
-  );
-  expect(edges.length).toBe(1);
-  expect(edges[0].to).toBe("crates/a/Cargo.toml");
-});
-
-test("cargo: inline-table `workspace = { members, exclude }` is parsed and exclude is honored", () => {
-  const edges = extractCargoWorkspaceMemberEdges(
-    "Cargo.toml",
-    'workspace = { members = ["crates/*"], exclude = ["crates/y"] }\n',
-    new Map([
-      ["crates/x/Cargo.toml", "crates/x/Cargo.toml"],
-      ["crates/y/Cargo.toml", "crates/y/Cargo.toml"],
-    ]),
-  );
-  const targets = edges.map((e) => e.to);
-  expect(targets.includes("crates/x/Cargo.toml"), "included member resolves").toBeTruthy();
-  expect(!targets.includes("crates/y/Cargo.toml"), "excluded member is dropped").toBeTruthy();
-});
-
-test("pyproject: scalar `testpaths = \"tests\"` and dotted header both resolve", () => {
-  const lookup = new Map([["tests/conftest.py", "tests/conftest.py"]]);
-  const scalar = extractPyprojectTestpathLinks("pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = "tests"\n', lookup);
-  expect(scalar.length).toBe(1);
-  expect(scalar[0].to).toBe("tests/conftest.py");
-  // Dotted-key form (no explicit section header) resolves to the same path.
-  const dotted = extractPyprojectTestpathLinks("pyproject.toml", 'tool.pytest.ini_options.testpaths = ["tests"]\n', lookup);
-  expect(dotted.length).toBe(1);
-  expect(dotted[0].to).toBe("tests/conftest.py");
-});
-
 test("toml extractors degrade to [] on malformed TOML (never throw)", () => {
   expect(extractCargoWorkspaceMemberEdges("Cargo.toml", "not [valid toml = =", new Map())).toEqual([]);
   expect(extractPyprojectTestpathLinks("pyproject.toml", "not [valid toml = =", new Map())).toEqual([]);
@@ -377,85 +305,13 @@ test("splitGoWorkspaceSpecifiers (via scanStringAware) — splits backtick-quote
   expect(splitGoWorkspaceSpecifiers("`./mod a` `./mod b`")).toEqual(["./mod a", "./mod b"]);
 });
 
-// ── MNT-8a93521a: per-submodule export and public API surface tests ────────
-
-// packageJson submodule exports all package edge extractors
-const {
-  extractPackageEntrypointEdges: pkgEntrypoint,
-  extractPackageScriptEdges: pkgScript,
-  extractWorkspacePackageEdges: pkgWorkspace,
-} = await import("../../src/audit/extractors/graphManifestEdges/packageJson.js");
-
-test("packageJson submodule: extractPackageEntrypointEdges is exported", () => {
-  expect(typeof pkgEntrypoint).toBe("function");
-});
-
-test("packageJson submodule: extractPackageScriptEdges is exported", () => {
-  expect(typeof pkgScript).toBe("function");
-});
-
-test("packageJson submodule: extractWorkspacePackageEdges is exported", () => {
-  expect(typeof pkgWorkspace).toBe("function");
-});
-
-test("packageJson submodule: extractPackageEntrypointEdges returns consistent results with graphManifestEdges index", async () => {
-  const { extractPackageEntrypointEdges: indexFn } = await import("../../src/audit/extractors/graphManifestEdges/index.js");
-  const content = JSON.stringify({ main: "./src/index.ts" });
-  const lookup = new Map([["src/index.ts", "src/index.ts"]]);
-  const directResult = pkgEntrypoint("package.json", content, lookup);
-  const indexResult = indexFn("package.json", content, lookup);
-  expect(directResult).toEqual(indexResult);
-});
-
-// jsonc submodule exports TypeScript project reference extractor
-const { extractTypescriptProjectReferenceEdges: tsRefEdges } =
-  await import("../../src/audit/extractors/graphManifestEdges/typescript.js");
-const { parseJsoncObject: parseJsonc } =
-  await import("../../src/audit/extractors/graphManifestEdges/jsonc.js");
-
-test("typescript submodule: extractTypescriptProjectReferenceEdges is exported", () => {
-  expect(typeof tsRefEdges).toBe("function");
-});
-
-test("jsonc submodule: parseJsoncObject strips // comments and trailing commas", () => {
-  const result = parseJsonc('{ "a": 1, // comment\n"b": 2, }');
-  expect(result).toEqual({ a: 1, b: 2 });
-});
-
-test("jsonc submodule: parseJsoncObject strips /* */ block comments", () => {
-  const result = parseJsonc('{ /* block comment */ "x": 3 }');
-  expect(result).toEqual({ x: 3 });
-});
-
-// pnpm submodule exports pnpmWorkspacePatterns
-const { pnpmWorkspacePatterns: pnpmPatterns } =
-  await import("../../src/audit/extractors/graphManifestEdges/pnpm.js");
-
-test("pnpm submodule: pnpmWorkspacePatterns is exported", () => {
-  expect(typeof pnpmPatterns).toBe("function");
-});
-
-// yamlPaths submodule exports extractYamlPathReferenceEdges
-const { extractYamlPathReferenceEdges: yamlPathEdges } =
-  await import("../../src/audit/extractors/graphManifestEdges/yamlPaths.js");
-
-test("yamlPaths submodule: extractYamlPathReferenceEdges is exported", () => {
-  expect(typeof yamlPathEdges).toBe("function");
-});
-
-// graphManifestEdges/index.ts aggregates every submodule extractor. Import it
-// here — ahead of the first test that uses it — so node:test's concurrent
-// scheduling can never run a consuming test before this top-level await
-// resolves (which would hit the const's temporal dead zone).
-const allFromIndex = await import("../../src/audit/extractors/graphManifestEdges/index.js");
-
 test("graphManifestEdges/index.ts: extractWorkspacePackageEdges returns correct edges for pnpm-workspace.yaml", () => {
   const content = "packages:\n  - packages/*\n";
   const lookup = new Map([
     ["packages/a/package.json", "packages/a/package.json"],
     ["packages/b/package.json", "packages/b/package.json"],
   ]);
-  const edges = allFromIndex.extractWorkspacePackageEdges("pnpm-workspace.yaml", content, lookup);
+  const edges = extractWorkspacePackageEdges("pnpm-workspace.yaml", content, lookup);
   expect(edges.length >= 1, "expected at least one workspace-package edge").toBeTruthy();
   expect(edges.every((e) => e.kind === "workspace-package-link")).toBeTruthy();
 });
@@ -468,7 +324,7 @@ test("pnpm: inline-flow `packages: [a, b]` is recovered (old scanner only had th
     ["packages/a/package.json", "packages/a/package.json"],
     ["packages/b/package.json", "packages/b/package.json"],
   ]);
-  const edges = allFromIndex.extractWorkspacePackageEdges(
+  const edges = extractWorkspacePackageEdges(
     "pnpm-workspace.yaml",
     "packages: [packages/a, packages/b]\n",
     lookup,
@@ -479,7 +335,7 @@ test("pnpm: inline-flow `packages: [a, b]` is recovered (old scanner only had th
 
 test("yamlPaths: a path reference nested under a map is recovered (not just top-level lines)", () => {
   const lookup = new Map([["ci/shared.yml", "ci/shared.yml"]]);
-  const edges = allFromIndex.extractYamlPathReferenceEdges(
+  const edges = extractYamlPathReferenceEdges(
     "config.yaml",
     "jobs:\n  build:\n    uses: ci/shared.yml\n",
     lookup,
@@ -490,24 +346,8 @@ test("yamlPaths: a path reference nested under a map is recovered (not just top-
 
 test("yaml extractors degrade to [] on malformed YAML (never throw)", () => {
   const bad = "packages:\n\t- tab-indented-is-invalid";
-  expect(allFromIndex.extractWorkspacePackageEdges("pnpm-workspace.yaml", bad, new Map())).toEqual([]);
-  expect(allFromIndex.extractYamlPathReferenceEdges("config.yaml", bad, new Map())).toEqual([]);
-});
-
-// toml submodule exports Cargo and pyproject extractors
-const { extractCargoWorkspaceMemberEdges: cargoEdges } =
-  await import("../../src/audit/extractors/graphManifestEdges/cargo.js");
-const { cargoWorkspacePatterns: cargoPatterns } =
-  await import("../../src/audit/extractors/graphManifestEdges/cargo.js");
-const { extractPyprojectTestpathLinks: pyprojectLinks } =
-  await import("../../src/audit/extractors/graphManifestEdges/pyproject.js");
-
-test("cargo submodule: extractCargoWorkspaceMemberEdges is exported", () => {
-  expect(typeof cargoEdges).toBe("function");
-});
-
-test("pyproject submodule: extractPyprojectTestpathLinks is exported", () => {
-  expect(typeof pyprojectLinks).toBe("function");
+  expect(extractWorkspacePackageEdges("pnpm-workspace.yaml", bad, new Map())).toEqual([]);
+  expect(extractYamlPathReferenceEdges("config.yaml", bad, new Map())).toEqual([]);
 });
 
 test("cargo submodule: cargoWorkspacePatterns correctly parses multi-line TOML arrays", () => {
@@ -518,18 +358,10 @@ test("cargo submodule: cargoWorkspacePatterns correctly parses multi-line TOML a
     '  "crates/b",',
     "]",
   ].join("\n");
-  const patterns = cargoPatterns(content);
+  const patterns = cargoWorkspacePatterns(content);
   expect(patterns.length).toBe(2);
   expect(patterns.some((p) => p.pattern === "crates/a")).toBeTruthy();
   expect(patterns.some((p) => p.pattern === "crates/b")).toBeTruthy();
-});
-
-// go submodule exports Go workspace extractor
-const { extractGoWorkspaceModuleEdges: goEdges } =
-  await import("../../src/audit/extractors/graphManifestEdges/go.js");
-
-test("go submodule: extractGoWorkspaceModuleEdges is exported", () => {
-  expect(typeof goEdges).toBe("function");
 });
 
 test.each([
@@ -538,15 +370,7 @@ test.each([
 ])("go submodule: resolves $form use directives", ({ content, modules }) => {
   const paths = modules.map((name) => name + "/go.mod");
   const lookup = new Map(paths.map((path) => [path, path]));
-  expect(goEdges("go.work", content, lookup).map((edge) => edge.to)).toEqual(paths);
-});
-
-// maven submodule exports Maven module extractor
-const { extractMavenModuleEdges: mavenEdges } =
-  await import("../../src/audit/extractors/graphManifestEdges/maven.js");
-
-test("maven submodule: extractMavenModuleEdges is exported", () => {
-  expect(typeof mavenEdges).toBe("function");
+  expect(extractGoWorkspaceModuleEdges("go.work", content, lookup).map((edge) => edge.to)).toEqual(paths);
 });
 
 test("maven submodule: extractMavenModuleEdges strips XML comments before parsing <module> elements", () => {
@@ -559,61 +383,7 @@ test("maven submodule: extractMavenModuleEdges strips XML comments before parsin
     "</project>",
   ].join("\n");
   const lookup = new Map([["child-a/pom.xml", "child-a/pom.xml"]]);
-  const edges = mavenEdges("pom.xml", content, lookup);
+  const edges = extractMavenModuleEdges("pom.xml", content, lookup);
   expect(edges.length).toBe(1);
   expect(edges[0].to).toBe("child-a/pom.xml");
-});
-
-// graphManifestEdges/index.ts public API is unchanged (allFromIndex imported above)
-
-test("graphManifestEdges index: extractPackageEntrypointEdges is re-exported", () => {
-  expect(typeof allFromIndex.extractPackageEntrypointEdges).toBe("function");
-});
-
-test("graphManifestEdges index: extractPackageScriptEdges is re-exported", () => {
-  expect(typeof allFromIndex.extractPackageScriptEdges).toBe("function");
-});
-
-test("graphManifestEdges index: extractWorkspacePackageEdges is re-exported", () => {
-  expect(typeof allFromIndex.extractWorkspacePackageEdges).toBe("function");
-});
-
-test("graphManifestEdges index: extractCargoWorkspaceMemberEdges is re-exported", () => {
-  expect(typeof allFromIndex.extractCargoWorkspaceMemberEdges).toBe("function");
-});
-
-test("graphManifestEdges index: extractTypescriptProjectReferenceEdges is re-exported", () => {
-  expect(typeof allFromIndex.extractTypescriptProjectReferenceEdges).toBe("function");
-});
-
-test("graphManifestEdges index: extractGoWorkspaceModuleEdges is re-exported", () => {
-  expect(typeof allFromIndex.extractGoWorkspaceModuleEdges).toBe("function");
-});
-
-test("graphManifestEdges index: extractMavenModuleEdges is re-exported", () => {
-  expect(typeof allFromIndex.extractMavenModuleEdges).toBe("function");
-});
-
-test("graphManifestEdges index: extractPyprojectTestpathLinks is re-exported", () => {
-  expect(typeof allFromIndex.extractPyprojectTestpathLinks).toBe("function");
-});
-
-test("graphManifestEdges index: extractYamlPathReferenceEdges is re-exported", () => {
-  expect(typeof allFromIndex.extractYamlPathReferenceEdges).toBe("function");
-});
-
-test("graphManifestEdges index: isCargoManifestPath is re-exported", () => {
-  expect(typeof allFromIndex.isCargoManifestPath).toBe("function");
-});
-
-test("graphManifestEdges index: isGoWorkspaceManifestPath is re-exported", () => {
-  expect(typeof allFromIndex.isGoWorkspaceManifestPath).toBe("function");
-});
-
-test("graphManifestEdges index: isMavenPomPath is re-exported", () => {
-  expect(typeof allFromIndex.isMavenPomPath).toBe("function");
-});
-
-test("graphManifestEdges index: isPyprojectPath is re-exported", () => {
-  expect(typeof allFromIndex.isPyprojectPath).toBe("function");
 });

@@ -44,22 +44,22 @@ const RETRY = "src/retry.ts";
 const DOC = "README.md";
 const HIDDEN = "src/not-admitted.ts";
 
-async function sourceFixture(root: string): Promise<ArtifactBundle> {
-  const contents = [
-    [MANUAL, "export const manual = () => 'continue';\n"],
-    [SCHEDULED, "export const tick = () => 'continue';\n"],
-    [STORE, "export const preserve = true;\n"],
-    [HIDDEN, "export const cannotRead = true;\n"],
-    [DOC, "# Fixture\nInterrupted work should remain available.\n"],
-  ] as const;
-  for (const [path, body] of contents) await writeFile(join(root, path), body, "utf8");
+const SOURCE_CONTENTS = [
+  [MANUAL, "export const manual = () => 'continue';\n"],
+  [SCHEDULED, "export const tick = () => 'continue';\n"],
+  [STORE, "export const preserve = true;\n"],
+  [HIDDEN, "export const cannotRead = true;\n"],
+  [DOC, "# Fixture\nInterrupted work should remain available.\n"],
+] as const;
+
+function sourceBundle(): ArtifactBundle {
   return {
     repo_manifest: { repository: { name: "fixture" }, generated_at: "2026-01-01T00:00:00Z",
-      files: contents.map(([path, body]) => ({ path, language: "text", size_bytes: Buffer.byteLength(body), hash: hashContent(body) })) },
-    file_disposition: { files: contents.map(([path]) => ({
+      files: SOURCE_CONTENTS.map(([path, body]) => ({ path, language: "text", size_bytes: Buffer.byteLength(body), hash: hashContent(body) })) },
+    file_disposition: { files: SOURCE_CONTENTS.map(([path]) => ({
       path, status: path === DOC ? "doc_only" : path === HIDDEN ? "excluded" : "included",
     })) },
-    unit_manifest: { units: contents.filter(([path]) => path !== DOC && path !== HIDDEN).map(([path]) => ({
+    unit_manifest: { units: SOURCE_CONTENTS.filter(([path]) => path !== DOC && path !== HIDDEN).map(([path]) => ({
       unit_id: path, name: path, files: [path], required_lenses: [],
     })) },
     surface_manifest: { surfaces: [
@@ -81,19 +81,28 @@ async function sourceFixture(root: string): Promise<ArtifactBundle> {
   };
 }
 
+async function sourceFixture(root: string): Promise<ArtifactBundle> {
+  await Promise.all(SOURCE_CONTENTS.map(([path, body]) => writeFile(join(root, path), body, "utf8")));
+  return sourceBundle();
+}
+
 function plan(bundle: ArtifactBundle): ArtifactBundle {
   return buildQuestionPlanArtifacts(bundle, fullAuditScope()).updated;
 }
 
-async function registerRetry(root: string, bundle: ArtifactBundle) {
-  const body = "export const retry = () => 'continue';\n";
-  await writeFile(join(root, RETRY), body, "utf8");
-  bundle.repo_manifest!.files.push({ path: RETRY, language: "typescript", hash: hashContent(body), size_bytes: Buffer.byteLength(body) });
+const RETRY_BODY = "export const retry = () => 'continue';\n";
+function addRetryToBundle(bundle: ArtifactBundle) {
+  bundle.repo_manifest!.files.push({ path: RETRY, language: "typescript", hash: hashContent(RETRY_BODY), size_bytes: Buffer.byteLength(RETRY_BODY) });
   bundle.file_disposition!.files.push({ path: RETRY, status: "included" });
   bundle.surface_manifest!.surfaces.push({ id: "retry", kind: "interface", entrypoint: RETRY });
   bundle.critical_flows!.flows.push({
     id: "retry", name: "Retry resume", entrypoints: [RETRY], paths: [RETRY, STORE], concerns: [],
   });
+}
+
+async function registerRetry(root: string, bundle: ArtifactBundle) {
+  await writeFile(join(root, RETRY), RETRY_BODY, "utf8");
+  addRetryToBundle(bundle);
 }
 
 function manualOnly(binding: AuditQuestionBinding, id: string): ReviewSubmission {
@@ -146,47 +155,43 @@ test("blind charter extraction still pauses and grants only its own packets, nev
   });
 });
 
-test("a targeted Architecture review is grounded in real ownership crossings, not all audited files", async () => {
-  await withTempRepo(async (root) => {
-    const fixture = await sourceFixture(root);
-    fixture.intent_checkpoint!.lens_selection = { include: ["architecture"] };
-    const result = plan(fixture).review_plan!;
-    expect(result.questions).toHaveLength(2);
-    expect(result.questions.every(question => question.lens === "architecture")).toBe(true);
-    for (const question of result.questions) {
-      const paths = question.source_dependencies.filter(dep => dep.kind === "source").map(dep => dep.key);
-      expect(paths).toContain(STORE);
-      expect(paths).not.toContain(HIDDEN);
-      expect(paths).toHaveLength(2);
-      expect(paths.some(path => path === MANUAL || path === SCHEDULED)).toBe(true);
-    }
-  });
+test("a targeted Architecture review is grounded in real ownership crossings, not all audited files", () => {
+  const fixture = sourceBundle();
+  fixture.intent_checkpoint!.lens_selection = { include: ["architecture"] };
+  const result = plan(fixture).review_plan!;
+  expect(result.questions).toHaveLength(2);
+  expect(result.questions.every(question => question.lens === "architecture")).toBe(true);
+  for (const question of result.questions) {
+    const paths = question.source_dependencies.filter(dep => dep.kind === "source").map(dep => dep.key);
+    expect(paths).toContain(STORE);
+    expect(paths).not.toContain(HIDDEN);
+    expect(paths).toHaveLength(2);
+    expect(paths.some(path => path === MANUAL || path === SCHEDULED)).toBe(true);
+  }
 });
 
-test("artifact planning is deterministic; discovering a new operation stales the plan and only its dependent revisions", async () => {
-  await withTempRepo(async (root) => {
-    const original = plan(await sourceFixture(root));
-    original.artifact_metadata = computeArtifactMetadata(original);
-    const planned = original.review_plan!;
-    expect(planned.questions).toHaveLength(3);
-    expect(plan(structuredClone(original)).review_plan).toEqual(planned);
-    const edited = structuredClone(original);
-    await registerRetry(root, edited);
-    expect(computeStaleArtifacts(edited, { emit: false }).has("review_plan.json")).toBe(true);
-    const revised = plan(edited);
-    const addedPlan = revised.review_plan!;
-    expect(addedPlan.snapshot_id).not.toBe(planned.snapshot_id);
-    expect(addedPlan.questions).toHaveLength(4);
-    const beforeShared = planned.questions.find(question => question.requested_parts.length > 1)!;
-    const afterShared = addedPlan.questions.find(question => question.question_id === beforeShared.question_id)!;
-    expect(afterShared.revision_id).not.toBe(beforeShared.revision_id);
-    expect(afterShared.requested_parts.map(part => part.part_id)).toEqual(["manual", "retry", "scheduled"]);
-    for (const prior of planned.questions.filter(question => question !== beforeShared)) {
-      expect(addedPlan.questions.find(question => question.question_id === prior.question_id)?.revision_id).toBe(prior.revision_id);
-    }
-    revised.artifact_metadata = computeArtifactMetadata(revised);
-    expect(computeStaleArtifacts(revised, { emit: false }).has("review_plan.json")).toBe(false);
-  });
+test("artifact planning is deterministic; discovering a new operation stales the plan and only its dependent revisions", () => {
+  const original = plan(sourceBundle());
+  original.artifact_metadata = computeArtifactMetadata(original);
+  const planned = original.review_plan!;
+  expect(planned.questions).toHaveLength(3);
+  expect(plan(structuredClone(original)).review_plan).toEqual(planned);
+  const edited = structuredClone(original);
+  addRetryToBundle(edited);
+  expect(computeStaleArtifacts(edited, { emit: false }).has("review_plan.json")).toBe(true);
+  const revised = plan(edited);
+  const addedPlan = revised.review_plan!;
+  expect(addedPlan.snapshot_id).not.toBe(planned.snapshot_id);
+  expect(addedPlan.questions).toHaveLength(4);
+  const beforeShared = planned.questions.find(question => question.requested_parts.length > 1)!;
+  const afterShared = addedPlan.questions.find(question => question.question_id === beforeShared.question_id)!;
+  expect(afterShared.revision_id).not.toBe(beforeShared.revision_id);
+  expect(afterShared.requested_parts.map(part => part.part_id)).toEqual(["manual", "retry", "scheduled"]);
+  for (const prior of planned.questions.filter(question => question !== beforeShared)) {
+    expect(addedPlan.questions.find(question => question.question_id === prior.question_id)?.revision_id).toBe(prior.revision_id);
+  }
+  revised.artifact_metadata = computeArtifactMetadata(revised);
+  expect(computeStaleArtifacts(revised, { emit: false }).has("review_plan.json")).toBe(false);
 });
 
 test("the host may examine admitted non-suggested files but an excluded file never enters the question source index", async () => {
