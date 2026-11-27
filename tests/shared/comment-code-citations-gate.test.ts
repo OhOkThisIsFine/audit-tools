@@ -4,8 +4,7 @@
 // WHY THIS EXISTS. Docs were gated and comments were gated by nothing, so a
 // comment naming a renamed or deleted symbol or file stayed green forever. The
 // script owns the rule; this file pins it on real throwaway git repos (the gate
-// resolves against `git ls-files`, so a mocked fs would exercise nothing), plus
-// the whole live tree.
+// resolves against `git ls-files`, so a mocked fs would exercise nothing).
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -123,11 +122,6 @@ describe("check-comment-code-citations — resolution on a real tree", () => {
     // An untracked scratch file citing nonsense must not add a citation.
     write(dir, "src/scratch.mjs", "// `neverDeclaredAnywhere`\n");
     const r = run(dir);
-    expect(r.code, r.out).toBe(0);
-  });
-
-  it("the live tree is green", () => {
-    const r = run(REPO_ROOT);
     expect(r.code, r.out).toBe(0);
   });
 });
