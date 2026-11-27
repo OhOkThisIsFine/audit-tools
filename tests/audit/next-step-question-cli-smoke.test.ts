@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { toPromptPathToken } from "audit-tools/shared";
 import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
-import { advanceToDispatchReady } from "./helpers/completion-harness.js";
+import { advanceToDispatchReady, callNextStep } from "./helpers/completion-harness.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 import { persistAnalyzerSettings } from "../../src/shared/analyzerPolicy.js";
 import { presentQuestionReport, readAcceptedAnswers, readQuestionFindings, readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
@@ -19,8 +19,10 @@ test("a fresh CLI finishes a persisted review once, replacing only the old repor
     const step = await advanceToDispatchReady(root);
     expect(step).toMatchObject({ contract_version: "audit-code-step/v1alpha1", status: "ready" });
     const workload = await readQuestionWorkload(step);
-    const answers = await submitQuestions(root, workload.work_items);
-    const submitted = answers[0]!;
+    expect(workload.work_items.length).toBeGreaterThan(1);
+    const firstCount = Math.ceil(workload.work_items.length / 2);
+    const firstAnswers = await submitQuestions(root, workload.work_items.slice(0, firstCount));
+    const submitted = firstAnswers[0]!;
     const source = resolve(root, workload.work_items[0]!.result_path);
     const run = (...args: string[]) => runWrapper(["--expect-version=" + packageVersion, ...args], { cwd: root });
 
@@ -30,8 +32,19 @@ test("a fresh CLI finishes a persisted review once, replacing only the old repor
 
     await unlink(source);
 
-    // A new CLI process now consumes the remaining saved answers and promotes
-    // the report. The submitted answer can only come from the durable ledger.
+    // Collect the first wave through next-step. The direct CLI submission can
+    // now come only from the ledger; the next workload must contain only work
+    // that was not accepted yet.
+    const resumed = await readQuestionWorkload(await callNextStep(root, artifactsDir));
+    expect(resumed.run_id).toBe(workload.run_id);
+    expect(resumed.work_items.map(item => item.binding.assignment.assignment_id).sort())
+      .toEqual(workload.work_items.slice(firstCount).map(item => item.binding.assignment.assignment_id).sort());
+    const acceptedFirst = await readAcceptedAnswers(artifactsDir, workload.run_id);
+    expect(acceptedFirst).toHaveLength(firstAnswers.length);
+    expect(acceptedFirst).toEqual(expect.arrayContaining(firstAnswers));
+
+    const answers = [...firstAnswers, ...await submitQuestions(root, resumed.work_items)];
+    // A fresh CLI process consumes the second wave and promotes the report.
     const reportPath = join(root, ".audit-tools", "audit-findings.json");
     const promotedMarkdown = join(root, ".audit-tools", "audit-report.md");
     const workingMarkdown = join(artifactsDir, "audit-report.md");
@@ -62,6 +75,7 @@ test("a fresh CLI finishes a persisted review once, replacing only the old repor
     await access(join(artifactsDir, "runs", workload.run_id, "host-accepted-results-ledger.json"));
     expect(await readFile(terminal.prompt_path, "utf8")).toMatch(/present report/i);
     const report = await readQuestionFindings(reportPath);
+    expect(report.question_review.completion).toBe("incomplete");
     expect(report.question_review.accepted.map(({ submission }) => submission))
       .toEqual(expect.arrayContaining(answers));
     expect(report.question_review.accepted).toHaveLength(answers.length);
