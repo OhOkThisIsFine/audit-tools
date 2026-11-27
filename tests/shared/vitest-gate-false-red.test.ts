@@ -160,7 +160,7 @@ function runGateCase(scenario: GateCase) {
   };
   try {
     for (const file of [
-      "run-vitest-gate.mjs", "vitestShard.mjs", "vitestGateVerdict.mjs",
+      "run-vitest-gate.mjs", "vitest-windows-owner.mjs", "vitestShard.mjs", "vitestGateVerdict.mjs",
       "worktree-tree.mjs", "suiteGreenStamp.mjs", "load-flake-record.mjs", "primitives.mjs",
       "loopCoreAttestationLedger.mjs",
       ...(scenario.reportFromChild ? ["vitest-timing-reporter.mjs", "profile.mjs", "spawn-shell.mjs"] : []),
@@ -231,6 +231,7 @@ require("node:module").syncBuiltinESMExports();
     { cwd: root, encoding: "utf8", timeout: 10_000 });
     assert.equal(result.error, undefined);
     assert.equal(result.signal, null);
+    assert(existsSync(resolve(root, "child-calls.jsonl")), `fixture did not observe gate child launch (exit=${result.status}):\nstderr: ${result.stderr}\nstdout: ${result.stdout}`);
     const calls = readFileSync(resolve(root, "child-calls.jsonl"), "utf8").trim().split("\n");
     return { status: result.status, stderr: result.stderr, calls,
       stamp: existsSync(stamp) ? readFileSync(stamp, "utf8") : null,
