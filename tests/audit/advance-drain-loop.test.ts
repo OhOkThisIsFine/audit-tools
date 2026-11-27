@@ -345,7 +345,8 @@ test("charter evidence is ready before the review plan and has no late-input def
     expect(upstream).toBeGreaterThan(-1);
     expect(upstream).toBeLessThan(planning);
   }
-  expect(LATE_INPUT_EDGES["review_plan.json"]).toBeUndefined();
+  // Only completed systemic claims reach ordinary planning late.
+  expect(LATE_INPUT_EDGES["review_plan.json"]).toEqual(["systemic_challenge.json"]);
 });
 
 test("a slice participant whose producing obligation is absent from the order is REPORTED, never assumed safe", () => {
