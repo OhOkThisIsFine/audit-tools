@@ -3,8 +3,11 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
+import { ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS, advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { callNextStep } from "./helpers/completion-harness.js";
+import { walkStepsUntilTerminal } from "./helpers/step-driver.js";
+import { submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
 import { packageVersion } from "./helpers/wrapper-harness.js";
 import { runBounded } from "../helpers/spawn.mjs";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
@@ -12,13 +15,22 @@ import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questi
 import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
+function prepareWorkload(root: string) {
+  const artifactsDir = join(root, ".audit-tools", "audit");
+  return walkStepsUntilTerminal({
+    transport: () => callNextStep(root, artifactsDir),
+    terminalKinds: ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS,
+    label: "prepare question workload",
+  });
+}
+
 test("snapshot-bound questions feed standalone synthesis only after accepted answers", async () => {
   await withTempRepo(async (root) => {
     const neighbor = "src/neighbor/isolated.ts";
     await mkdir(dirname(join(root, neighbor)), { recursive: true });
     await writeFile(join(root, "src/neighbor/helper.ts"), "export const value = 1;\n");
     await writeFile(join(root, neighbor), "import { value } from './helper.js';\nexport const unrelated = value;\n");
-    const step = await advancePastDesignReview(root);
+    const step = await prepareWorkload(root);
     const handoff = await readFile(step.prompt_path, "utf8");
     expect(handoff).toContain("Read only the routing metadata");
     expect(handoff).toContain("The command returns a prompt_path, not the prompt.");
@@ -153,8 +165,18 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
         expect(await readLedger()).toEqual(ledgerBeforeRefusal);
         await writeFile(file, JSON.stringify(response));
       }
-      await runWrapper(["submit", "--work-item", assignment.assignment_id, "--from", file], { cwd: root });
-      if (index === 0) await expect(prepare(assignment.assignment_id)).rejects.toThrow(/already has an accepted answer/);
+      if (index === 0) {
+        const accepted = await runWrapper(["submit", "--work-item", assignment.assignment_id, "--from", file], { cwd: root });
+        expect(JSON.parse(accepted.stdout)).toMatchObject({ disposition: "accepted", submission_id: response.submission_id });
+        await expect(prepare(assignment.assignment_id)).rejects.toThrow(/already has an accepted answer/);
+      } else {
+        // Later answers only fill the real durable ledger for synthesis; CLI argv,
+        // stdout and rejection have already been exercised above.
+        const accepted = await submitWorkItemResult({
+          root, artifactsDir: step.artifacts_dir, workItemId: assignment.assignment_id, source: JSON.stringify(response),
+        });
+        expect(accepted).toMatchObject({ disposition: "accepted", submission_id: response.submission_id });
+      }
     }
     const ledgerBefore = await readFile(ledgerFile, "utf8");
     const { stdout } = await runWrapper(["synthesize"], { cwd: root });
@@ -422,7 +444,7 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
 
 test("interrupted workload and step publication resume the same frozen snapshot", async () => {
   await withTempRepo(async (root) => {
-    const initial = await advancePastDesignReview(root);
+    const initial = await prepareWorkload(root);
     expect(initial.step_kind).toBe("dispatch_review");
     const readJson = async (path: string) => JSON.parse(await readFile(path, "utf8"));
     const artifacts = initial.artifacts_dir;
