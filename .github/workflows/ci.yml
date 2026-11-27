@@ -213,7 +213,8 @@ jobs:
   # expressions have no regex): it matches only `release: v<digit>...` — the exact
   # bump-commit format emitted by scripts/release-and-publish.mjs (`release: vX.Y.Z`)
   # — so a non-bump message that merely shares the prefix (e.g. `release: verify
-  # hosts...`) does NOT skip CI (CE-004). The separate test workflow still checks the default test command.
+  # hosts...`) does NOT skip CI (CE-004). Prepared release commits use a separate
+  # exact title, run this job normally, and may retain its smoke-qualified package.
   checks:
     if: >-
       ${{ github.event_name != 'push'
@@ -232,11 +233,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
+        with:
+          fetch-depth: 2
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.CI_NODE_VERSION }}
           cache: npm
+      - name: Check for an explicit prepared release
+        if: ${{ github.event_name == 'push' && github.ref_protected && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        id: candidate
+        run: node scripts/shared/qualified-ci-tarball.mjs --candidate
       - name: Validate package-lock.json
         timeout-minutes: 2
         shell: bash
@@ -254,10 +261,34 @@ jobs:
       - name: Verify release checks (non-test gate)
         timeout-minutes: 15
         shell: bash
+        env:
+          PREPARED_RELEASE: ${{ steps.candidate.outputs.candidate }}
         run: |
           set -euo pipefail
+          if [[ "$PREPARED_RELEASE" == true ]]; then
+            AUDIT_TOOLS_RELEASE_PACK_DIR=$(mktemp -d "$RUNNER_TEMP/npm-release-pack.XXXXXX")
+            export AUDIT_TOOLS_RELEASE_PACK_DIR
+            echo "AUDIT_TOOLS_RELEASE_PACK_DIR=$AUDIT_TOOLS_RELEASE_PACK_DIR" >> "$GITHUB_ENV"
+          fi
           trap 'echo "::error::npm run verify:checks failed. Download the ci-npm-logs artifact and rerun npm run verify:checks locally before retrying."' ERR
           npm run verify:checks
+      - name: Identify the CI-qualified tarball
+        if: steps.candidate.outputs.candidate == 'true'
+        id: ci-tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball=$(node scripts/shared/smoke-tarball.mjs --verify-release)
+          node scripts/shared/qualified-ci-tarball.mjs --emit "$tarball"
+          echo "path=$tarball" >> "$GITHUB_OUTPUT"
+      - name: Upload the CI-qualified tarball
+        if: steps.ci-tarball.outputs.name != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.ci-tarball.outputs.name }}
+          path: ${{ steps.ci-tarball.outputs.path }}
+          if-no-files-found: error
+          compression-level: 0
       - name: Upload npm debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

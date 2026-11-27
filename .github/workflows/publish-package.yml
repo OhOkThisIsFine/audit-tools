@@ -83,9 +83,12 @@ jobs:
       (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
-      tarball_sha256: ${{ steps.tarball.outputs.sha256 }}
+      tarball_sha256: ${{ steps.reuse.outputs.sha256 || steps.tarball.outputs.sha256 }}
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
@@ -97,13 +100,26 @@ jobs:
         with:
           node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: npm
+      - name: Look for the exact-commit CI-qualified tarball
+        id: reuse
+        timeout-minutes: 3
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_RELEASE_SHA: ${{ needs.validate-source.outputs.commit }}
+          RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          node scripts/shared/qualified-ci-tarball.mjs --retrieve "$(mktemp -d "$RUNNER_TEMP/npm-ci-pack.XXXXXX")"
       - name: Install dependencies
+        if: steps.reuse.outputs.path == ''
         timeout-minutes: 10
         shell: bash
         run: |
           set -euo pipefail
           npm ci --prefer-offline --no-audit --no-fund
       - name: Verify release checks (non-test gate)
+        if: steps.reuse.outputs.path == ''
         timeout-minutes: 15
         shell: bash
         run: |
@@ -114,6 +130,7 @@ jobs:
           echo "AUDIT_TOOLS_RELEASE_PACK_DIR=$AUDIT_TOOLS_RELEASE_PACK_DIR" >> "$GITHUB_ENV"
           npm run verify:checks
       - name: Identify the smoke-qualified tarball
+        if: steps.reuse.outputs.path == ''
         id: tarball
         shell: bash
         run: |
@@ -128,7 +145,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: qualified-npm-tarball-${{ github.run_attempt }}
-          path: ${{ steps.tarball.outputs.path }}
+          path: ${{ steps.reuse.outputs.path || steps.tarball.outputs.path }}
           if-no-files-found: error
           compression-level: 0
 
@@ -335,13 +352,13 @@ jobs:
           # Leave room inside the job timeout for the last bounded exact-version
           # and tag lookups and the final diagnostics.
           readback_deadline=$((SECONDS + 440))
-          for attempt in {1..24}; do
+          for (( attempt=1; ; attempt++ )); do
             status=$(node scripts/shared/verify-release-registry.mjs)
             case "$status" in
               confirmed|integrity-mismatch|invalid-json|unexpected-json) break ;;
               pending|tag-mismatch|query-timeout|query-error)
                 echo "Registry verification: $status (attempt $attempt)."
-                if [[ "$attempt" -ge 24 || "$SECONDS" -ge "$readback_deadline" ]]; then break; fi
+                if (( SECONDS + 10 >= readback_deadline )); then break; fi
                 sleep 10 ;;
               *) echo "::error::Unknown registry verification status: $status"; exit 1 ;;
             esac
