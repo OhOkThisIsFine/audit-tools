@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { g as gIn, initGateRepo, runAttest as runAttestIn, STAGED_LOOP_CORE_PATH } from "./pre-commit-gate-harness.js";
 import { catalogGates } from "../../scripts/shared/verify-steps.mjs";
@@ -279,10 +279,10 @@ describe("a baseline records starting content and claims no review", () => {
       };
       syncBuiltinESMExports();
     `);
-    const interrupted = spawnSync(process.execPath, ["--import", interrupt, SEED, "--commit", "HEAD"], {
+    const interrupted = spawnSync(process.execPath, ["--import", pathToFileURL(interrupt).href, SEED, "--commit", "HEAD"], {
       cwd: repo, encoding: "utf8",
     });
-    expect(interrupted.status).toBe(73);
+    expect(interrupted.status, interrupted.stdout + interrupted.stderr).toBe(73);
     expect(existsSync(join(repo, LEDGER_PATH))).toBe(false);
     const retry = seed("--commit", "HEAD");
     expect(retry.status, retry.stderr).toBe(0);

@@ -423,6 +423,8 @@ describe("ensureRunSnapshot — git root", () => {
     const root = join(base, "repo");
     await mkdir(root, { recursive: true });
     await git(root, ["init", "-q"]);
+    // Recovery must verify byte identity; this case isolates loss of the Git marker.
+    await git(root, ["config", "core.autocrlf", "false"]);
     await writeFile(join(root, "a.ts"), "export const a = 1;\n");
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
