@@ -24,28 +24,22 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 128 entr(y/ies) indexed.
+> and at commit). 111 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
 - `open-bugs.md:9` — Audit/shared tests time out under full-suite load and pass alone (2026-10-08, medium).
-- `open-bugs.md:11` — The merge-routing check measures incoming paths from `CLAUDE_PROJECT_DIR`, not the checkout the command runs in (2026-10-09, medium).
-- `open-bugs.md:13` — The merge-routing check refuses to fast-forward a checkout to commits the remote already holds (2026-11-16, medium, friction: tool_should_decide).
-- `open-bugs.md:15` — The session-start "commits BEHIND origin/main" warning measures the main checkout, not the session's worktree (2026-10-06, medium).
-- `open-bugs.md:19` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
-- `open-bugs.md:21` — A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).
-- `open-bugs.md:23` — `SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).
-- `open-bugs.md:25` — `check-backlog-budget --update-baseline` grandfathers new violators (2026-10-06, medium).
-- `open-bugs.md:27` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
-- `open-bugs.md:30` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
-- `open-bugs.md:32` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:40` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:47` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:55` — Confirmed scope leaks beyond planning (2026-11-15, medium).
-- `open-bugs.md:57` — Analyzer evidence lacks a comparable coverage record (2026-11-15, medium).
-- `open-bugs.md:59` — Audit and remediation paths have multiple sources (2026-11-15, medium).
-- `open-bugs.md:61` — Incidental inputs restart the systemic challenge (2026-11-15, medium).
-- `open-bugs.md:63` — Isolated dependency installs repoint regular host launchers (2026-11-15, medium).
+- `open-bugs.md:11` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
+- `open-bugs.md:13` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
+- `open-bugs.md:16` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
+- `open-bugs.md:18` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:26` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:33` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:41` — Confirmed scope leaks beyond planning (2026-11-15, medium).
+- `open-bugs.md:43` — Analyzer evidence lacks a comparable coverage record (2026-11-15, medium).
+- `open-bugs.md:45` — Audit and remediation paths have multiple sources (2026-11-15, medium).
+- `open-bugs.md:47` — Incidental inputs restart the systemic challenge (2026-11-15, medium).
+- `open-bugs.md:49` — Isolated dependency installs repoint regular host launchers (2026-11-15, medium).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
@@ -54,35 +48,24 @@
 - `minor-bugs.md:32` — A partial withdrawal reports a complete item as rejected (2026-10-06, low).
 - `minor-bugs.md:34` — Conceptual perspective lanes read only the head of the call-site map (2026-10-05, low).
 - `minor-bugs.md:36` — The lock heartbeat only logs a stolen lock (2026-10-06, low).
-- `minor-bugs.md:38` — `explain-task` takes the first token after the verb as the task id (2026-10-06, low).
-- `minor-bugs.md:40` — A fractional positive-integer flag becomes 0 (2026-10-06, low).
-- `minor-bugs.md:42` — `status` drops `not_applicable` obligations from its summary (2026-10-06, low).
-- `minor-bugs.md:44` — `loopCoreClosure.mjs` drops directory imports from the importer graph (2026-10-06, low).
-- `minor-bugs.md:46` — The vitest shard duration baseline is stale, so duration sharding is off (2026-10-06, low).
-- `minor-bugs.md:48` — `bounded-call-single-source.test.ts` matches `advance(` in raw text (2026-10-05, low).
-- `minor-bugs.md:50` — A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).
-- `minor-bugs.md:52` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
-- `minor-bugs.md:54` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
-- `minor-bugs.md:56` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:38` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
+- `minor-bugs.md:40` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
+- `minor-bugs.md:42` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:22` — Track 2.5 — keep production-orphan detection beside knip.
+- `forward-tracks.md:11` — Track 2.5 — keep production-orphan detection beside knip.
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:37` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:52` — Shared orchestration retains deliberate consumer policies.
-- `forward-tracks.md:55` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
-- `forward-tracks.md:57` — Structured MCP submission beyond work-item results (owner, 2026-11-06).
+- `forward-tracks.md:24` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:39` — Structured MCP submission beyond work-item results (owner, 2026-11-06).
 
 ### [`deferred.md`](backlog/deferred.md)
 
-- `deferred.md:11` — The P1–P8 hardening contract waits for an isolated, platform-qualified execution environment (2026-10-07, medium).
-- `deferred.md:23` — A7 multi-host validation — automated half green, manual GUI half never run.
-- `deferred.md:33` — Manual real-OpenCode validation
-- `deferred.md:36` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
-- `deferred.md:61` — Audit refactor native qualification awaits the serialized validation lane.
+- `deferred.md:10` — The P1–P8 hardening contract waits for an isolated, platform-qualified execution environment (2026-10-07, medium).
+- `deferred.md:22` — A7 multi-host validation — automated half green, manual GUI half never run.
+- `deferred.md:32` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
 
 ### [`durable-traps.md`](backlog/durable-traps.md)
 

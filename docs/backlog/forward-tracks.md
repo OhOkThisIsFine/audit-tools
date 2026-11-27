@@ -8,27 +8,14 @@
 
 ## Open tracks
 
-- **Simplify sweep, parts P04–P12.** A quality-only `/simplify` pass, one part per chat, over the
-  disjoint partition in
-  [`simplify-partition-2026-11-15.md`](../reviews/simplify-partition-2026-11-15.md). Each part
-  reads its leads in that record first, and its landing sets its row to `landed`. What a part chose
-  not to do, and what would unblock it, is in
-  [`simplify-deferred-items-2026-11-16.md`](../reviews/simplify-deferred-items-2026-11-16.md).
-  Remove this entry when every row is landed.
-- **Governance consolidation retains explicit scope limits.** The executable gate catalog, backlog corpus, document pins, shared vocabulary, outcome evaluation and graph reachability are consolidated. Snapshot retention stays consumer-specific. A validation-receipt cache and a universal execution/mutation-certification gate are deliberately omitted without demonstrated value. Source-to-test declarations provide navigation, not behavioral proof. Remaining specific test-replica claims require independent evidence rather than another generic certification subsystem.
-
-
-
 **Track 2.5 — keep production-orphan detection beside knip.** The dated
 [`slimdown-review-2026-07-28.md`](../reviews/slimdown-review-2026-07-28.md) is a historical lead set,
 not a current deletion list; the provider and dispatch subgraphs it identified have since been retired.
 Its surviving structural finding is that neither knip mode reports a whole module that is exported
-through a barrel and otherwise referenced only by its own tests. Periodically run a relative-import
-graph check for production files whose only consumers are tests, then verify each candidate against
-current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-modes]]
+through a barrel and otherwise referenced only by its own tests. Run the existing `npm run check:orphan-modules` production-reachability check alongside Knip,
+then verify each candidate against current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-modes]]
 
 ---
-
 
 
 ## Forward tracks
@@ -48,11 +35,6 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
     output into leads (cargo-clippy / bundle-rubocop), not skip. FAIL = "skipped" status when the ecosystem
     is present + consent given, or a parse that drops all output. (No Rust/Ruby toolchain on the box →
     install `rustup` / `ruby`+`bundler` first, or point at a repo that vendors them.)
-
-- **Shared orchestration retains deliberate consumer policies.** Run-directory and prompt-binding mechanisms are shared. Remediation has no consumer graceful cap from which to derive another engine bound, and no measured defect justifies changing obligation granularity. Preserve these non-goals until new evidence warrants revisiting them.
-
-
-- **The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).** `scripts/release-and-publish.mjs` ends at registry visibility; global reinstall, the allowed postinstall lifecycle scripts and both binary smokes live in `.claude/skills/ship/SKILL.md` as instructions an agent must remember and execute — the host-remembering shape the auditor-agnostic rule bans, applied to the project's own pipeline-ownership rule. There is also no single resumable record spanning the phases, so a stall part-way is recovered by hand. **Property:** one idempotent command owns gated ref verification, exactly-once tag/release/publish creation, delayed release observation, registry verification, reinstall with allowed lifecycle scripts, and smoke checks of both global binaries and the installed host assets — resuming only its observation and completion phases and never retrying a destructive creation. The observation half already has its own entry (the await-run timeout shorter than a release-event delivery delay); fix it inside this command rather than beside it. YAML critical-path profiling moves out of release correctness into best-effort reporting.
 
 - **Structured MCP submission beyond work-item results (owner, 2026-11-06).** Work-item
   `submit_result` covers both draws. Audit `submit_gate` supports `synthesis_narrative`,

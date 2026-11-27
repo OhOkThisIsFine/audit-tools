@@ -7,7 +7,6 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 
-
 - **The P1–P8 hardening contract waits for an isolated, platform-qualified execution environment
   (2026-10-07, medium).** The [canonical implementation plan](../reviews/audit-tools-canonical-implementation-plan-2026-10-07.md)
   selects mechanisms for bounded source reads (P1), argv command objects (P2), lock ownership without
@@ -29,9 +28,6 @@
   run the release-time checklist in the *Host validation* section of [`release.md`](../audit-pkg/release.md) — three GUI rows
   (Antigravity / OpenCode / VS Code), now for BOTH `/audit-code` and `/remediate-code`. Every checkbox
   is still unticked and both Notes sections are empty, so no release has recorded a pass.
-
-- **Manual real-OpenCode validation** that agent-scoped permission allowances propagate to spawned
-  subtasks. Folds into the A7 checklist.
 
 - **Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts
   stay deferred (2026-07-24, low).** The bounded semantic gate SHIPPED for the artifact that drove it.
@@ -57,5 +53,3 @@
   incident, never by an estimate of one. Extend the gate to a second artifact only when one of those
   exists for it; if the choice is ever genuinely undecidable, the cheap move is edge attribution +
   cost on the existing staleness record, not a second classifier.
-
-- **Audit refactor native qualification awaits the serialized validation lane.** The bounded refactors follow the [finalized plan](../reviews/audit-final-refactor-plan.md). The [qualification record](../reviews/audit-refactor-qualification-2026-10-14.md) separates accepted source patches from pending native gates, offline pipx/Lizard smoke and excluded work. Source review alone does not close the accepted defects or authorize release. Close only with exact-final-tree evidence; preserve platform and live-run limitations.

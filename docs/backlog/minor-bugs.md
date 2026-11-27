@@ -35,20 +35,6 @@
 
 - **The lock heartbeat only logs a stolen lock (2026-10-06, low).** `startLockHeartbeat` (`src/shared/io/fileLock.ts`) logs `lock_heartbeat_stolen` and returns, every tick; the interval keeps running and `fn()` is neither aborted nor told. P3 of the [canonical implementation plan](../reviews/audit-tools-canonical-implementation-plan-2026-10-07.md) replaces this protocol. **Property:** a holder that loses its lock stops its writes and learns of the loss.
 
-- **`explain-task` takes the first token after the verb as the task id (2026-10-06, low).** The now-retired per-file command fell back to `argv[3]`, so `explain-task --root X T1` asked for task `--root`. **Property:** a flag is never read as the task id.
-
-- **A fractional positive-integer flag becomes 0 (2026-10-06, low).** `normalizePositiveInteger` (`src/audit/cli/args.ts`) passes 0.5 and floors it to 0, so `--timeout 0.5` skips the default and sets a 0 ms timeout. **Property:** a value that floors to 0 is refused or falls back to the default.
-
-- **`status` drops `not_applicable` obligations from its summary (2026-10-06, low).** `obligationStates` (`src/audit/cli/statusCommand.ts`) has no `not_applicable` key, so the counts do not sum to the obligation total. **Property:** every `ObligationStateSchema` value is counted.
-
-- **`loopCoreClosure.mjs` drops directory imports from the importer graph (2026-10-06, low).** `buildImporterGraph` (`scripts/shared/loopCoreClosure.mjs`) maps a directory specifier only to a sibling .ts file, while `resolveSpecifier` in the same file also tries the directory's index.ts. **Property:** both functions resolve a specifier the same way.
-
-- **The vitest shard duration baseline is stale, so duration sharding is off (2026-10-06, low).** `scripts/shared/vitest-shard-duration-baseline.json` lacks 259 tracked test files and lists 257 that no longer exist; `vitest-sequencer.mjs` then falls back to hash sharding for the whole run. **Property:** a test-file add or rename cannot silently disable duration sharding.
-
-- **`bounded-call-single-source.test.ts` matches `advance(` in raw text (2026-10-05, low).** A comment that contains `advance(` trips the test. **Property:** the test matches calls, not comments or strings.
-
-- **A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).** `attest-loop-core-review.mjs` overwrites earlier values, so a two-reviewer attestation records one. **Property:** every given reviewer is recorded, or a repeat is refused.
-
 - **The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).** `.claude/hooks/tool-input-guard.mjs` refused a sub-agent that ran in a lap worktree and was not an audit lane. **Property:** the guard identifies an audit node from run state, not from the session's shape.
 
 - **Test-command discovery lacks some ecosystem declarations (2026-10-06, low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`); repositories using unsupported build systems such as Gradle or Make still reach the final gate's "Verification command required" pause. **Property:** discovery reads a declared command for any ecosystem with one, without a per-ecosystem fork in planning.
