@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { cp, mkdtemp, mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RemediationState } from "../../src/remediate/state/store.js";
-import { StateStore } from "../../src/remediate/state/store.js";
+import { REMEDIATION_STATE_CONTRACT_VERSION, StateStore } from "../../src/remediate/state/store.js";
 import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "../../src/remediate/state/dirtyBaseline.js";
 import { attributeGateRed } from "../../src/remediate/steps/gateCommands.js";
 import { writeFinalGateRedRecord, finalGateRecordPath } from "../../src/remediate/steps/finalGate.js";
@@ -15,7 +15,7 @@ import { precomputeRecoveryTestVerdicts, prepareRemediationHostHandoff, ingestRe
 import { corroborateHostResult, corroborateNoChangeClaim } from "../../src/remediate/steps/dispatch/hostCorroboration.js";
 import { canonicalPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { cleanupHostHandoffFixtures, fixture, boundState, git, resultFor, decisionFor, writeResult, COUNTER_TEST, counterRuns, recoveryOptions } from "./helpers/hostHandoffCorroborationFixture.js";
-import type { RemediationHostResult } from "../../src/remediate/steps/dispatch/hostContracts.js";
+import type { CurrentRemediationHostState, RemediationHostResult, RemediationHostWorkItem } from "../../src/remediate/steps/dispatch/hostContracts.js";
 import { DirtyPathDiscoveryError } from "audit-tools/shared";
 
 // The closing command seam is inert, including every unsafe unscoped commit.
@@ -157,34 +157,52 @@ describe("locked resume admission", () => {
   });
 });
 
+// The production readers see a real nested Git repository and a tracked gitlink.
+// Seed child history once; copy it into isolated working trees instead of
+// invoking Git's submodule clone machinery before every corroboration case.
+let childSeed: Promise<{ root: string; commit: string }> | undefined;
+let childSeedRoot: string | undefined;
+afterAll(async () => {
+  if (childSeedRoot) await rm(childSeedRoot, { recursive: true, force: true });
+});
+
+async function seedChild() {
+  const root = await mkdtemp(join(tmpdir(), "dirty-baseline-child-seed-"));
+  childSeedRoot = root;
+  git(root, ["init"]);
+  git(root, ["config", "user.email", "test@example.com"]);
+  git(root, ["config", "user.name", "Test"]);
+  await writeFile(join(root, "tracked.ts"), "before\n");
+  git(root, ["add", "tracked.ts"]);
+  git(root, ["commit", "-m", "child baseline"]);
+  return { root, commit: git(root, ["rev-parse", "HEAD"]) };
+}
+
 async function addSubmodule(root: string): Promise<void> {
-  const source = await temporaryRoot();
-  git(source, ["init"]);
-  git(source, ["config", "user.email", "test@example.com"]);
-  git(source, ["config", "user.name", "Test"]);
-  await writeFile(join(source, "tracked.ts"), "before\n");
-  git(source, ["add", "tracked.ts"]);
-  git(source, ["commit", "-m", "child baseline"]);
-  git(root, ["-c", "protocol.file.allow=always", "submodule", "add", source, "sub"]);
-  git(root, ["commit", "-am", "add child"]);
+  const child = await (childSeed ??= seedChild());
+  await cp(child.root, join(root, "sub"), { recursive: true });
+  await writeFile(join(root, ".gitmodules"), '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n');
+  git(root, ["add", ".gitmodules"]);
+  git(root, ["update-index", "--add", "--cacheinfo", "160000," + child.commit + ",sub"]);
+  git(root, ["commit", "-m", "add child"]);
   git(root, ["config", "submodule.sub.ignore", "all"]);
-  git(join(root, "sub"), ["config", "user.email", "test@example.com"]);
-  git(join(root, "sub"), ["config", "user.name", "Test"]);
 }
 
 describe("host authority and superproject visibility", () => {
   it.each(invalidBaselines)("refuses direct current-shape host entry points %j", async baseline => {
-    const f = await fixture({ requiredTest: COUNTER_TEST });
-    const state = { ...boundState(f) };
-    delete state.run_start_dirty;
-    delete state.run_start_dirty_encoding;
-    Object.assign(state, baseline);
-    const params = { root: f.root, artifactsDir: f.artifactsDir, runId: f.runId, state };
-    await expect(prepareRemediationHostHandoff({ ...params, baselineCommit: f.baseline })).rejects.toThrow(RemediationDirtyBaselineError);
+    // These entry points must refuse before an approved plan, handoff or Git
+    // repository is needed; a full handoff fixture obscures that boundary.
+    const root = await temporaryRoot();
+    const state = { contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
+      status: "implementing", plan: canonicalPlanFixture(), items: {}, ...baseline } as CurrentRemediationHostState;
+    const params = { root, artifactsDir: join(root, ".audit-tools"), runId: "no-admitted-baseline", state };
+    const commit = "1".repeat(40);
+    await expect(prepareRemediationHostHandoff({ ...params, baselineCommit: commit })).rejects.toThrow(RemediationDirtyBaselineError);
     await expect(precomputeRecoveryTestVerdicts(params)).rejects.toThrow(RemediationDirtyBaselineError);
     await expect(ingestRemediationHostResults(params)).rejects.toThrow(RemediationDirtyBaselineError);
-    await expect(corroborateHostResult({ root: f.root, state, workItem: f.item, result: resultFor(f, f.baseline) as unknown as RemediationHostResult, verdicts: null, recovery: false })).rejects.toThrow(RemediationDirtyBaselineError);
-    expect(existsSync(join(f.root, ".counter"))).toBe(false);
+    await expect(corroborateHostResult({ root, state, workItem: { baseline_commit: commit } as RemediationHostWorkItem,
+      result: { landed_commit: commit } as RemediationHostResult, verdicts: null, recovery: false })).rejects.toThrow(RemediationDirtyBaselineError);
+    expect(await readdir(root)).toEqual([]);
   });
   it.each(["tracked", "untracked", "committed", "index cancellation"])("refuses a false no-change claim despite ignore=all: %s", async mode => {
     const f = await fixture({ requiredTest: COUNTER_TEST, allowedFiles: ["src/a.ts", "sub/tracked.ts"], beforePrepare: addSubmodule });
@@ -200,20 +218,33 @@ describe("host authority and superproject visibility", () => {
         git(f.root, ["add", "sub"]); git(f.root, ["commit", "-m", "land gitlink"]);
       }
     }
-    await writeResult(f, decisionFor(f, { status: "resolved_no_change", evidence: ["Claimed no change"] }));
-    const result = await ingestRemediationHostResults({ root: f.root, artifactsDir: f.artifactsDir, runId: f.runId, state: boundState(f) });
-    expect(result).not.toBe("unsupported_retired_state");
-    if (result === "unsupported_retired_state") return;
-    expect(result.accepted_count).toBe(0);
-    expect(result.issues.some(issue => issue.code === "changed_files_mismatch" && issue.check === "no_change_corroboration")).toBe(true);
-    expect(existsSync(join(f.root, ".counter"))).toBe(false);
+    if (mode === "tracked") {
+      // Keep one end-to-end refusal to pin wiring into normal ingestion.
+      await writeResult(f, decisionFor(f, { status: "resolved_no_change", evidence: ["Claimed no change"] }));
+      const result = await ingestRemediationHostResults({ root: f.root, artifactsDir: f.artifactsDir, runId: f.runId, state: boundState(f) });
+      expect(result).toMatchObject({ accepted_count: 0, issues: expect.arrayContaining([
+        expect.objectContaining({ code: "changed_files_mismatch", check: "no_change_corroboration" }),
+      ]) });
+      expect(existsSync(join(f.root, ".counter"))).toBe(false);
+    } else {
+      // The other cases exercise distinct Git queries, not different intake.
+      await expect(corroborateNoChangeClaim({ root: f.root, workItem: f.item,
+        excusedPaths: new Set(f.state.run_start_dirty) })).resolves.toMatchObject({
+        ok: false, code: "changed_files_mismatch", check: "no_change_corroboration",
+      });
+    }
   });
   it("characterizes the retained already-excused gitlink ambiguity without claiming descendant protection", async () => {
     const f = await fixture({ requiredTest: COUNTER_TEST, beforePrepare: addSubmodule, runStartDirty: ["sub"] });
     await writeFile(join(f.root, "sub", "tracked.ts"), "later child edit\n");
     expect(await corroborateNoChangeClaim({ root: f.root, workItem: f.item, excusedPaths: new Set(f.state.run_start_dirty) })).toEqual({ ok: true });
   });
-  it.each(["scope", "overlap", "accepted"].flatMap(mode => ["direct", "normal", "recovery"].map(lane => ({ mode, lane }))))("sees committed gitlinks before landed-result tests: $mode/$lane", async ({ mode, lane }) => {
+  // Exercise all three Git/authority outcomes at their shared boundary. The two
+  // public lanes need witnesses for their distinct wiring, not a cross-product.
+  it.each([
+    { mode: "scope", lane: "direct" }, { mode: "overlap", lane: "direct" }, { mode: "accepted", lane: "direct" },
+    { mode: "scope", lane: "normal" }, { mode: "overlap", lane: "recovery" },
+  ])("sees committed gitlinks before landed-result tests: $mode/$lane", async ({ mode, lane }) => {
     const f = await fixture({ requiredTest: COUNTER_TEST, beforePrepare: addSubmodule, allowedFiles: mode === "scope" ? ["src/a.ts"] : ["src/a.ts", "sub"], runStartDirty: mode === "overlap" ? ["sub"] : [] });
     await writeFile(join(f.root, "sub", "tracked.ts"), "after\n");
     git(join(f.root, "sub"), ["commit", "-am", "child change"]);
@@ -276,18 +307,23 @@ describe("closing selection and inert whole-index proof", () => {
     expect((await collectStagingFiles(root, ["space.ts", "back/slash.ts"])).files).toEqual(names);
   });
   it.for([false, true])("whole-index collision admits only the exact own set, foreign=%s", async (foreign, context) => {
-    const f = await fixture({ requiredTest: COUNTER_TEST, beforePrepare: addSubmodule });
-    for (const name of ["Foo.ts", "foo.ts"]) await writeFile(join(f.root, name), "content\n");
-    const entries = await readdir(f.root);
+    const root = await temporaryRoot();
+    for (const name of ["Foo.ts", "foo.ts"]) await writeFile(join(root, name), "content\n");
+    const entries = await readdir(root);
     if (!entries.includes("Foo.ts") || !entries.includes("foo.ts")) { context.skip(); return; }
-    git(f.root, ["add", "Foo.ts", "foo.ts"]);
+    git(root, ["init"]);
+    git(root, ["config", "user.email", "test@example.com"]);
+    git(root, ["config", "user.name", "Test"]);
+    git(root, ["commit", "--allow-empty", "-m", "baseline"]);
+    if (foreign) await addSubmodule(root);
+    git(root, ["add", "Foo.ts", "foo.ts"]);
     if (foreign) {
-      await writeFile(join(f.root, "sub", "tracked.ts"), "after\n");
-      git(join(f.root, "sub"), ["commit", "-am", "child change"]);
-      git(f.root, ["add", "sub"]);
+      await writeFile(join(root, "sub", "tracked.ts"), "after\n");
+      git(join(root, "sub"), ["commit", "-am", "child change"]);
+      git(root, ["add", "sub"]);
     }
     const state: RemediationState = { status: "closing", ...marked, applied_edit_surface: ["Foo.ts", "foo.ts"], closing_plan: { action: "commit", pre_authorized: true, closing_action_preview: { action: "commit", files: ["Foo.ts", "foo.ts"], commit_message: "inert" } } };
-    const result = await executeClosingAction(state, { root: f.root, artifactsDir: f.artifactsDir });
+    const result = await executeClosingAction(state, { root, artifactsDir: join(root, ".audit-tools") });
     const commits = closingCommands.filter(argv => argv[1] === "commit");
     if (foreign) {
       expect(result.status).toBe("failed");
