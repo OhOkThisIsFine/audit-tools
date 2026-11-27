@@ -42,3 +42,18 @@ test("an admitted review is replayable but is not silently replaced", async () =
   assert.throws(()=>admit([accepted.record],{...submission,submission_id:"two"}),/already has an accepted response/);
   assert.deepEqual(accepted.record.submission,submission);
 });
+
+test("Codebase Memory runtime cache stays out of a Windows audit's shared temp ancestry", async () => {
+  const { reviewerCbmCacheDirectory } = await load("audit/io/reviewerCbmCache.js");
+  const { homedir, tmpdir } = await import("node:os");
+  const run = join(tmpdir(), "audit-cbm-layout-test");
+  const cache = reviewerCbmCacheDirectory(run);
+  assert.equal(cache, reviewerCbmCacheDirectory(join(run, "graph-index", "..")));
+  assert.notEqual(cache, reviewerCbmCacheDirectory(run + "-other"));
+  if (process.platform === "win32") {
+    assert.ok(cache.startsWith(join(homedir(), ".audit-tools", "review-cbm") + "\\"));
+    assert.ok(!cache.startsWith(run + "\\"));
+  } else {
+    assert.equal(cache, join(run, "review-cbm"));
+  }
+});

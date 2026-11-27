@@ -7,6 +7,7 @@ import {
   runTrackedAsync, stableStringify,
 } from "audit-tools/shared";
 import { resolveExecutableFile } from "../../shared/tooling/resolveExecutable.js";
+import { reviewerCbmCacheDirectory } from "../io/reviewerCbmCache.js";
 
 const ENGINE = "codebase-memory-mcp";
 
@@ -17,7 +18,7 @@ export const ReviewerCbmSchema = z.strictObject({
   key: z.string().refine(isSha256), engine: z.literal(ENGINE), build: z.string().refine(isSha256).optional(), version: z.string().optional(),
 });
 export type ReviewerCbm = z.infer<typeof ReviewerCbmSchema>;
-const cacheDirectory = (graphIndex: string, key: string) => join(dirname(graphIndex), "..", "review-cbm", key);
+const cacheDirectory = (graphIndex: string, key: string) => join(reviewerCbmCacheDirectory(join(dirname(graphIndex), "..")), key);
 
 function executable(): string | null {
   const configured = process.env.AUDIT_TOOLS_CBM_BIN;
@@ -73,7 +74,7 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
   const identity = { engine: ENGINE, build, files };
   const key = hashContent(stableStringify(identity));
   const meta = ReviewerCbmSchema.parse({ key, engine: ENGINE, build });
-  const cache = join(runDir, "review-cbm");
+  const cache = reviewerCbmCacheDirectory(runDir);
   const final = join(cache, key);
   const ready = async () => ReviewerCbmSchema.parse(JSON.parse(await readFile(join(final, MANIFEST), "utf8"))).key === key;
   try { if (await ready()) return meta; } catch (error) { if (!isFileMissingError(error)) throw error; }

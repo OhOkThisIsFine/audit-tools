@@ -259,6 +259,7 @@ Use the latest Codebase Memory MCP on PATH or point AUDIT_TOOLS_CBM_BIN to
 an absolute native executable. The adapter checks the actual index and query
 commands, not a version label. It does not download or update the engine.
 The host indexes the admitted frozen files once per run and installed build.
+On Windows, Audit Tools keeps the index and Codebase Memory runtime under your user profile, even when the audit artifacts are in Windows Temp. The normal audit cleanup removes the index; do not loosen Temp permissions to get indexing to work.
 Use --detail symbols or --detail call-sites, optionally --symbol for an exact
 name, and continue with the returned --cursor. Use the host/build that made
 the index; reissue the workload after a tool upgrade to rebuild it.

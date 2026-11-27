@@ -45,6 +45,7 @@
  * the OS temp dir, so no temp cleaner removes it mid-run; deterministic, so a
  * snapshot leaked by a crashed run is replaced, never accumulated.
  */
+import { removeWindowsReviewerCbmCache } from "./reviewerCbmCache.js";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rename, rm, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -959,16 +960,27 @@ export async function removeRunSnapshot(artifactsDir: string, root: string | und
       path = acquiringSnapshotPath(artifactsDir);
       record = await readSnapshotRecord(path);
     }
-    if (record === undefined) return problems;
+    if (record === undefined) return removeSnapshotReviewerCache(artifactsDir);
     ({ dir } = await validateSnapshotOwnership(record, root, artifactsDir));
   } catch (error) {
     return [`unreadable ${path}: ${(error as Error).message}`];
   }
+  problems.push(...await removeSnapshotReviewerCache(artifactsDir));
+  if (problems.length > 0) return problems;
   problems.push(...await removeSnapshotTreeAndPins(dir, record.pins));
   if (problems.length === 0) {
     await rm(path, { force: true }).catch(error => problems.push(`could not remove ${path}: ${String(error)}`));
   }
   return problems;
+}
+
+async function removeSnapshotReviewerCache(artifactsDir: string): Promise<string[]> {
+  try {
+    await removeWindowsReviewerCbmCache(artifactsDir);
+    return [];
+  } catch (error) {
+    return ["could not remove the Codebase Memory reviewer cache: " + (error as Error).message];
+  }
 }
 
 /** Internal primitive: callers must validate the layout or own freshly acquired pins. */
