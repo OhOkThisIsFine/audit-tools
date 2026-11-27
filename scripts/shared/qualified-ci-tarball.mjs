@@ -76,11 +76,13 @@ export async function retrieveQualification({
   if (candidates.length !== 1) throw new Error("Duplicate CI qualification artifacts");
   const [artifact] = candidates;
   const packedSha = artifact.name.slice(marker.length);
+  const hasOrigin = Object.hasOwn(artifact, "workflow_run");
+  const origin = artifact.workflow_run;
   if (!positiveId(artifact.id) || !/^[a-f0-9]{64}$/u.test(packedSha)
-    || artifact.workflow_run?.id !== runId || artifact.workflow_run?.head_sha !== sha
-    || artifact.workflow_run?.head_branch !== branch
-    || artifact.workflow_run?.repository_id !== run.repository.id
-    || artifact.workflow_run?.head_repository_id !== run.head_repository.id
+    || (hasOrigin && (
+      origin?.id !== runId || origin.head_sha !== sha || origin.head_branch !== branch
+      || origin.repository_id !== run.repository.id || origin.head_repository_id !== run.head_repository.id
+    ))
     || !Number.isFinite(Date.parse(artifact.expires_at))
     || !checks[0].steps?.some(step => step.name === "Verify release checks (non-test gate)" && success(step))
     || !checks[0].steps?.some(step => step.name === "Upload the CI-qualified tarball" && success(step))) {
@@ -88,9 +90,11 @@ export async function retrieveQualification({
   }
   if (artifact.expired === true || Date.parse(artifact.expires_at) <= now) return null;
   if (artifact.expired !== false) throw new Error("Missing CI artifact expiry state");
-  // Older GitHub archives without SHA-256 do not provide positive evidence.
-  if (artifact.digest == null) return null;
-  if (!/^sha256:[a-f0-9]{64}$/u.test(artifact.digest)) throw new Error("Invalid CI artifact digest");
+  if (artifact.digest != null && !/^sha256:[a-f0-9]{64}$/u.test(artifact.digest)) {
+    throw new Error("Invalid CI artifact digest");
+  }
+  // GitHub can omit workflow_run or the digest: neither absence qualifies reuse.
+  if (!hasOrigin || artifact.digest == null) return null;
   const zip = await request("/actions/artifacts/" + artifact.id + "/zip", { archive: true });
   if (!zip) return null; // GitHub may expire/delete the artifact during download.
   if (zip.length !== artifact.size_in_bytes || "sha256:" + hashContent(zip) !== artifact.digest) {

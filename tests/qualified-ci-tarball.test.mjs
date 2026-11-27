@@ -74,7 +74,7 @@ test("retrieves exactly one intact tarball from the authoritative latest attempt
   assert.equal(calls[0], calls.at(-1));
 });
 
-test("fork, PR, pending, skipped, expired and earlier-attempt artifacts cannot skip a fresh gate", async t => {
+test("fork, PR, pending, skipped, expired, incomplete and earlier-attempt artifacts cannot skip a fresh gate", async t => {
   const changes = [
     ({ run }) => { run.event = "pull_request"; },
     ({ run }) => { run.head_repository = { full_name: "fork/repo" }; },
@@ -85,6 +85,7 @@ test("fork, PR, pending, skipped, expired and earlier-attempt artifacts cannot s
     ({ input }) => { input.now = Date.parse("2030-02-01T00:00:00Z"); },
     ({ artifact }) => { artifact.name = artifact.name.replace("-2-", "-1-"); },
     ({ artifact }) => { delete artifact.digest; },
+    ({ artifact }) => { delete artifact.workflow_run; },
   ];
   for (const change of changes) {
     const data = fixture(t);
@@ -107,6 +108,9 @@ test("new failure and contradictory evidence cannot inherit an older green", asy
   const wrongOrigin = fixture(t);
   wrongOrigin.artifact.workflow_run.id = 210;
   await assert.rejects(retrieveQualification(wrongOrigin.input), /does not match the qualified run and attempt/);
+  const malformedOrigin = fixture(t);
+  malformedOrigin.artifact.workflow_run = null;
+  await assert.rejects(retrieveQualification(malformedOrigin.input), /does not match the qualified run and attempt/);
   const tampered = fixture(t);
   tampered.artifact.digest = "sha256:" + "0".repeat(64);
   await assert.rejects(retrieveQualification(tampered.input), /archive bytes do not match/);
