@@ -301,27 +301,19 @@ describe('entry-boundary damage — the RED the index generator cannot see by co
   });
 
   it('THE INCIDENT, replayed: deleting an opener LINE is caught even though the entry count drops', () => {
-    // The exact damage a line-count deletion does — remove the `- **Title**` line
-    // and nothing else. The entry is swallowed silently (the splitter's count for
-    // the live open-bugs.md drops 77 → 76), and NOTHING else in the pipeline
-    // notices: the text is just indented, which every continuation line is.
-    // Replayed against the real file so the fixture cannot drift from the corpus
-    // it is drawn from. The target is chosen by SHAPE, never by title: the entry
-    // the incident was recorded against closes one day (this lap closed it), and
-    // a title-pinned replay dies with it. The shape is the incident's: an opener
-    // after the file's first entry (before it, every indented line is already
-    // ownerless), preceded by a blank line, whose next line is indented prose.
-    const lines = readFileSync(join(REPO_ROOT, 'docs', 'backlog', 'open-bugs.md'), 'utf8').split(/\r?\n/);
-    const isOpener = (l: string): boolean => /^- \*\*/.test(l);
-    const first = lines.findIndex(isOpener);
-    const opener = lines.findIndex(
-      (l, i) =>
-        i > first &&
-        isOpener(l) &&
-        lines[i - 1]!.trim() === '' &&
-        /^[ \t]+[^-*+\s]/.test(lines[i + 1] ?? ''),
-    );
-    expect(opener, 'open-bugs.md must hold an entry of the incident shape to replay').toBeGreaterThan(0);
+    // Replay the incident's layout without requiring an unrelated open issue to
+    // stay in the living backlog. The separate live-corpus assertion below
+    // still checks the real files.
+    const lines = [
+      '# Open bugs',
+      '',
+      '- **Unrelated issue.** A first entry with its own body.',
+      '',
+      '- **Issue whose opener is deleted.**',
+      '  This surviving continuation must not be swallowed by the first issue.',
+      '',
+    ];
+    const opener = lines.indexOf('- **Issue whose opener is deleted.**');
     const damaged = [...lines.slice(0, opener), ...lines.slice(opener + 1)].join('\n');
 
     // The splitter cannot see it: one fewer entry, no malformed markdown.
