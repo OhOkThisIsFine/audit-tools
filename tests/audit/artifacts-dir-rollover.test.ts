@@ -8,6 +8,7 @@ import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
 import { buildTerminalStep } from "../../src/audit/cli/nextStepHelpers.js";
 import { AUDIT_GATE_SUBMISSION_SCOPE } from "../../src/audit/cli/laneSubmissions.js";
+import { submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
 import { hostScratchDir } from "../../src/shared/io/auditToolsPaths.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 import {
@@ -107,11 +108,15 @@ test("a completed question audit rolls over without carrying the prior run's ans
     expect(existsSync(interruption)).toBe(false);
     await expect(readAcceptedAnswers(artifactsDir, first.run_id)).rejects.toMatchObject({ code: "ENOENT" });
 
-    const secondAnswers = await submitQuestions(root, second.work_items);
-    expect((await presentQuestionReport(root)).status).toBe("complete");
-    expect((await readQuestionFindings(reportPath)).question_review.accepted.map(({ submission }) => submission))
-      .toEqual(expect.arrayContaining(secondAnswers));
-    expect(await readAcceptedAnswers(artifactsDir, second.run_id)).toHaveLength(secondAnswers.length);
+    // Admit one real result into the fresh ledger. Terminal promotion replacing
+    // an older report is tested separately below; don't repeat that full flow.
+    const [secondAnswer] = await submitQuestions(root, second.work_items.slice(0, 1));
+    expect(await submitWorkItemResult({
+      root, artifactsDir, workItemId: secondAnswer!.assignment_id, source: JSON.stringify(secondAnswer),
+    })).toMatchObject({ disposition: "accepted", submission_id: secondAnswer!.submission_id });
+    expect(await readAcceptedAnswers(artifactsDir, second.run_id)).toEqual([secondAnswer]);
+    await expect(readAcceptedAnswers(artifactsDir, first.run_id)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(reportPath)).toEqual(previousMachineReport);
   });
 });
 // The gate is the run-ended marker the terminal step writes after a successful

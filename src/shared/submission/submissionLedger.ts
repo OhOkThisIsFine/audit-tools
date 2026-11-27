@@ -189,6 +189,8 @@ export interface SubmissionLedgerEvent<
   readonly prompt_sha256?: string;
   readonly prompt_path?: string;
   readonly content_sha256?: string;
+  /** Tool-minted identity of a staged acceptance; stable during receipt replay. */
+  readonly acceptance_id?: string;
   /** ISO-8601. A faithful event record is allowed to say when. */
   readonly recorded_at: string;
 }
@@ -255,7 +257,7 @@ const SUBMISSION_LEDGER_EVENT_STRING_FIELDS = [
   "round_id",
   "landed_commit",
   "review_requirement", "review_mode", "review_reason", "prompt_sha256", "prompt_path", "content_sha256",
-  "outcome",
+  "outcome", "acceptance_id",
 ] as const;
 
 /**

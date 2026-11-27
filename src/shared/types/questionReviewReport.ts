@@ -4,6 +4,7 @@ import { AuditFindingsReportSchema, type Finding } from "./finding.js";
 import { confidenceRank, severityRank } from "./lens.js";
 import { hashContent } from "../hash.js";
 import { uniqueSorted } from "../compareCodeUnits.js";
+import { countBy } from "../countBy.js";
 import { stableStringify } from "../stableStringify.js";
 import {
   REVIEW_QUESTION_CONTRACT_VERSION,
@@ -168,10 +169,11 @@ export const QuestionAuditFindingsReportSchema = z.intersection(
     if (!question || question.revision_id !== submission.revision_id || !dependency_bindings.length ||
         question.plan_status === "blocked" || question.plan_status === "deferred" || question.state === "conflicted" ||
         question.conflicts.length || !question.accepted_answer_ids.includes(submission.submission_id)) return [];
+    const findingCounts = countBy(submission.answer.findings, claim => claim.finding_id);
     return submission.answer.findings.flatMap(claim =>
       claim.kind === "confirmed_defect" && claim.question_id === submission.question_id &&
       claim.revision_id === submission.revision_id && claim.source_refs.length > 0 &&
-      submission.answer.findings.filter(other => other.finding_id === claim.finding_id).length === 1 &&
+      findingCounts[claim.finding_id] === 1 &&
       submission.answer.parts.some(part => part.outcome === "findings" &&
         question.parts.some(row => row.part_id === part.part_id && row.accepted_answer_ids.includes(submission.submission_id)) &&
         questionPartHasSupport(submission.answer, part, evidence, claim.observation_ids ?? []))

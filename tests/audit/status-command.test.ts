@@ -392,14 +392,14 @@ test("status projects the verified current question handoff without ingesting or
         { question, assignment, sourceFiles: [], evidence: [], dependencies: [] },
         { question: secondQuestion, assignment: secondAssignment, sourceFiles: [], evidence: [], dependencies: [] },
       ] });
-    const emit = (rejected: number) => writeCurrentStep({
-      artifactsDir, repoRoot: root, stepKind: "dispatch_review", status: "ready", runId,
+    const emit = (rejected: number, stepKind: "dispatch_review" | "systemic_challenge" = "dispatch_review") => writeCurrentStep({
+      artifactsDir, repoRoot: root, stepKind, status: "ready", runId,
       progress: { summary: rejected ? "Correct the saved result." : "Wait for answers.", pending_tasks: 2, rejected_tasks: rejected },
       allowedCommands: [], stopCondition: "Submit then continue.", artifactPaths: { host_workload: workload_path }, prompt: "Fixture",
     });
     const step = await emit(0);
     expect(await status()).toMatchObject({ state: "current", action: "await_results", pending_answers: 2, workload_path: step.artifact_paths.host_workload });
-    await emit(1);
+    await emit(1, "systemic_challenge");
 
     const source = (questionId: string, assignmentId: string) => JSON.stringify({ ...identity, question_id: questionId, assignment_id: assignmentId, submission_id: "answer-" + assignmentId,
       inspected_sources: [], evidence_ids: [], limitations: ["synthetic test"],
@@ -416,9 +416,35 @@ test("status projects the verified current question handoff without ingesting or
     await submitAuditQuestionResult({ ...boundary, assignmentId: secondAssignment.assignment_id,
       source: source(secondQuestion.question_id, secondAssignment.assignment_id) });
     const before = await readFile(ledger, "utf8");
-    expect(await status()).toMatchObject({ state: "current", action: "continue", pending_answers: 0 });
+    expect(await status()).toMatchObject({
+      state: "current", action: "continue", pending_answers: 0,
+      summary: "Issued answers are accepted. The published systemic challenge is a separate lane.",
+    });
     expect(await readFile(ledger, "utf8")).toBe(before);
     await writeJson("review_plan.json", { ...plan, questions: [{ ...question, revision_id: "r2" }, secondQuestion] });
     expect(await status()).toEqual({ state: "stale" });
+  });
+});
+
+test("status reports a bound preflight without creating core audit state", async () => {
+  await withTempDir(async root => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const { functionalPreflightStep } = await import("../../src/audit/cli/functionalPreflight.js");
+    const first = (await functionalPreflightStep(root, artifactsDir))!;
+    await writeCurrentStep(first);
+    const awaiting = await runStatus(artifactsDir);
+    expect(awaiting.exitCode).toBe(0);
+    expect(JSON.parse(awaiting.stdout)).toMatchObject({ status: "preflight", functional_preflight: { status: "ready", run_id: first.runId } });
+    await expect(readFile(join(artifactsDir, "audit_state.json"))).rejects.toMatchObject({ code: "ENOENT" });
+
+    await writeCurrentStep({ ...first, runId: "11111111-1111-4111-8111-111111111111" });
+    const stale = await runStatus(artifactsDir);
+    expect(stale.exitCode).toBe(1);
+    expect(JSON.parse(stale.stdout)).toMatchObject({ status: "no_active_audit" });
+
+    await writeCurrentStep({ ...first, status: "blocked" });
+    const stopped = await runStatus(artifactsDir);
+    expect(stopped.exitCode).toBe(0);
+    expect(JSON.parse(stopped.stdout)).toMatchObject({ status: "preflight", functional_preflight: { status: "blocked" } });
   });
 });

@@ -20,7 +20,7 @@ export type AuditRunConsent = z.infer<typeof RunConsentSchema>;
 export const auditRunConsentPath = (artifactsDir: string): string => join(artifactsDir, "run-consent.json");
 
 /** Caller holds the artifact-tree lock. Cleanup/new-run removes this record with the run. */
-export async function readRunConsentUnlocked(root: string, artifactsDir: string): Promise<AuditRunConsent> {
+export async function readExistingRunConsentUnlocked(root: string, artifactsDir: string): Promise<AuditRunConsent | undefined> {
   const repository_root = await realpath(root);
   const raw = await readOptionalJsonFile<unknown>(auditRunConsentPath(artifactsDir));
   if (raw !== undefined && raw !== null) {
@@ -28,6 +28,14 @@ export async function readRunConsentUnlocked(root: string, artifactsDir: string)
     if (record.repository_root !== repository_root) throw new Error("Audit run consent belongs to another repository");
     return record;
   }
+  return undefined;
+}
+
+/** Caller holds the artifact-tree lock. Create a run only on an advancing path. */
+export async function readRunConsentUnlocked(root: string, artifactsDir: string): Promise<AuditRunConsent> {
+  const existing = await readExistingRunConsentUnlocked(root, artifactsDir);
+  if (existing) return existing;
+  const repository_root = await realpath(root);
   const record: AuditRunConsent = {
     schema_version: "audit-run-consent/v1", run_id: randomUUID(), repository_root, decisions: {}, auto_fix: false, dry_run: false,
   };

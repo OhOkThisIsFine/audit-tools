@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import type { RuntimeValidationTask } from "../../src/audit/types/runtimeValidation.js";
 
 const { checkFileIntegrity } = await import("../../src/audit/orchestrator/fileIntegrity.js");
 const { normalizeGenericExternalResults } = await import("../../src/shared/analyzers/normalizeExternal.js");
@@ -250,3 +252,98 @@ test("runCommand error event summary includes the OS error message", async () =>
   expect(result.summary.length > 0, "summary is non-empty").toBeTruthy();
   expect(result.summary.includes("__audit_code_nonexistent_42__"), "summary embeds the command name").toBeTruthy();
 });
+
+// ── runRuntimeValidationExecutor: deduplication counters in progress_summary (OBS-24ba5c5e) ──
+
+const { runRuntimeValidationExecutor } = await import("../../src/audit/orchestrator/ingestionExecutors.js");
+
+/**
+ * Build a minimal ArtifactBundle with runtime_validation_tasks for counter tests.
+ * Tasks are given `command` fields so the deduplication path is exercised.
+ */
+function makeRvBundle(tasks: RuntimeValidationTask[]): ArtifactBundle {
+  return {
+    runtime_validation_tasks: { tasks },
+    runtime_validation_report: undefined,
+    audit_results: [],
+    audit_tasks: undefined,
+    coverage_matrix: undefined,
+    critical_flows: undefined,
+    flow_coverage: undefined,
+    unit_manifest: undefined,
+    repo_manifest: undefined,
+    graph_bundle: undefined,
+    external_analyzer_results: undefined,
+    audit_plan_metrics: undefined,
+    requeue_tasks: undefined,
+    audit_report: undefined,
+    file_disposition: undefined,
+    surface_manifest: undefined,
+  };
+}
+
+function makeRvTask(id: string, command: string[]): RuntimeValidationTask {
+  return {
+    id,
+    kind: "unit-risk-check",
+    target_paths: [`src/${id}.ts`],
+    reason: "test",
+    priority: "low",
+    command,
+  };
+}
+
+test("runRuntimeValidationExecutor progress_summary includes unique-command and deduplication-hit counts", async () => {
+  await withTempDir(async (dir) => {
+    // Two tasks share the same command; one task has a unique command.
+    const sharedCommand = ["node", "--version"];
+    const uniqueCommand = ["node", "-e", "process.exit(0)"];
+    const bundle = makeRvBundle([
+      makeRvTask("t1", sharedCommand),
+      makeRvTask("t2", sharedCommand), // same signature → dedup hit
+      makeRvTask("t3", uniqueCommand),
+    ]);
+
+    const result = await runRuntimeValidationExecutor(bundle, dir);
+
+    // 3 total tasks, 2 unique command signatures (sharedCommand + uniqueCommand), 1 dedup hit.
+    expect(result.progress_summary, "summary mentions total task count").toMatch(/3 task\(s\)/);
+    expect(result.progress_summary, "summary mentions uniqueCommandsRun = 2").toMatch(/2 unique command\(s\) run/);
+    expect(result.progress_summary, "summary mentions deduplicatedHits = 1").toMatch(/1 served from deduplication cache/);
+  });
+});
+
+test("runRuntimeValidationExecutor: all distinct commands → deduplicatedHits is 0", async () => {
+  await withTempDir(async (dir) => {
+    const bundle = makeRvBundle([
+      makeRvTask("t1", ["node", "--version"]),
+      makeRvTask("t2", ["node", "-e", "process.exit(0)"]),
+    ]);
+
+    const result = await runRuntimeValidationExecutor(bundle, dir);
+
+    expect(result.progress_summary, "both commands are unique").toMatch(/2 unique command\(s\) run/);
+    expect(result.progress_summary, "no dedup hits").toMatch(/0 served from deduplication cache/);
+  });
+});
+
+test("runRuntimeValidationExecutor: all tasks share one command → uniqueCommandsRun is 1", async () => {
+  await withTempDir(async (dir) => {
+    const sharedCommand = ["node", "--version"];
+    const bundle = makeRvBundle([
+      makeRvTask("t1", sharedCommand),
+      makeRvTask("t2", sharedCommand),
+      makeRvTask("t3", sharedCommand),
+    ]);
+
+    const result = await runRuntimeValidationExecutor(bundle, dir);
+
+    expect(result.progress_summary, "summary mentions total task count").toMatch(/3 task\(s\)/);
+    expect(result.progress_summary, "only 1 unique command").toMatch(/1 unique command\(s\) run/);
+    expect(result.progress_summary, "task count minus 1 are dedup hits").toMatch(/2 served from deduplication cache/);
+    expect(result.updated.runtime_validation_report?.results.map(row => row.status))
+      .toEqual(["inconclusive", "inconclusive", "inconclusive"]);
+  });
+});
+
+// FND-OBS-c8d43100/48c05a13/6e84f23c/99e3a861/bf5c7331 tests: audit-dispatch-observability.test.mjs

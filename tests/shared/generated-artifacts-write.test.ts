@@ -32,3 +32,19 @@ test("a failed publish preserves the old generated page and cleans staging", () 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("an unrecognized generator option cannot write the target", () => {
+  const root = mkdtempSync(join(tmpdir(), "generated-artifact-option-"));
+  try {
+    const file = join(root, "page.md");
+    writeFileSync(file, "original");
+    expect(() => runGeneratedArtifactCli({
+      repoRoot: root, files: [{ target: "page.md", next: "replacement" }],
+      staleMessage: "", fixCommand: "", okMessage: "", argv: ["--chek"],
+    })).toThrow(/--chek/);
+    expect(readFileSync(file, "utf8")).toBe("original");
+    expect(readdirSync(root)).toEqual(["page.md"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

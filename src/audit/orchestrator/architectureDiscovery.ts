@@ -211,36 +211,6 @@ export function isArchitectureDiscoveryTask(task: AuditTask): boolean {
   return task.tags?.includes(ARCHITECTURE_DISCOVERY_TAG) ?? false;
 }
 
-/** Do not turn a broad design snapshot or an obsolete task into sampled source coverage. */
-export function projectArchitectureSourceSample(bundle: ArtifactBundle):
-  { status: "not_planned" | "planned_not_run" } |
-  { status: "reviewed_no_findings" | "reviewed_with_findings"; taskId: string } | undefined {
-  if (!bundle.intent_checkpoint?.lens_selection?.include?.includes("architecture") ||
-      !resolveIntentLensSelection(bundle.intent_checkpoint.lens_selection)?.includes("architecture")) return undefined;
-  const task = bundle.audit_tasks?.find((entry) => entry.tags?.includes(ARCHITECTURE_SAMPLE_TAG));
-  if (!task) return { status: "not_planned" };
-  const current = selectCurrentResults(bundle.audit_results ?? []).find((result) => result.task_id === task.task_id);
-  const baselines = bundle.artifact_metadata?.result_baselines;
-  const fresh = current?.idempotency_key && baselines?.[current.idempotency_key] !== undefined &&
-    !computeStaleResultTaskIds([current], [task], baselines).has(task.task_id);
-  const hashes = new Map(bundle.repo_manifest?.files.map((file) => [file.path, file.hash]));
-  // Host ingestion refuses reviewed_lines != total_lines even for selective
-  // work; the ledger preserves just total_lines. The seed binds complete coverage.
-  const reviewed = task.coverage_policy === "complete" && fresh && current?.lens === task.lens && current.pass_id === task.pass_id &&
-    current.unit_id === task.unit_id && (current.reviewed_clean === true || current.findings.length > 0) &&
-    task.file_paths.every((path) => hashes.has(path) && hashes.get(path) !== undefined &&
-      hashes.get(path) === task.inputs?.[`source:${path}`] &&
-      current.file_coverage.some((file) => file.path === path && file.total_lines > 0 &&
-        file.total_lines === task.file_line_counts?.[path]));
-  return reviewed
-    ? { status: current.findings.length === 0 ? "reviewed_no_findings" : "reviewed_with_findings", taskId: task.task_id }
-    : { status: "planned_not_run" };
-}
-
-export function isArchitectureSourceSampleResult(result: AuditResult): boolean {
-  return result.pass_id === "deepening:architecture" && result.task_id.startsWith(`deepening:${ARCHITECTURE_SAMPLE_ID}:`);
-}
-
 /**
  * Re-derive the discovery family inside `bundle.audit_tasks` for a producer that
  * rewrites audit_tasks.json without replanning (result ingestion). The DAG stamps
@@ -259,46 +229,4 @@ export function reconcileArchitectureDiscoveryTasks(bundle: ArtifactBundle, line
     return existing && derivation(existing) === derivation(task) ? existing : task;
   });
   return [...tasks.filter((task) => !isArchitectureDiscoveryTask(task)), ...discovery];
-}
-
-/** Join current independent evidence without pretending an empty result refutes a claim. */
-export function withArchitectureFollowupEvidence(bundle: ArtifactBundle): ArtifactBundle {
-  const tasks = new Map((bundle.audit_tasks ?? []).map((task) => [task.task_id, task]));
-  const results = selectCurrentResults(bundle.audit_results ?? []);
-  const baselines = bundle.artifact_metadata?.result_baselines;
-  const stale = computeStaleResultTaskIds(results, bundle.audit_tasks ?? [], baselines);
-  const hashes = new Map((bundle.repo_manifest?.files ?? []).map((file) => [file.path, file.hash]));
-  const current = new Map(results.filter((result) => {
-    const task = tasks.get(result.task_id);
-    return task && task.tags?.includes(DEEPENING_TAG) && !stale.has(result.task_id) &&
-      result.idempotency_key !== undefined && baselines?.[result.idempotency_key] !== undefined &&
-      task.file_paths.every((path) => hashes.get(path) !== undefined && task.inputs?.[`source:${path}`] === hashes.get(path));
-  }).map((result) => [result.task_id, result]));
-  const existingFollowups = existingFindingFollowups(bundle, results);
-  const attach = (finding: Finding): Finding => {
-    const key = architectureDiscoveryKey(finding);
-    const result = current.get(taskIdFor("architecture", [key])) ??
-      current.get(existingFollowups.get(key)?.task_id ?? "");
-    if (!result) return finding;
-    const account = result.findings.length > 0
-      ? JSON.stringify(result.findings)
-      : "No additional finding reported; this is inconclusive about the source claim and is not a refutation.";
-    return {
-      ...finding,
-      verification_status: finding.verification_status ?? "asserted",
-      evidence: [...new Set([...(finding.evidence ?? []),
-        `Independent follow-up ${result.task_id}: ${account} Treat disagreement as unresolved evidence; no semantic resolution is inferred by the tool.`])],
-    };
-  };
-  return {
-    ...bundle,
-    audit_results: results.map((result) => ({ ...result, findings: result.findings.map(attach) })),
-    ...(bundle.design_assessment ? { design_assessment: {
-      ...bundle.design_assessment,
-      contract_findings: bundle.design_assessment.contract_findings?.map(attach),
-      conceptual_findings: bundle.design_assessment.conceptual_findings?.map(attach),
-    } } : {}),
-    ...(bundle.charter_register ? { charter_register: { ...bundle.charter_register, findings: bundle.charter_register.findings.map(attach) } } : {}),
-    ...(bundle.systemic_challenge ? { systemic_challenge: { ...bundle.systemic_challenge, findings: bundle.systemic_challenge.findings.map(attach) } } : {}),
-  };
 }

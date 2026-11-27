@@ -750,6 +750,41 @@
         "src/shared/observability/rootLogObservations.ts": "c7497a421c8fa84a6b19c713bc0b0bfdc9ea6ef6"
       }
     },
+    "d9632808536dd1ea": {
+      "reviewed_by": "dot-integrated-review",
+      "attester_class": "agent",
+      "checked": "Independently checked receipt replay vs new occurrence, read-only preflight and concurrent status, frozen input-byte revalidation, supplemental challenge planning and synthesis barrier, analyzer retry order and skips, archive reader preservation, and graph precedence and cache identity.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "e2c85e3bd3364f9c8066bd277dc9ed0c8a78ee53",
+        "ran_at": "2026-11-27T17:58:22.774Z"
+      },
+      "attested_at": "2026-11-27T17:58:23.252Z",
+      "vouches": {
+        "src/audit/cli/fanoutLanes.ts": "fbf34eedbaed1152e469181c8e252c3aa8eed266",
+        "src/audit/cli/foldTransaction.ts": "7f53856c51eccbfbefea1c12bf83b332123b0922",
+        "src/audit/cli/laneSubmissions.ts": "2a3a629cdc6ea3568ff0fc17f39d17a42ec2ed5e",
+        "src/audit/cli/nextStepCommand.ts": "e413abbf33b90a9896df279e283e9a6efa66a596",
+        "src/audit/cli/nextStepHelpers.ts": "9ac9c02fefda4d679f86fec5f934d7ddd6d5dbb6",
+        "src/audit/orchestrator/acquisitionExecutor.ts": "ab7b4c1a05b2717048054ee6e4f459ed419349e8",
+        "src/audit/orchestrator/architectureDiscovery.ts": "8494fb65e453edcf9a58e6633e656bde25790fa4",
+        "src/audit/orchestrator/dependencyMap.ts": "ac926fce100e4288b2c16e230ae40d160b8d15fd",
+        "src/audit/orchestrator/dependencySlices.ts": "d98c8ce47144b6938580339e4ed8232e6ff4e50d",
+        "src/audit/orchestrator/ingestionExecutors.ts": "682fa0c3976016c7f5d7c77f0085ffbefb4aa839",
+        "src/audit/orchestrator/nextStep.ts": "5da948b90d10365e399565b3944d405270df4bea",
+        "src/audit/orchestrator/questionPlanning.ts": "c6e51c139b72dd5c5e1ebff4e7d4fae86ad1bf73",
+        "src/audit/orchestrator/runtimeValidationUpdate.ts": "03eba8f01f21304631c9e9a8bdee77d1d075d3b5",
+        "src/audit/orchestrator/state.ts": "f28c745076dc22ebe3a52804cf7056a0f89e917b",
+        "src/audit/orchestrator/structureExecutors.ts": "e7d72bdb6860313a7f5292f81088b44f3996abda",
+        "src/audit/orchestrator/synthesisExecutors.ts": "f3b054de5fecaf6d084c23b499efa451a874d661",
+        "src/audit/systemic/reviewFileMap.ts": "3c1ed43d2ff754a8a76753c8b5783b6b1d4eb082",
+        "src/remediate/steps/planningGraph.ts": "8b8897dcf88dd6d61f69c4443fb634b35d9c1780",
+        "src/shared/submission/hostResultOutcomes.ts": "68430ea470f6dc9ab43c0fac471cb971104b5a9b",
+        "src/shared/submission/submissionLedger.ts": "e45538d4610f4e35055a8429b5fadbc64fa0ff8f"
+      }
+    },
     "d9e2661ac6e501dd": {
       "reviewed_by": "codex-design-check",
       "attester_class": "agent",
@@ -994,22 +1029,22 @@
       "review": "eadba2ff8958aa32"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "review": "380a3e547fdf760b"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/cli/foldTransaction.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/cli/laneSubmissions.ts": {
-      "review": "3ac795cb6300b0c0"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/cli/laneValidators.ts": {
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "3ac795cb6300b0c0"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/cli/prompts.ts": {
       "review": "3ac795cb6300b0c0"
@@ -1033,7 +1068,7 @@
       "review": "6e602a027f50ded0"
     },
     "src/audit/orchestrator/acquisitionExecutor.ts": {
-      "review": "3ac795cb6300b0c0"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/advance.ts": {
       "review": "74f5fdb4c95e9366"
@@ -1048,7 +1083,7 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/orchestrator/architectureDiscovery.ts": {
-      "review": "e36223304299f9c6"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/artifactMetadata.ts": {
       "review": "e36223304299f9c6"
@@ -1087,10 +1122,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/dependencyMap.ts": {
-      "review": "3ac795cb6300b0c0"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/dependencySlices.ts": {
-      "review": "e36223304299f9c6"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/designReviewProjection.ts": {
       "review": "3e7d0736a83209a4"
@@ -1141,7 +1176,7 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/ingestionExecutors.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/intakeExecutors.ts": {
       "review": "392554939aa89e3b"
@@ -1174,7 +1209,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/nextStep.ts": {
-      "review": "e36223304299f9c6"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/obligationDerive.ts": {
       "baseline": "7b79934e86baf378"
@@ -1198,7 +1233,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"
@@ -1246,7 +1281,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/runtimeValidationUpdate.ts": {
-      "review": "e36223304299f9c6"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/scope.ts": {
       "review": "f20b857654eebefb"
@@ -1282,16 +1317,16 @@
       "review": "58a44ca3a3caea9d"
     },
     "src/audit/orchestrator/state.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/structureExecutors.ts": {
-      "review": "f20b857654eebefb"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/syntaxResolutionExecutor.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/synthesisExecutors.ts": {
-      "review": "a1a3dd0149010098"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/orchestrator/systemicChallengeExecutor.ts": {
       "review": "3e7d0736a83209a4"
@@ -1315,7 +1350,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/systemic/reviewFileMap.ts": {
-      "review": "380a3e547fdf760b"
+      "review": "d9632808536dd1ea"
     },
     "src/audit/systemic/secondOrderAdversaryPrompt.ts": {
       "review": "380a3e547fdf760b"
@@ -1375,7 +1410,7 @@
       "review": "eadba2ff8958aa32"
     },
     "src/remediate/steps/planningGraph.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "d9632808536dd1ea"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "e36223304299f9c6"
@@ -1408,7 +1443,7 @@
       "review": "9ae8f3b83f558bae"
     },
     "src/shared/submission/hostResultOutcomes.ts": {
-      "review": "e36223304299f9c6"
+      "review": "d9632808536dd1ea"
     },
     "src/shared/submission/ingestReport.ts": {
       "review": "e36223304299f9c6"
@@ -1423,7 +1458,7 @@
       "review": "0c6c1b84455cdb39"
     },
     "src/shared/submission/submissionLedger.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "d9632808536dd1ea"
     },
     "src/shared/submission/submissionScan.ts": {
       "review": "e501ffc69df5ac27"

@@ -246,6 +246,8 @@ export interface SubmissionIngestHistory {
    * what this pass just recorded.
    */
   readonly accepted: Set<string>;
+  /** Staged acceptance identities, grouped by the stable lane submission ID. */
+  readonly stagedAcceptances: Map<string, Set<string>>;
 }
 
 export async function readSubmissionIngestHistory(
@@ -253,15 +255,22 @@ export async function readSubmissionIngestHistory(
   options?: { readonly runId?: string },
 ): Promise<SubmissionIngestHistory> {
   const accepted = new Set<string>();
+  const stagedAcceptances = new Map<string, Set<string>>();
   for (const event of await readSubmissionLedger(artifactsDir)) {
     if (options?.runId !== undefined && event.run_id !== options.runId) continue;
     if (!isIngestEvent(event.kind)) continue;
     // `accepted` only, not `accepted_via_recovery`: the recovery verb is a
     // different, operator-driven act with its own record, and folding the two
     // would let one suppress the other's row.
-    if (event.kind === "accepted") accepted.add(event.submission_id);
+    if (event.kind !== "accepted") continue;
+    accepted.add(event.submission_id);
+    if (event.acceptance_id !== undefined) {
+      let ids = stagedAcceptances.get(event.submission_id);
+      if (!ids) stagedAcceptances.set(event.submission_id, ids = new Set());
+      ids.add(event.acceptance_id);
+    }
   }
-  return { accepted };
+  return { accepted, stagedAcceptances };
 }
 
 /**

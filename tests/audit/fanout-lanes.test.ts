@@ -31,7 +31,7 @@ describe("materializeFanoutLanes", () => {
       await writeFile(packet, "packet evidence");
       const ids = [charterExtractionLane("stated"), charterExtractionLane("structural"),
         charterExtractionLane("revealed"), GATE_LANES.charter_fidelity];
-      const fanout = await materializeFanoutLanes({
+      const emit = () => materializeFanoutLanes({
         artifactsDir: dir, sourceRoot, runId: AUDIT_GATE_SUBMISSION_SCOPE,
         lanes: ids.map(id => ({
           id, label: id, fileCount: 0, riskScore: 0,
@@ -39,6 +39,7 @@ describe("materializeFanoutLanes", () => {
           contextPaths: [packet],
         })),
       });
+      const fanout = await emit();
       expect(fanout.readPaths).toContain(packet);
       expect(fanout.readPaths).not.toContain(sourceRoot);
       for (const lane of fanout.lanes) {
@@ -48,8 +49,15 @@ describe("materializeFanoutLanes", () => {
         expect(prompt).not.toContain(sourceRoot);
         expect(prompt).toContain("## Bound review submission");
         expect(await readAuditReviewBinding(dir, lane.id)).toMatchObject({
-          inputs: [{ path: packet, sha256: expect.any(String) }],
+          inputs: [{ path: packet, sha256: createHash("sha256").update("packet evidence").digest("hex") }],
         });
+      }
+      await writeFile(packet, "new packet bytes");
+      expect(await readAuditReviewBinding(dir, ids[0]!)).toBeUndefined();
+      await emit();
+      const updatedDigest = createHash("sha256").update("new packet bytes").digest("hex");
+      for (const lane of ids) {
+        expect(await readAuditReviewBinding(dir, lane)).toMatchObject({ inputs: [{ path: packet, sha256: updatedDigest }] });
       }
     } finally {
       await rm(dir, { recursive: true, force: true });

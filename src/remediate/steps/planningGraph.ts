@@ -28,8 +28,10 @@ export async function preparePlanningGraph({ root, artifactsDir }: PlanningGraph
       const candidate = await read().catch(() => undefined);
       if (readReviewGraphSourceDigest(candidate) === source) { text = candidate; break; }
     }
+    // The remediation phase lock serializes writers, so one snapshot serves both checks.
+    const cachedText = await readOptionalTextFile(cachePath).catch(() => undefined);
     if (!text) {
-      text = await readOptionalTextFile(cachePath).catch(() => undefined);
+      text = cachedText;
       if (readReviewGraphSourceDigest(text) !== source) {
         const disposition = await buildFileDisposition(manifest, { root });
         const bundle = await buildGraphBundleFromFs(manifest, root, disposition);
@@ -41,7 +43,7 @@ export async function preparePlanningGraph({ root, artifactsDir }: PlanningGraph
       }
     }
     if (text === undefined) return "";
-    if (await readOptionalTextFile(cachePath).catch(() => undefined) !== text) await writeTextFile(cachePath, text);
+    if (cachedText !== text) await writeTextFile(cachePath, text);
     const command = renderAuditCommand(["review-graph", "--graph-index", cachePath, "--graph-sha256", hashContent(text), "--path", "REPO_RELATIVE_PATH"]);
     return `\nDependency navigation: run \`${command}\` on demand. Replace REPO_RELATIVE_PATH with a repository-relative path. These file links are hints; verify affected callers and boundaries in source. Do not load the entire graph into context.\n`;
   } catch (error) {

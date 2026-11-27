@@ -1105,18 +1105,6 @@ function reportFindingIds(report: RenderableAuditReport): Set<string> {
   ]);
 }
 
-export function conceptualAttributionNeedsIdSource(
-  report: RenderableAuditReport,
-  adjudication: ConceptualReviewAdjudication | undefined,
-): boolean {
-  if (!adjudication) return false;
-  const ids = reportFindingIds(report);
-  return adjudication.final_finding_shares.some((share) => !ids.has(share.final_finding_id)) ||
-    adjudication.candidate_dispositions.some((disposition) =>
-      disposition.target_final_finding_ids.some((id) => !ids.has(id)),
-    );
-}
-
 export function canonicalizeConceptualAttributionIds(
   report: RenderableAuditReport,
   adjudication: ConceptualReviewAdjudication,

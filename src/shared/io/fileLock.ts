@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/fileLock.test.ts
 import { access, writeFile, unlink, stat, readFile, mkdir, utimes } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname } from "node:path";
@@ -131,7 +132,7 @@ async function bestEffortUnlink(path: string): Promise<void> {
 // reclaimed, mirroring the main lock's staleness recovery. The claim is always
 // removed in a finally on the happy path so it lives only for the brief
 // token-check + unlink window.
-async function stealStaleLock(lockPath: string, staleToken: string, now: Clock): Promise<void> {
+async function stealStaleLock(lockPath: string, staleToken: string, now: Clock): Promise<boolean> {
   const claimPath = `${lockPath}${STEAL_CLAIM_SUFFIX}`;
   try {
     await writeFile(claimPath, generateOwnerToken(now), { flag: "wx" });
@@ -150,9 +151,9 @@ async function stealStaleLock(lockPath: string, staleToken: string, now: Clock):
       } catch {
         // claim vanished between EEXIST and stat — nothing to reclaim
       }
-      return;
+      return false;
     }
-    if (code === "EPERM" || code === "EACCES") return; // transient Windows contention
+    if (code === "EPERM" || code === "EACCES") return false; // transient Windows contention
     throw err;
   }
 
@@ -173,12 +174,14 @@ async function stealStaleLock(lockPath: string, staleToken: string, now: Clock):
     const stillStale = now() - info.mtimeMs > STALE_LOCK_MS;
     if (stillStale && content === staleToken) {
       await unlink(lockPath);
+      return true;
     }
   } catch {
     // best-effort: lock already gone or briefly contended on Windows
   } finally {
     await bestEffortUnlink(claimPath);
   }
+  return false;
 }
 
 /** Optional seams for the lock: the injectable {@link Clock} + heartbeat cadence. */
@@ -315,8 +318,8 @@ export async function acquireLock(
         // unlinks, and only while the lock still carries this stale token — so a
         // fresh lock another holder created in the gap is never clobbered, and two
         // concurrent stealers can never both end up holding the lock.
-        await stealStaleLock(lockPath, staleToken, now);
-        logger?.event({ kind: "step", note: "stale_lock_removed", lock_path: lockPath } as never);
+        const removed = await stealStaleLock(lockPath, staleToken, now);
+        if (removed) logger?.event({ kind: "step", note: "stale_lock_removed", lock_path: lockPath } as never);
         // Progress was made (a slot may have opened); retry promptly and reset
         // the backoff window.
         retryInterval = RETRY_INTERVAL_INITIAL_MS;

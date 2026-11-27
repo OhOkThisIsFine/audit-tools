@@ -13,6 +13,8 @@ import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import { loadCurrentActiveReviewRun } from "./reviewRun.js";
 import { StepArtifactSchema } from "./steps.js";
 import { inspectAuditQuestionHandoff } from "./dispatch/hostHandoff.js";
+import { readExistingRunConsentUnlocked } from "../../shared/analyzerRunConsent.js";
+import { functionalPreflightPath } from "./functionalPreflight.js";
 import { getRunPaths } from "../io/runArtifacts.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
@@ -26,7 +28,8 @@ async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: st
       join(artifactsDir, "steps", "current-step.json"),
     ));
     const boundPath = step.artifact_paths.host_workload;
-    if (step.step_kind !== "dispatch_review" || step.run_id !== runId ||
+    const alongsideChallenge = step.step_kind === "systemic_challenge";
+    if ((!alongsideChallenge && step.step_kind !== "dispatch_review") || step.run_id !== runId ||
         step.status !== "ready" || !boundPath ||
         resolve(step.artifacts_dir) !== resolve(artifactsDir)) return { state: "stale" };
     const issued = await inspectAuditQuestionHandoff({ root: step.repo_root, artifactsDir, runId });
@@ -42,11 +45,33 @@ async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: st
       state: "current", action: issued.pending === 0 ? "continue" : "await_results",
       workload_path: boundPath, pending_answers: issued.pending,
       ...(rejectedAtPublication === undefined ? {} : { previous_publication_rejections: rejectedAtPublication }),
-      summary: issued.pending === 0 ? "Issued answers are accepted. Run next-step to continue."
+      summary: issued.pending === 0
+        ? alongsideChallenge
+          ? "Issued answers are accepted. The published systemic challenge is a separate lane."
+          : "Issued answers are accepted. Run next-step to continue."
         : "Waiting for " + issued.pending + (issued.pending === 1 ? " question answer." : " question answers."),
     };
   } catch {
     return { state: "unavailable" };
+  }
+}
+
+async function publishedPreflight(artifactsDir: string) {
+  try {
+    const step = StepArtifactSchema.parse(await readJsonFile<unknown>(
+      join(artifactsDir, "steps", "current-step.json"),
+    ));
+    if (step.step_kind !== "functional_preflight" || !step.run_id ||
+        (step.status !== "ready" && step.status !== "blocked") ||
+        resolve(step.artifacts_dir) !== resolve(artifactsDir) ||
+        !step.artifact_paths.functional_preflight ||
+        resolve(step.artifact_paths.functional_preflight) !== resolve(functionalPreflightPath(artifactsDir))) return null;
+    const consent = await readExistingRunConsentUnlocked(step.repo_root, artifactsDir);
+    if (consent?.run_id !== step.run_id) return null;
+    return { run_id: step.run_id, status: step.status, summary: step.progress?.summary ?? null };
+  } catch {
+    // A missing, invalid, or stale publication cannot prove an active preflight.
+    return null;
   }
 }
 
@@ -65,6 +90,11 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
   }
 
   if (!auditState) {
+    const preflight = await publishedPreflight(artifactsDir);
+    if (preflight) {
+      outputJson({ artifacts_dir: artifactsDir, status: "preflight", functional_preflight: preflight });
+      return;
+    }
     outputJson({ status: 'no_active_audit', error: 'No audit_state.json found; no active audit in this artifacts directory.' });
     process.exitCode = 1;
     return;

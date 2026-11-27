@@ -109,8 +109,10 @@ export function runGeneratedArtifactCli({
   fixCommand,
   okMessage,
   wroteSuffix = "",
-  argv = process.argv,
+  argv = process.argv.slice(2),
 }) {
+  const unknown = argv.find(option => option !== "--check");
+  if (unknown !== undefined) throw new Error("Unknown generator option: " + unknown);
   if (argv.includes("--check")) {
     const stale = files.filter(({ target, next }) => {
       let current = null;

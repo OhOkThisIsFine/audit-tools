@@ -405,12 +405,15 @@ function extractAnalyzerGraphEdges(
   return edges;
 }
 
-function extractImportEdges(
+interface ImportSpecifierRange { start: number; end: number }
+
+function extractImportEvidence(
   fromPath: string,
   content: string,
   pathLookup: Map<string, string>,
-): GraphEdge[] {
+): { edges: GraphEdge[]; ranges: ImportSpecifierRange[] } {
   const edges: GraphEdge[] = [];
+  const ranges: ImportSpecifierRange[] = [];
   for (const { pattern, kind } of IMPORT_PATTERNS) {
     pattern.lastIndex = 0;
     for (const match of content.matchAll(pattern)) {
@@ -428,20 +431,8 @@ function extractImportEdges(
           }),
         );
       }
-    }
-  }
-  return edges;
-}
 
-function importSpecifierRanges(
-  content: string,
-): Array<{ start: number; end: number }> {
-  const ranges: Array<{ start: number; end: number }> = [];
-  for (const { pattern } of IMPORT_PATTERNS) {
-    pattern.lastIndex = 0;
-    for (const match of content.matchAll(pattern)) {
-      const specifier = match[1];
-      if (!specifier) continue;
+      // Even when resolution fails, the literal belongs to the import syntax.
       const fullMatch = match[0];
       const doubleQuotedOffset = fullMatch.lastIndexOf(`"${specifier}"`);
       const singleQuotedOffset = fullMatch.lastIndexOf(`'${specifier}'`);
@@ -452,13 +443,13 @@ function importSpecifierRanges(
       ranges.push({ start, end: start + specifier.length });
     }
   }
-  return ranges;
+  return { edges, ranges };
 }
 
 function isImportSpecifierRange(
   start: number,
   end: number,
-  ranges: Array<{ start: number; end: number }>,
+  ranges: ImportSpecifierRange[],
 ): boolean {
   return ranges.some((range) => range.start === start && range.end === end);
 }
@@ -467,9 +458,9 @@ function extractReferenceEdges(
   fromPath: string,
   content: string,
   pathLookup: Map<string, string>,
+  importRanges: ImportSpecifierRange[],
 ): GraphEdge[] {
   const edges: GraphEdge[] = [];
-  const importRanges = importSpecifierRanges(content);
   STRING_LITERAL_PATTERN.lastIndex = 0;
   for (const match of content.matchAll(STRING_LITERAL_PATTERN)) {
     const literal = match[1];
@@ -692,9 +683,10 @@ function extractContentEdgesForFile(
   pathIndex: GraphPathIndex,
 ): void {
   const packageContent = isPackageManifestPath(filePath) ? parsePackageRecord(content) : content;
-  acc.imports.push(...extractImportEdges(filePath, content, pathLookup));
+  const { edges: importEdges, ranges: importRanges } = extractImportEvidence(filePath, content, pathLookup);
+  acc.imports.push(...importEdges);
   acc.imports.push(...extractPythonImportEdges(filePath, content, pathLookup, pathIndex));
-  acc.references.push(...extractReferenceEdges(filePath, content, pathLookup));
+  acc.references.push(...extractReferenceEdges(filePath, content, pathLookup, importRanges));
   acc.references.push(
     ...extractJsonSchemaReferenceEdges(filePath, content, pathLookup),
   );

@@ -59,15 +59,28 @@ export function projectQuestionForReport(
     }
   }
   const effective = live.filter(({submission}) => !inactive.has(submission.submission_id));
+  const supportedPartsByAnswer = new Map<string, {submission: ReviewAcceptedAnswer["submission"]; part: ReviewAcceptedAnswer["submission"]["answer"]["parts"][number]}[]>();
+  for (const {submission} of effective) {
+    for (const part of submission.answer.parts) {
+      if (part.outcome === "findings") addToIndex(supportedPartsByAnswer, submission.submission_id, {submission, part});
+    }
+  }
+  const stalePartIds = new Set(stale.flatMap(({submission}) => submission.answer.parts.map(part => part.part_id)));
+  const latestDecisionsFirst = [...decisions].reverse();
   const conflicts: QuestionRow["conflicts"] = [];
   const parts = question.requested_parts.map(({ part_id, expectation }): QuestionRow["parts"][number] => {
     const answers = effective.flatMap(({ submission }) => submission.answer.parts.filter(part => part.part_id === part_id).map(part => {
       return { part, answerId: submission.submission_id, outcome: questionPartHasSupport(submission.answer, part, evidence) ? part.outcome : "inconclusive" as const };
     }));
     const answerIds = uniqueSorted(answers.map(answer => answer.answerId));
-    const dispute = [...decisions].reverse().find(decision =>
-      decision.submission_ids.filter(id => answerIds.includes(id)).length >= 2,
-    )?.decision === "disputed";
+    const partAnswerIds = new Set(answerIds);
+    const dispute = latestDecisionsFirst.find(decision => {
+      let matched = 0;
+      for (const id of decision.submission_ids) {
+        if (partAnswerIds.has(id) && ++matched === 2) return true;
+      }
+      return false;
+    })?.decision === "disputed";
     const findings = answers.some(answer => answer.outcome === "findings");
     const clean = answers.some(answer => answer.outcome === "clean");
     const gap = answers.some(answer => answer.outcome === "inconclusive");
@@ -78,8 +91,7 @@ export function projectQuestionForReport(
     } else if (gap) state = "inconclusive";
     else if (findings) state = "findings";
     else if (clean) state = "clean";
-    else if (stale.some(answer =>
-      answer.submission.answer.parts.some(part => part.part_id === part_id))) state = "stale";
+    else if (stalePartIds.has(part_id)) state = "stale";
     else state = "unreviewed";
     return {
       part_id, expectation, state, accepted_answer_ids: answerIds,
@@ -109,9 +121,8 @@ export function projectQuestionForReport(
     answerId: submission.submission_id, source,
     actionable: counts.get(source.finding_id) === 1 && active && ids.has(submission.submission_id) && !inactive.has(submission.submission_id) &&
       source.kind === "confirmed_defect" && source.source_refs.length > 0 &&
-      effective.some(answer => answer.submission.submission_id === submission.submission_id &&
-        answer.submission.answer.parts.some(part => part.outcome === "findings" &&
-          questionPartHasSupport(answer.submission.answer, part, evidence, source.observation_ids ?? []))),
+      (supportedPartsByAnswer.get(submission.submission_id)?.some(({submission: effectiveSubmission, part}) =>
+        questionPartHasSupport(effectiveSubmission.answer, part, evidence, source.observation_ids ?? [])) ?? false),
     }));
   });
   return {
@@ -206,8 +217,9 @@ export function buildQuestionAuditFindingsReport(input: QuestionReportInput): Qu
   const counts = (key: "severity" | "lens"): Record<string, number> => Object.fromEntries(
     uniqueSorted(findings.map(finding => finding[key])).map(value => [value, findings.filter(finding => finding[key] === value).length]),
   );
+  const mappedInventory = new Set(input.plan.questions.flatMap(question => question.inventory_item_ids));
   const unmapped = input.plan.inventory.some(item => item.scope === "in_scope" &&
-    !input.plan.questions.some(question => question.inventory_item_ids.includes(item.inventory_item_id)));
+    !mappedInventory.has(item.inventory_item_id));
   const completion = questions.length === 0 || unmapped || input.plan.omissions.length > 0 ||
     questions.some(row => row.state !== "clean" && row.state !== "findings") ? "incomplete" : "complete";
   const question_review: QuestionReviewReport = {

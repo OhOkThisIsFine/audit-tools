@@ -883,3 +883,19 @@ test("INV-SCC-08: a LIVE withFileLock holder is heartbeat-refreshed and never cl
     expect(await held).toBe("done");
   });
 });
+
+test("a stale lock with another fresh steal claim does not log removal", async () => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = join(dir, "claimed.lock");
+    const logPath = join(dir, "run.jsonl");
+    await writeFile(lockPath, "stale-owner");
+    const past = new Date(Date.now() - STALE_BACKDATE_MS);
+    await utimes(lockPath, past, past);
+    await writeFile(lockPath + ".steal", "another claimant");
+
+    await expect(acquireLock(lockPath, 0, new RunLogger(logPath)))
+      .rejects.toBeInstanceOf(FileLockTimeoutError);
+    expect(await readFile(lockPath, "utf8")).toBe("stale-owner");
+    expect((await readLoggedEvents(logPath)).map(event => event.note)).not.toContain("stale_lock_removed");
+  });
+});

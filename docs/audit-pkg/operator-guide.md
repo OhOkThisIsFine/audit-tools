@@ -78,7 +78,9 @@ audit-code next-step
 ```
 
 The wrapper defaults artifacts to `<repo-root>/.audit-tools/audit` and advances
-one bounded, persisted step. Useful diagnostic and recovery commands include:
+one bounded, persisted step. `status` can show a last-published preflight even before
+the audit state exists; it does not ingest a newly written preflight response.
+Useful diagnostic and recovery commands include:
 
 ```bash
 audit-code status

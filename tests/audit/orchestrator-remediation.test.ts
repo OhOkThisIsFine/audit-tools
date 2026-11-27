@@ -27,6 +27,8 @@ import type {
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const {
   runExternalAnalyzerImportExecutor,
+  runResultIngestionExecutor,
+  runRuntimeValidationUpdateExecutor,
 } = await import("../../src/audit/orchestrator/ingestionExecutors.js");
 const { resolveRuntimeValidationSpawnCommand } = await import("../../src/audit/orchestrator/runtimeCommand.js");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
@@ -657,6 +659,144 @@ test("selective deepening reconciles runtime validation disagreement", () => {
   expect(runtimeTask!.lens).toBe("security");
   expect(runtimeTask!.priority).toBe("high");
   expect(runtimeTask!.file_paths).toEqual(["src/api/auth.ts"]);
+});
+
+test("result ingestion appends selective deepening tasks to the next review plan", () => {
+  const result: AuditResult = {
+    task_id: "src-api-auth:security",
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+    findings: [
+      {
+        id: "SEC-001",
+        title: "Token bypass",
+        category: "auth",
+        severity: "high",
+        confidence: "medium",
+        lens: "security",
+        summary: "Potential token bypass needs verification.",
+        affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
+        evidence: ["src/api/auth.ts:12 - accepts empty token"],
+      },
+    ],
+  };
+
+  const run = runResultIngestionExecutor(
+    {
+      coverage_matrix: {
+        files: [
+          {
+            path: "src/api/auth.ts",
+            unit_ids: ["src-api-auth"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+        ],
+      },
+      audit_tasks: [
+        {
+          task_id: result.task_id,
+          unit_id: result.unit_id,
+          pass_id: result.pass_id,
+          lens: result.lens,
+          file_paths: ["src/api/auth.ts"],
+          file_line_counts: { "src/api/auth.ts": 40 },
+          rationale: "Audit auth",
+          priority: "high",
+          status: "pending",
+        },
+      ],
+    },
+    [result],
+  );
+
+  expect(run.updated.audit_tasks!.length).toBe(2);
+  expect(
+    run.updated.audit_tasks!.find((task) => task.task_id === result.task_id)
+      ?.status,
+  ).toBe("complete");
+  const followup = run.updated.audit_tasks!.find((task) =>
+    task.tags?.includes("selective_deepening"),
+  );
+  expect(followup?.status).toBe("pending");
+  expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
+  expect(run.progress_summary).toMatch(/selective deepening task/i);
+});
+
+test("runtime validation updates append disagreement follow-ups to the next review plan", () => {
+  const sourceTask: AuditTask = {
+    task_id: "src-api-auth:correctness",
+    unit_id: "src-api-auth",
+    pass_id: "pass:correctness",
+    lens: "correctness",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 40 },
+    rationale: "Audit auth",
+    priority: "low",
+    status: "complete",
+  };
+  const run = runRuntimeValidationUpdateExecutor(
+    {
+      audit_tasks: [sourceTask],
+      audit_results: [
+        {
+          task_id: sourceTask.task_id,
+          unit_id: sourceTask.unit_id,
+          pass_id: sourceTask.pass_id,
+          lens: sourceTask.lens,
+          file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+          findings: [],
+          reviewed_clean: true,
+        },
+      ],
+      runtime_validation_tasks: {
+        tasks: [
+          {
+            id: "runtime:unit:src-api-auth",
+            kind: "unit-risk-check",
+            target_paths: ["src/api/auth.ts"],
+            reason: "Auth unit is high risk.",
+            priority: "high",
+            command: ["npm", "test"],
+          },
+        ],
+      },
+      runtime_validation_report: {
+        results: [
+          {
+            task_id: "runtime:unit:src-api-auth",
+            status: "pending",
+            summary: "Pending",
+          },
+        ],
+      },
+    },
+    {
+      results: [
+        {
+          task_id: "runtime:unit:src-api-auth",
+          status: "not_confirmed",
+          summary: "npm test failed",
+        },
+      ],
+    },
+  );
+
+  expect(run.updated.audit_tasks!.length).toBe(2);
+  const followup = run.updated.audit_tasks!.find((task) =>
+    task.tags?.includes("trigger:runtime_validation_disagreement"),
+  );
+  expect(followup).toBeDefined();
+  expect(
+    followup?.tags?.includes("trigger:runtime_validation_disagreement"),
+  ).toBeTruthy();
+  expect(followup?.status).toBe("pending");
+  expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
+  expect(run.progress_summary).toMatch(/selective deepening task/i);
 });
 
 test("a lens steward is granted its whole surface through buildSelectiveDeepeningTasks, with metrics and the selective policy", () => {
@@ -1759,6 +1899,287 @@ test("the active question plan uses frozen source without legacy line counts or 
   expect(resumed.updated.review_plan).toEqual(planned);
   expect(resumed.updated.requeue_tasks).toEqual([requeueTask]);
   expect(resumed.artifacts_written).toEqual(["scope.json", "review_plan.json"]);
+});
+
+test("ingestion executor folds pending requeue tasks for uncovered files into the dispatch surface", () => {
+  // Scenario: auth.ts is ingested (coverage complete), utils.ts has no task
+  // and remains uncovered → buildRequeuePayload generates a pending task for
+  // it → that task must count toward the refreshed plan metrics (packets
+  // themselves are partitioned just-in-time at dispatch).
+  const authTask: AuditTask = {
+    task_id: "src-api-auth:security",
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 30 },
+    rationale: "Audit auth",
+    priority: "high",
+    status: "pending",
+  };
+  const result: AuditResult = {
+    task_id: authTask.task_id,
+    unit_id: authTask.unit_id,
+    pass_id: authTask.pass_id,
+    lens: authTask.lens,
+    file_coverage: [{ path: "src/api/auth.ts", total_lines: 30 }],
+    findings: [],
+    reviewed_clean: true,
+  };
+
+  const run = runResultIngestionExecutor(
+    {
+      coverage_matrix: {
+        files: [
+          {
+            path: "src/api/auth.ts",
+            unit_ids: ["src-api-auth"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+          {
+            path: "src/lib/utils.ts",
+            unit_ids: ["src-lib-utils"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+        ],
+      },
+      audit_tasks: [authTask],
+    },
+    [result],
+  );
+
+  // utils.ts has no planned task and is still uncovered → requeue task exists
+  const requeueTask = run.updated.requeue_tasks?.find(
+    (t) => t.task_id === "requeue:security:src/lib/utils.ts",
+  );
+  expect(requeueTask, "expected a pending requeue task for src/lib/utils.ts").toBeTruthy();
+  expect(requeueTask!.status).toBe("pending");
+
+  // The requeue task must be folded into the persisted dispatch surface so JIT
+  // packetization, the affinity graph, and metrics all describe one task set.
+  const foldedRequeue = run.updated.audit_tasks!.find(
+    (task) => task.task_id === requeueTask!.task_id,
+  );
+  expect(
+    foldedRequeue?.file_paths.includes("src/lib/utils.ts"),
+    "utils requeue task must be part of the folded dispatch surface",
+  ).toBeTruthy();
+  expect(run.updated.audit_plan_metrics!.task_count).toBe(
+    run.updated.audit_tasks!.length,
+  );
+  expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
+});
+
+test("ingestion executor deduplicates requeue tasks already present in audit_tasks", () => {
+  // Scenario: utils.ts is already tracked as a "complete" task in audit_tasks.
+  // After ingestion, buildRequeuePayload still generates a pending requeue task
+  // for it (coverage is still marked pending), but the dedup guard must prevent
+  // it from being added a second time via the requeue folding path.
+  const authTask: AuditTask = {
+    task_id: "src-api-auth:security",
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 30 },
+    rationale: "Audit auth",
+    priority: "high",
+    status: "complete",
+  };
+  const utilsRequeueTask: AuditTask = {
+    task_id: "requeue:security:src/lib/utils.ts",
+    unit_id: "requeue:src/lib/utils.ts",
+    pass_id: "requeue:security",
+    lens: "security",
+    file_paths: ["src/lib/utils.ts"],
+    file_line_counts: {},
+    rationale: "Already tracked",
+    priority: "medium",
+    tags: [],
+    status: "complete",
+  };
+
+  const run = runResultIngestionExecutor(
+    {
+      coverage_matrix: {
+        files: [
+          {
+            path: "src/api/auth.ts",
+            unit_ids: ["src-api-auth"],
+            classification_status: "classified",
+            audit_status: "complete",
+            required_lenses: ["security"],
+            completed_lenses: ["security"],
+          },
+          {
+            path: "src/lib/utils.ts",
+            unit_ids: ["src-lib-utils"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+        ],
+      },
+      audit_tasks: [authTask, utilsRequeueTask],
+    },
+    [],
+  );
+
+  // The dispatch surface must count utils.ts once (no duplicate task): the
+  // already-tracked utils requeue task must not be re-added via the requeue
+  // folding path, so metrics never exceed tracked tasks + genuinely-new
+  // pending requeue tasks.
+  const trackedIds = new Set(run.updated.audit_tasks!.map((t) => t.task_id));
+  const foldedRequeue = (run.updated.requeue_tasks ?? []).filter(
+    (t) => t.status === "pending" && !trackedIds.has(t.task_id),
+  );
+  expect(run.updated.audit_plan_metrics!.task_count, "requeue task must not be folded into the dispatch surface twice").toBe(run.updated.audit_tasks!.length + foldedRequeue.length);
+});
+
+test("ingestion executor refuses a requeue task a PLAIN plan task already covers under the same lens", () => {
+  // The gap both fixtures above miss. `requeue:<lens>:<path>` and a plan task's
+  // `<unit>:<lens>` are two different id grammars, so a task_id-only dedupe can
+  // never match: the file is covered by a still-pending PLAIN plan task, which is
+  // exactly the shape the whole coverage set takes on a fresh plan. Coverage-based
+  // dedupe (`selectUncoveredRequeueTasks`, the planning draw's mechanism) is the
+  // only thing that sees it.
+  const authTask: AuditTask = {
+    task_id: "src-api-auth:security",
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 30 },
+    rationale: "Audit auth",
+    priority: "high",
+    status: "pending",
+  };
+  const utilsTask: AuditTask = {
+    task_id: "src-lib-utils:security",
+    unit_id: "src-lib-utils",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/lib/utils.ts"],
+    file_line_counts: { "src/lib/utils.ts": 20 },
+    rationale: "Audit utils",
+    priority: "medium",
+    status: "pending",
+  };
+  const result: AuditResult = {
+    task_id: authTask.task_id,
+    unit_id: authTask.unit_id,
+    pass_id: authTask.pass_id,
+    lens: authTask.lens,
+    file_coverage: [{ path: "src/api/auth.ts", total_lines: 30 }],
+    findings: [],
+    reviewed_clean: true,
+  };
+
+  const run = runResultIngestionExecutor(
+    {
+      coverage_matrix: {
+        files: [
+          {
+            path: "src/api/auth.ts",
+            unit_ids: ["src-api-auth"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+          {
+            path: "src/lib/utils.ts",
+            unit_ids: ["src-lib-utils"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+        ],
+      },
+      audit_tasks: [authTask, utilsTask],
+    },
+    [result],
+  );
+
+  // The payload still names the gap — the fold, not the payload, is under test.
+  expect(
+    (run.updated.requeue_tasks ?? []).some(
+      (t) => t.task_id === "requeue:security:src/lib/utils.ts" && t.status === "pending",
+    ),
+    "the requeue payload must still emit the pending coverage cell",
+  ).toBe(true);
+
+  expect(
+    run.updated.audit_tasks!.filter((t) => t.task_id.startsWith("requeue:")),
+    "no requeue task may be folded when a pending plan task already covers the file under that lens",
+  ).toEqual([]);
+  expect(run.updated.audit_plan_metrics!.task_count).toBe(
+    run.updated.audit_tasks!.length,
+  );
+});
+
+test("ingestion executor applies the operator lens gate to the requeue fold", () => {
+  // `intent_checkpoint.lens_selection.exclude` is the operator's word on what may
+  // be dispatched. The planning draw gates the fold on it; ingestion must resolve
+  // the SAME effective lens set, or an excluded lens re-enters dispatch through
+  // requeue on the first ingest.
+  const authTask: AuditTask = {
+    task_id: "src-api-auth:security",
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 30 },
+    rationale: "Audit auth",
+    priority: "high",
+    status: "pending",
+  };
+
+  const run = runResultIngestionExecutor(
+    {
+      coverage_matrix: {
+        files: [
+          {
+            path: "src/api/auth.ts",
+            unit_ids: ["src-api-auth"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security", "performance"],
+            completed_lenses: [],
+          },
+        ],
+      },
+      audit_tasks: [authTask],
+      intent_checkpoint: {
+        schema_version: "intent-checkpoint/v1",
+        confirmed_at: "2026-01-01T00:00:00.000Z",
+        confirmed_by: "host",
+        scope_summary: "test",
+        intent_summary: "test",
+        lens_selection: { exclude: ["performance"] },
+      },
+    },
+    [],
+  );
+
+  expect(
+    (run.updated.requeue_tasks ?? []).some(
+      (t) => t.task_id === "requeue:performance:src/api/auth.ts" && t.status === "pending",
+    ),
+    "the requeue payload still names the excluded-lens gap; the fold is what must refuse it",
+  ).toBe(true);
+  expect(
+    run.updated.audit_tasks!.map((t) => t.task_id).filter((id) => id.includes("performance")),
+    "an operator-excluded lens must never re-enter dispatch through the requeue fold",
+  ).toEqual([]);
 });
 
 test("scopes frozen project rule excerpts to the question's source folders and lens", async () => {

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/graph-manifest-edges.test.ts, tests/audit/graph-edge-cache.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { graphEdge, normalizeGraphPath } from "../graphPathUtils.js";
@@ -78,7 +79,7 @@ export function normalizeWorkspacePattern(
     : posix.join(workspaceDir, normalizedPattern);
 }
 
-export function globPatternToRegExp(pattern: string): RegExp {
+function globPatternToRegExp(pattern: string): RegExp {
   let source = "^";
   for (let index = 0; index < pattern.length; index++) {
     const char = pattern[index];
@@ -97,18 +98,10 @@ export function globPatternToRegExp(pattern: string): RegExp {
   return new RegExp(`${source}$`, "i");
 }
 
-export function workspacePatternMatchesManifest(
-  workspacePattern: string,
-  manifestPath: string,
-  manifestName: string,
-): boolean {
-  const normalizedManifestPath = normalizeGraphPath(manifestPath);
-  const manifestDir = posix.dirname(normalizedManifestPath);
-  const lowerManifestPattern = `/${manifestName.toLowerCase()}`;
-  const patternTarget = workspacePattern.toLowerCase().endsWith(lowerManifestPattern)
-    ? normalizedManifestPath
-    : manifestDir;
-  return globPatternToRegExp(workspacePattern).test(patternTarget);
+function workspaceMatcher(pattern: string, manifestSuffix: string) {
+  const regex = globPatternToRegExp(pattern);
+  const targetsFile = pattern.toLowerCase().endsWith(manifestSuffix);
+  return (member: { path: string; dir: string }) => regex.test(targetsFile ? member.path : member.dir);
 }
 
 /**
@@ -147,40 +140,30 @@ export function workspaceMemberEdges(options: {
     reason,
   } = options;
 
-  if (rawPatterns.length === 0) {
-    return [];
-  }
-
-  const positivePatterns: string[] = [];
-  const negativePatterns: string[] = [];
+  const manifestSuffix = `/${manifestName.toLowerCase()}`;
+  const positives: Array<{ pattern: string; matches: ReturnType<typeof workspaceMatcher> }> = [];
+  const negatives: Array<ReturnType<typeof workspaceMatcher>> = [];
   for (const { pattern, negated } of rawPatterns) {
     const normalized = normalizeWorkspacePattern(fromPath, pattern);
-    if (!normalized) {
-      continue;
-    }
-    if (negated) {
-      negativePatterns.push(normalized);
-    } else {
-      positivePatterns.push(normalized);
-    }
+    if (!normalized) continue;
+    const matches = workspaceMatcher(normalized, manifestSuffix);
+    if (negated) negatives.push(matches);
+    else positives.push({ pattern: normalized, matches });
+  }
+  if (positives.length === 0) return [];
+
+  const members: Array<{ target: string; path: string; dir: string }> = [];
+  for (const target of pathLookup.values()) {
+    if (target === fromPath || !isMemberManifest(target)) continue;
+    const path = normalizeGraphPath(target);
+    members.push({ target, path, dir: posix.dirname(path) });
   }
 
   const edges: GraphEdge[] = [];
-  for (const pattern of positivePatterns) {
-    for (const target of pathLookup.values()) {
-      if (target === fromPath || !isMemberManifest(target)) {
-        continue;
-      }
-      if (!workspacePatternMatchesManifest(pattern, target, manifestName)) {
-        continue;
-      }
-      if (
-        negativePatterns.some((negativePattern) =>
-          workspacePatternMatchesManifest(negativePattern, target, manifestName),
-        )
-      ) {
-        continue;
-      }
+  for (const { pattern, matches } of positives) {
+    for (const member of members) {
+      if (!matches(member) || negatives.some(excludes => excludes(member))) continue;
+      const { target } = member;
       edges.push(
         graphEdge({
           from: fromPath,

@@ -165,17 +165,15 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 /**
- * Write one generated context file and return its path. A file already holding
+ * Ensure one generated context file holds the expected bytes. A file already holding
  * the same bytes is left alone (its path is content-addressed, so this is the
  * unchanged-round case). Repair edited bytes atomically: an already-emitted
  * prompt can still name this path while a new emission is being prepared.
  */
 async function writeGeneratedContext(
-  promptDir: string,
-  file: GeneratedLaneContextFile,
-): Promise<string> {
-  const path = join(promptDir, "context", hashContent(file.text), file.filename);
-  const expected = Buffer.from(file.text, "utf8");
+  path: string,
+  expected: Buffer,
+): Promise<void> {
   const holdsExpected = async (): Promise<boolean | undefined> => {
     try {
       return (await readFile(path)).equals(expected);
@@ -197,7 +195,6 @@ async function writeGeneratedContext(
     }
   }
   await chmod(path, 0o444);
-  return path;
 }
 
 /**
@@ -317,6 +314,21 @@ export async function materializeFanoutLanes(params: {
   const promptBodyByLane = new Map<string, string>();
   const reviewBindings = new Map<string, { promptSha256: string; reviewRequirement: string; promptPath: string }>();
   const activeBindings = new Map<string, AuditReviewBinding>();
+  type ContextInput = { path: string; sha256: string; bytes: number };
+  // This emission shares one view of each input. Ingestion still rehashes the
+  // bound inputs from disk; a later emission takes a fresh view.
+  const generatedInputs = new Map<string, ContextInput>();
+  const pendingInputs = new Map<string, Promise<ContextInput>>();
+  function describeInput(path: string): ContextInput | Promise<ContextInput> {
+    const generated = generatedInputs.get(path);
+    if (generated) return generated;
+    let input = pendingInputs.get(path);
+    if (!input) {
+      input = readFile(path).then(bytes => ({ path, sha256: hashContent(bytes), bytes: bytes.length }));
+      pendingInputs.set(path, input);
+    }
+    return input;
+  }
   for (const spec of params.lanes) {
     const resultPath = laneSubmissionPath(
       params.artifactsDir,
@@ -330,11 +342,19 @@ export async function materializeFanoutLanes(params: {
       throw new Error(`Lane '${spec.id}' carries generated context but no review binding to bind it into.`);
     }
     const generatedContextPaths: string[] = [];
-    for (const file of generated) generatedContextPaths.push(await writeGeneratedContext(promptDir, file));
-    const contextInputs = await Promise.all(uniqueSorted([...(spec.contextPaths ?? []), ...generatedContextPaths]).map(async path => {
-      const bytes = await readFile(path);
-      return { path, sha256: hashContent(bytes), bytes: bytes.length };
-    }));
+    for (const file of generated) {
+      const digest = hashContent(file.text);
+      const path = join(promptDir, "context", digest, file.filename);
+      if (!generatedInputs.has(path)) {
+        const expected = Buffer.from(file.text, "utf8");
+        await writeGeneratedContext(path, expected);
+        generatedInputs.set(path, { path, sha256: digest, bytes: expected.length });
+      }
+      generatedContextPaths.push(path);
+    }
+    const contextInputs = await Promise.all(
+      uniqueSorted([...(spec.contextPaths ?? []), ...generatedContextPaths]).map(describeInput),
+    );
     const inputBindingText = requirement === "ordinary" || contextInputs.length === 0 ? "" : `\n\n## Bound input fingerprints\n${contextInputs.map(input => `${input.path}: ${input.sha256}`).join("\n")}`;
     const revisionText = spec.semanticInputRevision === undefined ? "" : `\n\nReview input revision: ${spec.semanticInputRevision}`;
     const readOnlyContextText = generated.length === 0 ? "" : renderReadOnlyContextSection(generated.map((file, index) => ({ path: generatedContextPaths[index]!, label: file.label })));

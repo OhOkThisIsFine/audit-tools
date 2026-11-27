@@ -14,7 +14,7 @@ import { resolvePackageEntrypoint } from "../../src/audit/extractors/graphManife
 import { cargoWorkspacePatterns } from "../../src/audit/extractors/graphManifestEdges/cargo.js";
 import { stripGoLineComment, splitGoWorkspaceSpecifiers } from "../../src/audit/extractors/graphManifestEdges/go.js";
 import { stripJsonComments, removeTrailingJsonCommas, parseJsoncObject } from "../../src/audit/extractors/graphManifestEdges/jsonc.js";
-import { manifestStringArray } from "../../src/audit/extractors/graphManifestEdges/workspace.js";
+import { manifestStringArray, workspaceMemberEdges } from "../../src/audit/extractors/graphManifestEdges/workspace.js";
 import { parseYamlSafe, collectYamlStringScalars } from "../../src/audit/extractors/graphManifestEdges/yaml.js";
 import { parseTomlSafe } from "../../src/shared/parsing/toml.js";
 
@@ -242,6 +242,30 @@ test("removeTrailingJsonCommas (TST-b29c9d4f) — trailing comma in deeply neste
 test("toml extractors degrade to [] on malformed TOML (never throw)", () => {
   expect(extractCargoWorkspaceMemberEdges("Cargo.toml", "not [valid toml = =", new Map())).toEqual([]);
   expect(extractPyprojectTestpathLinks("pyproject.toml", "not [valid toml = =", new Map())).toEqual([]);
+});
+
+test("workspace selection enumerates manifests once and preserves each matching positive in input order", () => {
+  const source = "project/Cargo.toml";
+  const paths = [source, "project/crates/B/Cargo.toml", "project/crates/A/Cargo.toml", "project/crates/skip/Cargo.toml", "project/crates/A/notes.md"];
+  const examined: string[] = [];
+  const edges = workspaceMemberEdges({
+    fromPath: source,
+    rawPatterns: [
+      { pattern: "crates/*", negated: false }, { pattern: "crates/a/Cargo.toml", negated: false },
+      { pattern: "crates/skip/Cargo.toml", negated: true },
+    ],
+    pathLookup: new Map(paths.map(path => [path.toLowerCase(), path])),
+    manifestName: "Cargo.toml",
+    isMemberManifest: path => { examined.push(path); return path.endsWith("/Cargo.toml"); },
+    kind: "member",
+    confidence: 0.87,
+    reason: (pattern, target) => `${pattern} selects ${target}`,
+  });
+
+  expect(edges).toEqual([
+    ["project/crates/*", paths[1]!], ["project/crates/*", paths[2]!], ["project/crates/a/Cargo.toml", paths[2]!],
+  ].map(([pattern, to]) => ({ from: source, to, kind: "member", direction: "directed", confidence: 0.87, reason: `${pattern} selects ${to}` })));
+  expect(examined).toEqual(paths.slice(1));
 });
 
 const edgeTuples = (edges: import("audit-tools/shared").GraphEdge[]) =>

@@ -89,6 +89,8 @@ export interface StagedSubmission {
   stagingPath: string;
   /** sha256 of the staged bytes — the iterative-fold duplicate-guard identity. */
   contentHash: string;
+  /** Distinguishes a newly staged occurrence from a replay of its durable receipt. */
+  acceptanceId: string;
   /** True once the fold has landed the submission's effect on the carried bundle. */
   applied: boolean;
   /** Optional message for the deferred `accepted` ledger event. */
@@ -284,6 +286,7 @@ export async function stageLaneSubmission(
     boundPath,
     stagingPath,
     contentHash: hashContent(bytes),
+    acceptanceId: randomUUID(),
     applied: false,
   };
   tx.staged.push(staged);
@@ -442,6 +445,7 @@ const ReceiptSchema = z.object({
     lane: z.string().min(1),
     submissionId: z.string(),
     contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+    acceptanceId: z.string().uuid().optional(),
     acceptedMessage: z.string().optional(),
   }).strict()),
 }).strict();
@@ -450,7 +454,9 @@ type FoldReceipt = {
   version: 1;
   core: CoreArtifactPlan;
   snapshots: DesignReviewSnapshot[];
-  applied: Array<Pick<StagedSubmission, "lane" | "contentHash" | "acceptedMessage"> & { submissionId: string }>;
+  applied: Array<Pick<StagedSubmission, "lane" | "contentHash" | "acceptedMessage"> & {
+    submissionId: string; acceptanceId?: string;
+  }>;
 };
 
 async function applyFoldReceipt(
@@ -493,6 +499,7 @@ async function applyFoldReceipt(
       await recordLaneOutcome(artifactsDir, staged.lane, {
         kind: "accepted",
         ...(staged.acceptedMessage ? { message: staged.acceptedMessage } : {}),
+        ...(staged.acceptanceId !== undefined ? { acceptanceId: staged.acceptanceId } : {}),
       }, history);
     }
   }
@@ -524,8 +531,8 @@ export async function commitFold(
     version: 1,
     core: planCoreArtifacts(bundle, true),
     snapshots: tx.pendingSnapshots,
-    applied: tx.staged.filter(staged => staged.applied).map(({ lane, contentHash, acceptedMessage }) => ({
-      lane, contentHash, acceptedMessage, submissionId: laneSubmissionId(lane, AUDIT_GATE_SUBMISSION_SCOPE),
+    applied: tx.staged.filter(staged => staged.applied).map(({ lane, contentHash, acceptedMessage, acceptanceId }) => ({
+      lane, contentHash, acceptedMessage, acceptanceId, submissionId: laneSubmissionId(lane, AUDIT_GATE_SUBMISSION_SCOPE),
     })),
   };
   await assertOwnership();

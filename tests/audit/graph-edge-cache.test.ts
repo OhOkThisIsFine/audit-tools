@@ -64,6 +64,20 @@ function incrementalBuild(
   return { bundle, cache: edgeCacheSink.cache! };
 }
 
+test("import matching suppresses only the exact import literal, not another occurrence of the same path", () => {
+  const m = manifest([file(A, { hash: "a" }), file(B, { hash: "b" })]);
+  const content = { ...baseContents(), [A]: 'import "./b.ts";\nconst documentedPath = "./b.ts";\n' };
+  const graphs = fullBuild(m, content).graphs;
+
+  expect(graphs.imports).toEqual([
+    { from: A, to: B, kind: "esm", direction: "directed", confidence: 0.95, reason: "Resolved esm specifier './b.ts'." },
+  ]);
+  expect(graphs.references).toEqual([
+    { from: A, to: B, kind: "relative-string-reference", direction: "directed", confidence: 0.82, reason: "Resolved relative string literal './b.ts'." },
+  ]);
+  expect(fullBuild(m, { ...content, [A]: 'import "./b.ts";\n' }).graphs.references).toEqual([]);
+});
+
 test("sink-only build is byte-identical to a plain full build; cache covers all in-scope files", () => {
   const m = manifest([file(A, { hash: "ha" }), file(B, { hash: "hb" })]);
   const contents = baseContents();
@@ -449,7 +463,7 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("e9d5141b5f86414639b29be07dcadeb128cb09133b706dbc254ccd097ad9b0c6");
+  ).toBe("ffa8ad857c477bd148caa5d0bc66dd6f2c596158a2232434234dafa3fffb8ce1");
   expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v23");
 });
 

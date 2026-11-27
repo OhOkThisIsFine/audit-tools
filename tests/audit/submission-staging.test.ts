@@ -505,3 +505,26 @@ test("a pending receipt blocks competing reads and cleanup and replays the exact
     expect(accepted[0]!.message).toBe("retained across restart");
   });
 });
+
+test("a corrected submission through the same lane records a new acceptance even with identical valid bytes", async () => {
+  await withArtifactsDir(async artifactsDir => {
+    const { recordLaneOutcome } = await import("../../src/audit/cli/laneSubmissions.js");
+    const accept = async () => {
+      await writeFile(laneSubmissionPath(artifactsDir, LANE), '{"themes":[]}', "utf8");
+      const tx = createFoldTransaction();
+      const staged = await stageLaneSubmission(tx, artifactsDir, LANE);
+      if (staged.status !== "staged") throw new Error("expected staged");
+      markSubmissionApplied(tx, staged.staged.stagingPath);
+      await commitFold(artifactsDir, {}, tx, async () => undefined);
+    };
+
+    await accept();
+    await recordLaneOutcome(artifactsDir, LANE, {
+      kind: "rejected", issueCode: "submission_contract_invalid", message: "correction required",
+    });
+    await accept();
+
+    expect((await readSubmissionLedger(artifactsDir)).map(event => event.kind))
+      .toEqual(["accepted", "rejected", "accepted"]);
+  });
+});

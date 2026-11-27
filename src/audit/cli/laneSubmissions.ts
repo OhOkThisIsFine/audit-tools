@@ -616,7 +616,7 @@ export async function recordLaneOutcome(
   artifactsDir: string,
   lane: string,
   outcome:
-    | { readonly kind: "accepted"; readonly message?: string }
+    | { readonly kind: "accepted"; readonly message?: string; readonly acceptanceId?: string }
     | {
         readonly kind: "rejected";
         readonly issueCode: SubmissionIssueCode;
@@ -628,31 +628,17 @@ export async function recordLaneOutcome(
   // value by construction, not two sites spelling the same constant.
   const runId = AUDIT_GATE_SUBMISSION_SCOPE;
   const submissionId = laneSubmissionId(lane, runId);
-  // AT MOST ONCE per submission, read from the ledger rather than tracked in
-  // memory. `commitFold` re-enters on the SAME transaction after a mid-loop I/O
-  // error, and the two halves of this function are not atomic: the append lands
-  // durably, then the expected-set drop below can throw, and the re-entry would
-  // append a second identical `accepted`. The entry cannot simply be dropped
-  // from the register before the append instead — the whole reason the record is
-  // written first is that a submission must never be reported accepted while its
-  // durable evidence is missing. Asking the ledger what already landed keeps
-  // that order AND makes the append idempotent, which is the property a retry
-  // needs. Only the accepted arm can repeat: a rejection deliberately re-records
-  // on every re-observation (see `readTrailingSubmissionRefusals`'s note on
-  // repeated missing observations), so it is left alone.
-  //
-  // The question is whether an `accepted` for this submission is ALREADY on the
-  // ledger — not whether the trailing row is one. A submission that was accepted,
-  // then rejected on a later pass (the host resubmitted at the bound path and the
-  // repair failed again), then re-enters the fold has an accepted behind it; a
-  // trailing-only test would read the rejection, decide nothing had landed, and
-  // append a SECOND accepted for one staged submission.
+  // A crash can replay the same staged acceptance, even after a later refusal.
+  // A new result staged at the same lane is a different occurrence, even when its
+  // bytes match. Older receipts and unstaged writers keep lane-level deduplication.
   let alreadyAccepted = false;
   if (outcome.kind === "accepted") {
     const ledger =
       history ??
       (await readSubmissionIngestHistory(artifactsDir, { runId }));
-    alreadyAccepted = ledger.accepted.has(submissionId);
+    alreadyAccepted = outcome.acceptanceId === undefined
+      ? ledger.accepted.has(submissionId)
+      : ledger.stagedAcceptances.get(submissionId)?.has(outcome.acceptanceId) === true;
   }
   if (!alreadyAccepted) {
     await appendSubmissionEvent(artifactsDir, {
@@ -667,6 +653,7 @@ export async function recordLaneOutcome(
       ...(outcome.kind === "accepted" && outcome.message
         ? { message: outcome.message }
         : {}),
+      ...(outcome.kind === "accepted" && outcome.acceptanceId !== undefined ? { acceptance_id: outcome.acceptanceId } : {}),
       recorded_at: new Date().toISOString(),
     });
   }
@@ -675,6 +662,11 @@ export async function recordLaneOutcome(
   // next lane in the same batch (and a re-entry that re-walks the register)
   // asks against a ledger that includes this row.
   history?.accepted.add(submissionId);
+  if (history && outcome.acceptanceId !== undefined) {
+    let ids = history.stagedAcceptances.get(submissionId);
+    if (!ids) history.stagedAcceptances.set(submissionId, ids = new Set());
+    ids.add(outcome.acceptanceId);
+  }
   // Always reconcile the expected set, including a retry after an accepted
   // append landed but this removal failed. Only the append is deduplicated.
   // The drop runs under the store's lock, so it cannot race a concurrent
