@@ -13,7 +13,7 @@
 // `resetTestRepo`/cleanup helpers operate only on that dir, so files running in
 // parallel under vitest never clobber each other's scratch state.
 
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSyncHidden as spawnSync } from "../../helpers/spawn.mjs";
 import { dirname, join, isAbsolute } from "node:path";
 import { StateStore } from "../../../src/remediate/state/store.js";
@@ -183,15 +183,27 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     await new StateStore(ARTIFACTS_DIR).saveState(state);
   }
 
-  async function resetTestRepo(): Promise<void> {
-    await rm(TEST_DIR, { recursive: true, force: true });
-    await mkdir(ARTIFACTS_DIR, { recursive: true });
-    const git = (...args: string[]) =>
-      spawnSync("git", args, { cwd: REPO_DIR, encoding: "utf8" });
+  let gitSeed: Promise<string> | undefined;
+  // The global fixture teardown owns the seed as well as each test's repo.
+  // Copy only its empty baseline .git, in full: no test shares live Git state.
+  async function makeGitSeed() {
+    const seed = await mkdtemp(scratchDir("remediate-next-step-git-seed-"));
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: seed, encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr || result.error}`);
+    };
     git("init", "-q");
     git("config", "user.email", "test@example.com");
     git("config", "user.name", "Test");
     git("commit", "--allow-empty", "--no-gpg-sign", "-q", "-m", "fixture baseline");
+    return join(seed, ".git");
+  }
+
+  async function resetTestRepo(): Promise<void> {
+    gitSeed ??= makeGitSeed();
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(ARTIFACTS_DIR, { recursive: true });
+    await cp(await gitSeed, join(REPO_DIR, ".git"), { recursive: true });
   }
 
   async function cleanupTestRepo(): Promise<void> {
