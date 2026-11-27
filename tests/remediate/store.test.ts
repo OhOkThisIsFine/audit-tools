@@ -1,11 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   StateStore,
   validateRemediationState,
   RemediationState,
   REMEDIATION_STATE_CONTRACT_VERSION,
 } from "../../src/remediate/state/store.js";
-import { LOCKED_JSON_STORE_TIMEOUT_MS, SKIP_WRITE, STALE_LOCK_MS, SchemaVersionMismatchError } from "audit-tools/shared";
+import { LOCKED_JSON_STORE_TIMEOUT_MS, SKIP_WRITE, SchemaVersionMismatchError } from "audit-tools/shared";
+import * as fileLock from "../../src/shared/io/fileLock.js";
 import { rm, mkdir, writeFile, utimes, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
@@ -30,14 +31,6 @@ describe("StateStore", () => {
     const planErrors = errors.filter(message => message.startsWith("plan."));
     expect(planErrors.length).toBeGreaterThan(0);
     expect(planErrors).toEqual([...new Set(planErrors)]);
-  });
-
-  it("LOCKED_JSON_STORE_TIMEOUT_MS stays below the shared stale-lock threshold (no boundary race)", () => {
-    // Derived programmatically as STALE_LOCK_MS - margin. A held-but-fresh lock must
-    // time out before it could be reclaimed as stale, otherwise the timeout is a
-    // load-sensitive race. This guards the relationship if either value changes.
-    expect(LOCKED_JSON_STORE_TIMEOUT_MS).toBeGreaterThan(0);
-    expect(LOCKED_JSON_STORE_TIMEOUT_MS).toBeLessThan(STALE_LOCK_MS);
   });
 
   it("should return null if no state exists", async () => {
@@ -97,15 +90,35 @@ describe("StateStore", () => {
     expect(statuses).toContain(loaded!.status);
   });
 
-  it("times out and throws when lock file is fresh and never released", async () => {
-    // Write a fresh lock with a valid token (shared fileLock uses mtime-based staleness)
-    const lockFile = join(TEST_DIR, "state.lock");
-    await writeFile(lockFile, "some-token-that-will-not-be-released", "utf8");
-
+  it("refuses a fresh held lock, preserving the holder and last saved state", async () => {
     const store = new StateStore(TEST_DIR);
-    await expect(store.saveState({ status: "pending" })).rejects.toThrow(
-      /Timed out acquiring lock/i,
+    await store.saveState({ status: "planning" });
+    const stateFile = join(TEST_DIR, "state.json");
+    const originalState = await readFile(stateFile, "utf8");
+    const lockFile = join(TEST_DIR, "state.lock");
+    const holder = "another-writer";
+    await writeFile(lockFile, holder, { encoding: "utf8", flag: "wx" });
+
+    // Keep real lock acquisition and assert the store's normal timeout wiring,
+    // but skip polling here. Shared fileLock clock tests exercise elapsed time.
+    const withFileLock = fileLock.withFileLock;
+    const lock = vi.spyOn(fileLock, "withFileLock").mockImplementation(
+      (path, write, timeoutMs, logger, options) => {
+        expect(timeoutMs).toBe(LOCKED_JSON_STORE_TIMEOUT_MS);
+        return withFileLock(path, write, 0, logger, options);
+      },
     );
+    try {
+      await expect(store.saveState({ status: "pending" })).rejects.toThrow(
+        fileLock.FileLockTimeoutError,
+      );
+      expect(lock).toHaveBeenCalledTimes(1);
+      expect(lock.mock.calls[0]?.[0]).toBe(lockFile);
+      expect(await readFile(lockFile, "utf8")).toBe(holder);
+      expect(await readFile(stateFile, "utf8")).toBe(originalState);
+    } finally {
+      lock.mockRestore();
+    }
   });
 
   it("reclaims a stale lock file (mtime-based staleness)", async () => {
@@ -119,6 +132,7 @@ describe("StateStore", () => {
 
     const loaded = await store.loadState();
     expect(loaded?.status).toBe("pending");
+    await expect(stat(lockFile)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("second save succeeds after first save releases lock", async () => {
