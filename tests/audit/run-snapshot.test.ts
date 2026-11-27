@@ -122,6 +122,11 @@ async function dirtyRepo(): Promise<{ root: string; artifactsDir: string }> {
 describe("ensureRunSnapshot — git root", () => {
   test("pins a dirty tree without altering Git and removes only its own snapshot", async () => {
     const { root, artifactsDir } = await dirtyRepo();
+    // A tracked nested artifact path must not be confused with our root artifacts.
+    const nestedArtifact = "pkg/.audit-tools/keep.json";
+    await mkdir(dirname(join(root, nestedArtifact)), { recursive: true });
+    await writeFile(join(root, nestedArtifact), "{}\n");
+    await git(root, ["add", "-f", nestedArtifact]);
     const headBefore = await gitOut(root, ["rev-parse", "HEAD"]);
     const statusBefore = await gitOut(root, ["status", "--porcelain"]);
     const trackedBefore = await gitOut(root, ["ls-files"]);
@@ -141,6 +146,7 @@ describe("ensureRunSnapshot — git root", () => {
     expect(await gitOut(root, ["rev-parse", "HEAD"])).toBe(headBefore);
     expect(await gitOut(root, ["status", "--porcelain"])).toBe(statusBefore);
     expect(existsSync(join(snapshot.source_root, ".audit-tools"))).toBe(false);
+    expect(await readFile(join(snapshot.source_root, nestedArtifact), "utf8")).toBe("{}\n");
     expect(await gitOut(snapshot.source_root, ["ls-files"])).toBe(trackedBefore);
     expect(await gitOut(snapshot.source_root, ["log", "--format=%H %an"])).toBe(logBefore);
     expect(await readAuditReadState(snapshot.source_root, null, { excludePaths: snapshot.linked })).toEqual(readBefore);
@@ -274,11 +280,13 @@ describe("ensureRunSnapshot — git root", () => {
     expect(await removeRunSnapshot(artifactsDir, sub)).toEqual([]);
   });
 
-  test("a repository with no commit yet is snapshotted with its files", async () => {
-    const base = await mkdtemp(join(tmpdir(), "audit-run-snapshot-empty-"));
+  test("an unborn repository is snapshotted and recovers its missing Git marker", async () => {
+    const base = await mkdtemp(join(tmpdir(), "audit-run-snapshot-unborn-"));
     const root = join(base, "repo");
     await mkdir(root, { recursive: true });
     await git(root, ["init", "-q"]);
+    // Loss of the Git marker must be the only recovery fault in this case.
+    await git(root, ["config", "core.autocrlf", "false"]);
     await writeFile(join(root, "a.ts"), "export const a = 1;\n");
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -292,6 +300,10 @@ describe("ensureRunSnapshot — git root", () => {
     // HEAD stays unborn, as live: no synthetic commit reaches audit_read or history.
     expect(await readAuditReadState(snapshot.source_root)).toBeNull();
     expect(snapshot.pins[0].base).toBeNull();
+    await recordFrozenManifest(snapshot.source_root, artifactsDir);
+    await rm(join(snapshot.source_root, ".git"), { force: true });
+    await ensureRunSnapshot(root, artifactsDir);
+    expect(await gitOut(snapshot.source_root, ["symbolic-ref", "HEAD"])).toBe("refs/heads/audit-tools-unborn-snapshot");
   });
 
   test.skipIf(process.platform === "win32")("an ignored dangling symlink is skipped, never fatal", async () => {
@@ -368,17 +380,6 @@ describe("ensureRunSnapshot — git root", () => {
     await rm(join(root, ".git", "index.lock"));
   });
 
-  test("a TRACKED file under a nested .audit-tools segment is snapshot content", async () => {
-    const { root, artifactsDir } = await dirtyRepo();
-    await mkdir(join(root, "pkg", ".audit-tools"), { recursive: true });
-    await writeFile(join(root, "pkg", ".audit-tools", "keep.json"), "{}\n");
-    await git(root, ["add", "-f", "pkg/.audit-tools/keep.json"]);
-    const snapshot = await ensureRunSnapshot(root, artifactsDir);
-    expect(await readFile(join(snapshot.source_root, "pkg", ".audit-tools", "keep.json"), "utf8")).toBe("{}\n");
-    expect((await readAuditReadState(snapshot.source_root, null, { excludePaths: snapshot.linked }))?.dirty_paths)
-      .toEqual((await readAuditReadState(root))?.dirty_paths);
-  });
-
   test("an untracked nested repository is copied as its own git lists it; its ignored output is linked, never copied", async () => {
     const { root, artifactsDir } = await dirtyRepo();
     const nested = join(root, "vendor", "lib");
@@ -403,27 +404,6 @@ describe("ensureRunSnapshot — git root", () => {
     expect(await readFile(join(snapshot.source_root, "src", "abs-link.ts"), "utf8")).toBe("export const a = 2;\n");
   });
 
-  test("an unborn checkout whose .git link went missing is restored, not taken as intact", async () => {
-    const base = await mkdtemp(join(tmpdir(), "audit-run-snapshot-unborn-"));
-    const root = join(base, "repo");
-    await mkdir(root, { recursive: true });
-    await git(root, ["init", "-q"]);
-    // Recovery must verify byte identity; this case isolates loss of the Git marker.
-    await git(root, ["config", "core.autocrlf", "false"]);
-    await writeFile(join(root, "a.ts"), "export const a = 1;\n");
-    const artifactsDir = join(root, ".audit-tools", "audit");
-    await mkdir(artifactsDir, { recursive: true });
-    cleanups.push(async () => {
-      await removeRunSnapshot(artifactsDir, root);
-      await rm(base, { recursive: true, force: true });
-    });
-    const first = await ensureRunSnapshot(root, artifactsDir);
-    await recordFrozenManifest(first.source_root, artifactsDir);
-    await rm(join(first.source_root, ".git"), { force: true });
-    await ensureRunSnapshot(root, artifactsDir);
-    expect(await gitOut(first.source_root, ["symbolic-ref", "HEAD"])).toBe("refs/heads/audit-tools-unborn-snapshot");
-  });
-
   test("a populated submodule is pinned inside the snapshot, so ls-files still recurses into it", async () => {
     const fixture = await submoduleRepo();
     const artifactsDir = join(fixture.root, ".audit-tools", "audit");
@@ -442,25 +422,14 @@ describe("ensureRunSnapshot — git root", () => {
 });
 
 describe("the tool's own snapshot edits (opted-in auto-fix)", () => {
-  test("recovers the exact repin before intake refreshes its pre-format manifest", async () => {
+  test("write back only untouched live files and recover the repin before the frozen manifest refreshes", async () => {
     const { root, artifactsDir } = await dirtyRepo();
     await git(root, ["config", "core.autocrlf", "false"]);
+    await writeFile(join(root, "src", "b.ts"), "export const b = 1;\n");
     const first = await ensureRunSnapshot(root, artifactsDir);
     await recordFrozenManifest(first.source_root, artifactsDir);
     const manifestPath = join(artifactsDir, "repo_manifest.json");
     const oldManifest = await readFile(manifestPath, "utf8");
-    await writeFile(join(first.source_root, "src", "a.ts"), "export const a = 2; // formatted\n");
-    await repinRunSnapshot(artifactsDir, root);
-    await removeRunSnapshotDirOnly(first.pins[0].path);
-    const restored = await ensureRunSnapshot(root, artifactsDir);
-    expect(await readFile(join(restored.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 2; // formatted\n");
-    expect(await readFile(manifestPath, "utf8")).toBe(oldManifest);
-  });
-
-  test("write back only files whose live bytes are still the run-start bytes, then re-pin", async () => {
-    const { root, artifactsDir } = await dirtyRepo();
-    await writeFile(join(root, "src", "b.ts"), "export const b = 1;\n");
-    const first = await ensureRunSnapshot(root, artifactsDir);
     const startHashes = new Map<string, string>();
     for (const path of ["src/a.ts", "src/b.ts"]) {
       startHashes.set(path, hashContent(await readFile(join(first.source_root, path))));
@@ -489,6 +458,10 @@ describe("the tool's own snapshot edits (opted-in auto-fix)", () => {
     expect(await gitOut(root, ["rev-parse", pin.ref])).toBe(pin.commit);
     expect(await gitOut(first.source_root, ["rev-parse", "HEAD"])).toBe(first.pins[0].base);
     expect(await gitOut(root, ["show", `${pin.commit}:src/a.ts`])).toBe("export const a = 2; // formatted");
+    await removeRunSnapshotDirOnly(first.pins[0].path);
+    const restored = await ensureRunSnapshot(root, artifactsDir);
+    expect(await readFile(join(restored.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 2; // formatted\n");
+    expect(await readFile(manifestPath, "utf8")).toBe(oldManifest);
   });
 });
 
