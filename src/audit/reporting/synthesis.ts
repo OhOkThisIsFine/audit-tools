@@ -1713,9 +1713,10 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
     if (!dependency_bindings.length || !row || row.plan_status === "blocked" || row.plan_status === "deferred" ||
         row.state === "conflicted" ||
         row.revision_id !== submission.revision_id || !row.accepted_answer_ids.includes(submission.submission_id)) return [];
+    const findingCounts = countBy(submission.answer.findings, claim => claim.finding_id);
     return submission.answer.findings.filter(claim => claim.kind === "design_opportunity" && claim.source_refs.length > 0 &&
       claim.question_id === submission.question_id && claim.revision_id === submission.revision_id &&
-      submission.answer.findings.filter(other => other.finding_id === claim.finding_id).length === 1 &&
+      findingCounts[claim.finding_id] === 1 &&
       submission.answer.parts.some(part => part.outcome === "findings" &&
         row.parts.some(projected => projected.part_id === part.part_id && projected.state === "findings" &&
           projected.accepted_answer_ids.includes(submission.submission_id)) &&
@@ -1813,9 +1814,14 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
   }
   for (const omission of review.omissions) lines.push(`- ${omission.surface_id}: ${omission.reason}`);
   lines.push("", "## Findings and leads", "");
+  const selectedOpportunities = new Set(opportunities);
+  const findingsById = new Map<string, RenderableAuditReport["findings"][number]>();
+  for (const finding of report.findings) {
+    if (!findingsById.has(finding.id)) findingsById.set(finding.id, finding);
+  }
   for (const group of review.findings) {
-    if (opportunities.includes(group)) continue;
-    const finding = report.findings.find(row => row.id === group.canonical_finding_id);
+    if (selectedOpportunities.has(group)) continue;
+    const finding = findingsById.get(group.canonical_finding_id);
     lines.push(`- ${group.canonical_finding_id}: ${group.kind} (${finding ? `actionable; ${finding.severity}` : "not actionable"}).`);
     for (const source of group.sources) {
       lines.push(`  - ${source.finding_id} on ${source.question_id}: ${source.claim}. ${source.consequence}`);

@@ -379,7 +379,15 @@ export function buildRemediationOutcomesReport(
 ): RemediationOutcomesReport {
   const outcomes: RemediationOutcome[] = [];
   const closeReason = closingStatusReason(closingResult);
-  const executionOutcomes = (state.plan?.units ?? []).map(unit => {
+  const planUnits = state.plan?.units ?? [];
+  const unitsByFinding = new Map<string, (typeof planUnits)[number][]>();
+  const executionOutcomes = planUnits.map(unit => {
+    // Each unit contributes at most once per source, in original plan order.
+    for (const findingId of new Set(unit.source_finding_ids)) {
+      const units = unitsByFinding.get(findingId);
+      if (units) units.push(unit);
+      else unitsByFinding.set(findingId, [unit]);
+    }
     const item = state.items?.[unit.id];
     return {
       unit_id: unit.id, title: unit.title, source_finding_ids: [...unit.source_finding_ids],
@@ -415,17 +423,25 @@ export function buildRemediationOutcomesReport(
     };
   }
   const sourceFindings = new Map((state.plan?.findings ?? []).map(finding => [finding.id, finding]));
-  for (const entry of state.plan_coverage?.entries ?? []) {
+  const coverageEntries = state.plan_coverage?.entries ?? [];
+  const coverageByFinding = new Map<string, (typeof coverageEntries)[number]>();
+  for (const entry of coverageEntries) {
+    if (!coverageByFinding.has(entry.finding_id)) coverageByFinding.set(entry.finding_id, entry);
     const original = sourceFindings.get(entry.finding_id);
     if (entry.finding && original && contentSha256(entry.finding) !== contentSha256(original)) {
       throw new Error(`Conflicting original source payload for ${entry.finding_id}; refusing an ambiguous outcome.`);
     }
     if (entry.finding && !original) sourceFindings.set(entry.finding_id, entry.finding);
   }
+  const sourceDispositions = state.plan?.source_dispositions ?? [];
+  const dispositionByFinding = new Map<string, (typeof sourceDispositions)[number]>();
+  for (const entry of sourceDispositions) {
+    if (!dispositionByFinding.has(entry.finding_id)) dispositionByFinding.set(entry.finding_id, entry);
+  }
   for (const finding of sourceFindings.values()) {
-    const units = (state.plan?.units ?? []).filter(unit => unit.source_finding_ids.includes(finding.id));
+    const units = unitsByFinding.get(finding.id) ?? [];
     const linked = units.map(unit => state.items?.[unit.id]);
-    const coverage = state.plan_coverage?.entries.find(entry => entry.finding_id === finding.id);
+    const coverage = coverageByFinding.get(finding.id);
     const coverageDrop = coverage && DROP_REASON_BY_DISPOSITION[coverage.disposition];
     const settledWithOwnerSkip = linked.length > 0 && linked.every(item => item && isSettledStatus(item.status)) && linked.some(item => item && isSkipStatus(item.status));
     const unitOwnerDisposition = settledWithOwnerSkip ? {
@@ -434,7 +450,7 @@ export function buildRemediationOutcomesReport(
     } : undefined;
     const ownerDisposition = state.finding_dispositions?.[finding.id] ?? unitOwnerDisposition ??
       (coverageDrop ? {status:"ignored" as const, reason:coverage.rationale ?? `Source was not scheduled: ${coverageDrop}`} : undefined);
-    const semanticDisposition = state.plan?.source_dispositions?.find(entry => entry.finding_id === finding.id);
+    const semanticDisposition = dispositionByFinding.get(finding.id);
     const recorded = state.source_verifications?.[finding.id];
     const verified = recorded?.review_revision_sha256 === state.plan?.review_revision_sha256 &&
       recorded?.source_sha256 === contentSha256(finding) ? recorded : undefined;
