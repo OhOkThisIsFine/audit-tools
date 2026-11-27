@@ -8,6 +8,9 @@
 // Usage: node scripts/shared/profile-run.mjs <profile-name> <npm-script>...
 //   e.g. node scripts/shared/profile-run.mjs verify-checks check build verify:hosts
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { catalogCommands } from "./verify-steps.mjs";
 import { npmCommand, runProfiledCommands } from "./profile.mjs";
 
@@ -20,7 +23,15 @@ if (!profileName || scripts.length === 0) {
 
 const npm = npmCommand();
 const mode = scripts[0]?.match(/^--catalog=(checks|release)$/)?.[1];
+// A checks invocation owns one fresh tarball unless its caller (the publish
+// workflow) already owns the directory. The guarded prepack build supplies the
+// same dist to later checks, while both smokes consume the exact same verified pack.
+let ownedPackDir;
 try {
+  if (mode === "checks" && !process.env.AUDIT_TOOLS_RELEASE_PACK_DIR) {
+    ownedPackDir = mkdtempSync(join(tmpdir(), "audit-tools-checks-pack-"));
+    process.env.AUDIT_TOOLS_RELEASE_PACK_DIR = ownedPackDir;
+  }
   const commands = mode ? catalogCommands(mode, undefined, npm, {
     freshReleasePack: Boolean(process.env.AUDIT_TOOLS_RELEASE_PACK_DIR),
   }) : scripts.map((script) => ({
@@ -31,5 +42,14 @@ try {
   await runProfiledCommands(profileName, commands);
 } catch (error) {
   console.error(`[profile:${profileName}] ${/** @type {any} */ (error).message}`);
-  process.exit(1);
+  process.exitCode = 1;
+} finally {
+  // Never remove a caller-owned pack: publish uploads it after the gate.
+  if (ownedPackDir) {
+    try {
+      rmSync(ownedPackDir, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[profile:${profileName}] could not remove temporary checks pack: ${/** @type {Error} */ (error).message}`);
+    }
+  }
 }

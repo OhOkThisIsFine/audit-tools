@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { execFileSyncHidden as execFileSync } from "../helpers/spawn.mjs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -22,10 +22,12 @@ async function run(args: string[], failAt = -1, freshReleasePack = false) {
   await writeFile(hook, `
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 let call = 0;
 childProcess.spawnSync = (command, args, options) => {
-  appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({command, args, cwd: options.cwd}) + '\\n');
+  const packDir = process.env.AUDIT_TOOLS_RELEASE_PACK_DIR;
+  if (packDir && args.join(' ').includes('run --silent pack:smoke')) mkdirSync(packDir, { recursive: true });
+  appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({command, args, cwd: options.cwd, packDir}) + '\\n');
   return { status: call++ === ${failAt} ? 7 : 0, signal: null, stdout: '', stderr: '' };
 };
 syncBuiltinESMExports();
@@ -45,15 +47,15 @@ syncBuiltinESMExports();
   } catch (error) {
     status = (error as { status: number }).status;
   }
-  const calls = (await readFile(callsPath, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { command: string; args: string[]; cwd: string });
+  const calls = (await readFile(callsPath, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { command: string; args: string[]; cwd: string; packDir?: string });
   const ledger = JSON.parse(await readFile(latest, "utf8")) as { steps: { label: string }[] };
-  return { status, calls, ledger };
+  return { status, calls, ledger, suppliedPack: freshReleasePack ? join(dir, "release-pack") : undefined };
 }
 
 it("executes the checks and release catalogs through the real CLI and profiler", async () => {
   for (const stage of ["checks", "release"] as const) {
     const outcome = await run([`--catalog=${stage}`]);
-    const expected = catalogCommands(stage, undefined, process.platform === "win32" ? "npm.cmd" : "npm");
+    const expected = catalogCommands(stage, undefined, process.platform === "win32" ? "npm.cmd" : "npm", { freshReleasePack: stage === "checks" });
     expect(outcome.status).toBe(0);
     expect(outcome.ledger.steps.map(step => step.label)).toEqual(expected.map(step => step.label));
     expect(outcome.calls).toHaveLength(expected.length);
@@ -90,10 +92,25 @@ it("executes a single fresh release pack in the build slot, before checks that r
   expect(outcome.calls).toHaveLength(expected.length);
   expect(outcome.calls[packIndex]!.args.join(" ")).toContain("run --silent pack:smoke");
   expect(packIndex).toBeLessThan(expected.indexOf("check:scripts"));
+  expect(new Set(outcome.calls.map(({ packDir }) => packDir))).toEqual(new Set([outcome.suppliedPack]));
+  expect((await stat(outcome.suppliedPack!)).isDirectory()).toBe(true);
   expect(packIndex).toBeLessThan(expected.indexOf("smoke:packaged-audit-code"));
   expect(packIndex).toBeLessThan(expected.indexOf("smoke:packaged-remediate-code"));
   const failedPack = await run(["--catalog=checks"], packIndex, true);
   expect(failedPack.status).toBe(1);
   expect(failedPack.ledger.steps.map(({ label }) => label)).toEqual(expected.slice(0, packIndex + 1));
   expect(failedPack.calls).toHaveLength(packIndex + 1);
+});
+
+it("shares one fresh private pack for local checks and removes it on success or failure", async () => {
+  const packIndex = catalogCommands("checks", undefined, undefined, { freshReleasePack: true })
+    .findIndex(({ label }) => label === "pack:smoke");
+  for (const failAt of [-1, packIndex]) {
+    const outcome = await run(["--catalog=checks"], failAt);
+    expect(outcome.status).toBe(failAt < 0 ? 0 : 1);
+    const packDir = outcome.calls[0]!.packDir;
+    expect(packDir).toContain("audit-tools-checks-pack-");
+    expect(new Set(outcome.calls.map(call => call.packDir))).toEqual(new Set([packDir]));
+    await expect(stat(packDir!)).rejects.toMatchObject({ code: "ENOENT" });
+  }
 });
