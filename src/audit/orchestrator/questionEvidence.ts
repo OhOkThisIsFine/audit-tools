@@ -5,10 +5,16 @@ import { resolveWithinRoot } from "../../shared/io/pathContainment.js";
 import { analyzerProvenanceKey, hashAnalyzerSnippetLines } from "../../shared/analyzers/provenance.js";
 import { isDegradedExternalAnalyzerStatus, type ExternalAnalyzerResults, type ExternalAnalyzerToolStatus } from "../../shared/analyzers/types.js";
 import { hashContent } from "../../shared/hash.js";
+import { stableStringify } from "../../shared/stableStringify.js";
 import type { ReviewDependency, ReviewEvidence } from "../../shared/types/reviewQuestion.js";
 
 const sortedUnique = (values: readonly string[]): string[] => [...new Set(values)].sort();
 const keyOf = ({ kind, key }: ReviewDependency) => JSON.stringify([kind, key]);
+
+/** Bind the exact analyzer finding, not just its shared run receipt. */
+export function analyzerReceiptFingerprint(provenance: NonNullable<ReviewEvidence["analyzer_provenance"]>): string {
+  return hashContent(stableStringify(provenance));
+}
 
 /** Bind a reconstructed set to the discovery rule as well as its logical member IDs.
  * Call only for an authoritative inventory. Unavailable discovery supplies no binding. */
@@ -212,7 +218,7 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
         status: "observed", source_refs: [ref],
         dependencies: [
           { kind: "source", key: ref.path, fingerprint: sourceFiles.get(ref.path)! },
-          ...(comparison ? [{ kind: "evidence" as const, key: evidence_id, fingerprint: p.comparison_fingerprint! }] : []),
+          ...(comparison ? [{ kind: "evidence" as const, key: evidence_id, fingerprint: analyzerReceiptFingerprint(p) }] : []),
         ],
         ...(comparison ? { analyzer_provenance: p } : {}),
         description: "An analyzer flagged this frozen source span; inspect the source before interpreting the lead.",

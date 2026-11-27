@@ -230,6 +230,33 @@
         "scripts/shared/loopCoreAttestationLedger.mjs": "980bc485edb5cea323f05cf00629f8448b1d43bb"
       }
     },
+    "2fa9e1fc4c35f94e": {
+      "reviewed_by": "/root/suite_audit_three, /root/suite_audit_one, /root/suite_shared_one, /root",
+      "attester_class": "agent",
+      "checked": "Independent exact source and regression-fixture review verified scoped digest-bound graph reads, bound submission and ownership, analyzer receipt matching and staleness, advisory reimport, archival-only ingestion, and non-executing Make suggestions. Full Windows suite is recorded on the staged source tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "9292646c290d6b45f00846c7cbf312d8491b1bcc",
+        "ran_at": "2026-11-27T06:15:06.064Z"
+      },
+      "attested_at": "2026-11-27T06:15:12.111Z",
+      "vouches": {
+        "src/audit/cli/conceptualDispatch.ts": "3cf8569a9fd68c132cdaabdbdf7c79085e703891",
+        "src/audit/cli/dispatch/hostHandoff.ts": "797a935267aec44a334c001e338de2fcfc9e612f",
+        "src/audit/cli/dispatch/questionReviewAcceptance.ts": "4653de6c17467b44fbaa3be34ffbb1ec4668b2a1",
+        "src/audit/cli/nextStepCommand.ts": "f0df143c49dcf62a62cd3c2a67abb33d38c92b13",
+        "src/audit/cli/questionReviewCycle.ts": "f5342ae24d75c8c56b967ac9bc65df50135e30e0",
+        "src/audit/cli/submitCommand.ts": "831bcff22688a267d025b929f767738eeab11e66",
+        "src/audit/orchestrator/designReviewPrompt.ts": "ffdbc8dd3eb084c19f9366274a42136c7a905df4",
+        "src/audit/orchestrator/ingestionExecutors.ts": "682fa0c3976016c7f5d7c77f0085ffbefb4aa839",
+        "src/audit/orchestrator/questionEvidence.ts": "7b7ec98cec07a2cab57d9f3088903415900e5c20",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "5572fcdc590963174d2bd5fae448bc41e82f4074",
+        "src/remediate/steps/nextStep.ts": "6ea6cc4277db15b33b32f2a78a269ed8b3b61710",
+        "src/shared/submission/submissionLedger.ts": "d6a584281d8fa63ff03b8960ce85aad9c3fc875f"
+      }
+    },
     "380a3e547fdf760b": {
       "reviewed_by": "audit-tools-independent-security-review-v0579",
       "attester_class": "agent",
@@ -921,19 +948,19 @@
       "review": "380a3e547fdf760b"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "a1a3dd0149010098"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "3ac795cb6300b0c0"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/dispatch/questionReviewAcceptance.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/cli/fanoutLanes.ts": {
       "review": "380a3e547fdf760b"
@@ -948,7 +975,7 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "3ac795cb6300b0c0"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/cli/nextStepHelpers.ts": {
       "review": "3ac795cb6300b0c0"
@@ -957,13 +984,13 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/questionReviewCycle.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/cli/questionWorkloadBindings.ts": {
       "review": "aef2aac1e2d57f15"
     },
     "src/audit/cli/submitCommand.ts": {
-      "review": "0279a0adf3e99489"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/cli/submitGateResult.ts": {
       "review": "435c17a0f11016cc"
@@ -1038,7 +1065,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "0279a0adf3e99489"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "3ac795cb6300b0c0"
@@ -1083,7 +1110,7 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/ingestionExecutors.ts": {
-      "review": "e36223304299f9c6"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/orchestrator/intakeExecutors.ts": {
       "review": "392554939aa89e3b"
@@ -1131,7 +1158,7 @@
       "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/questionEvidence.ts": {
-      "review": "3e7d0736a83209a4"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/audit/orchestrator/questionPlanExecutor.ts": {
       "review": "e36223304299f9c6"
@@ -1302,7 +1329,7 @@
       "review": "185e1a9338c25bfc"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "cfe244114db006a2"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "cfe244114db006a2"
@@ -1311,7 +1338,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "aef2aac1e2d57f15"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "e36223304299f9c6"
@@ -1356,7 +1383,7 @@
       "review": "0c6c1b84455cdb39"
     },
     "src/shared/submission/submissionLedger.ts": {
-      "review": "74f5fdb4c95e9366"
+      "review": "2fa9e1fc4c35f94e"
     },
     "src/shared/submission/submissionScan.ts": {
       "review": "e501ffc69df5ac27"

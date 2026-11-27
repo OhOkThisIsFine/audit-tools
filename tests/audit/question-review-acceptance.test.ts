@@ -1,3 +1,4 @@
+import { analyzerReceiptFingerprint } from "../../src/audit/orchestrator/questionEvidence.js";
 import { projectQuestionForReport } from "../../src/audit/reporting/questionReport.js";
 import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -48,7 +49,7 @@ describe("question review acceptance", () => {
     const binding = makeBinding("a");
     const answer = submission("a", "findings");
     const provenance = { analyzer_id: "fixture", path: ref.path, snippet_hash: "original", comparison_fingerprint: "measured" };
-    const receipt = { kind: "evidence", key: "lead", fingerprint: provenance.comparison_fingerprint } as const;
+    const receipt = { kind: "evidence", key: "lead", fingerprint: analyzerReceiptFingerprint(provenance) } as const;
     const lead: ReviewEvidence = { schema_version: v, evidence_id: "lead", snapshot_id: identity.snapshot_id,
       kind: "source", source_refs: [ref], dependencies: [source, receipt], status: "observed",
       description: "Synthetic analyzer lead", analyzer_provenance: provenance };
@@ -72,11 +73,15 @@ describe("question review acceptance", () => {
     const accepted = acceptQuestionReview([], binding, answer, "now").record;
     expect(accepted.submission.answer.findings[0]!.verification).toEqual([obligation]);
     expect(accepted.dependency_bindings).toContainEqual(receipt);
-    const older = { ...accepted, dependency_bindings: [source, membership] };
-    for (const record of [accepted, older]) {
-      expect(projectQuestionReview(binding.question, [record], [source, membership, receipt]).current).toEqual([record]);
-      expect(projectQuestionReview(binding.question, [record], [source, membership]).stale).toEqual([record]);
-      expect(projectQuestionReview(binding.question, [record], [source, membership, { ...receipt, fingerprint: "new" }]).stale).toEqual([record]);
+    expect(projectQuestionReview(binding.question, [accepted], [source, membership, receipt]).current).toEqual([accepted]);
+    expect(projectQuestionReview(binding.question, [accepted], [source, membership]).stale).toEqual([accepted]);
+    expect(projectQuestionReview(binding.question, [accepted], [source, membership, { ...receipt, fingerprint: "new" }]).stale).toEqual([accepted]);
+    const unbound = { ...accepted, dependency_bindings: [source, membership] };
+    const legacy = { ...accepted, dependency_bindings: [source, membership, { ...receipt, fingerprint: provenance.comparison_fingerprint }] };
+    const wrongLead = structuredClone(accepted);
+    wrongLead.submission.answer.findings[0]!.verification = [{ ...obligation, provenance: { ...provenance, snippet_hash: "different" } }];
+    for (const record of [unbound, legacy, wrongLead]) {
+      expect(projectQuestionReview(binding.question, [record], [source, membership, receipt]).stale).toEqual([record]);
     }
   });
 

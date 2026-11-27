@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { hashContent } from "../../src/shared/hash.js";
 import { hashAnalyzerSnippet } from "../../src/shared/analyzers/provenance.js";
 import {
+  analyzerReceiptFingerprint,
   buildCommandEvidence,
   collectQuestionEvidence,
   evidenceApplicability,
@@ -85,7 +86,7 @@ describe("question evidence reuse", () => {
       const status = { tool: "local", status: "findings" as const, resolved: true, exit_code: 0, comparison_fingerprint: "old" };
       const [measured] = await collectQuestionEvidence({ ...input, analyzerStatuses: [status] });
       expect(measured?.analyzer_provenance).toEqual(original.provenance);
-      expect(measured?.dependencies).toContainEqual({ kind: "evidence", key: measured.evidence_id, fingerprint: "old" });
+      expect(measured?.dependencies).toContainEqual({ kind: "evidence", key: measured.evidence_id, fingerprint: analyzerReceiptFingerprint(original.provenance) });
       expect(await collectQuestionEvidence({ ...input, analyzerStatuses: [status] })).toEqual([measured]);
       for (const analyzerStatuses of [[], [{ ...status, comparison_fingerprint: "drifted" }], [{ ...status, dropped_rows: 1 }]]) {
         const unverified = await collectQuestionEvidence({ ...input, analyzerStatuses });

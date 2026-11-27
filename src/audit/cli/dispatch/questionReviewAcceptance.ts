@@ -1,5 +1,6 @@
 // sites-pinned: tests/audit/question-review-acceptance.test.ts
 import { compareCodeUnits, pathMatchesPrefix, stableStringify } from "audit-tools/shared";
+import { analyzerReceiptFingerprint } from "../../orchestrator/questionEvidence.js";
 import { questionReopenKey } from "../../../shared/types/reviewQuestion.js";
 import type { CurrentQuestionDependencies, ReviewDependency, ReviewAcceptedAnswer, ReviewAdjudication, ReviewAnswer, ReviewAssignment, ReviewEvidence, ReviewQuestion, ReviewSourceRef, ReviewSubmission } from "../../../shared/types/reviewQuestion.js";
 
@@ -178,13 +179,15 @@ export function projectQuestionReview(question: ReviewQuestion, answers: readonl
     .sort((a, b) => compareCodeUnits(a.submission.submission_id, b.submission.submission_id));
   const current = sameQuestion.filter((row) => dependencies !== undefined &&
     row.submission.revision_id === question.revision_id &&
-    // Earlier ledgers could accept analyzer obligations without recording the
-    // receipt dependency. Confirm their explicit claims against current evidence.
-    row.submission.answer.findings.every(finding => finding.verification.every(obligation =>
-      obligation.kind !== "analyzer" || (obligation.provenance.comparison_fingerprint &&
-        finding.evidence_ids.some(key => currentBindings.has(dependencyIdentity([{
-          kind: "evidence", key, fingerprint: obligation.provenance.comparison_fingerprint!,
-        }])))))) &&
+    // A historic obligation is current only if this exact comparison was
+    // bound in its own accepted record and is still issued for the cited lead.
+    row.submission.answer.findings.every(finding => finding.verification.every(obligation => {
+      if (obligation.kind !== "analyzer") return true;
+      if (!obligation.provenance.comparison_fingerprint) return false;
+      const fingerprint = analyzerReceiptFingerprint(obligation.provenance);
+      return finding.evidence_ids.some(key => currentBindings.has(dependencyIdentity([{ kind: "evidence", key, fingerprint }])) &&
+        row.dependency_bindings.some(item => item.kind === "evidence" && item.key === key && item.fingerprint === fingerprint));
+    })) &&
     row.dependency_bindings.length > 0 && row.dependency_bindings.every((item) => {
       const identity = dependencyIdentity([item]);
       return currentBindings.has(identity) || shared?.has(identity);
