@@ -16,7 +16,7 @@ Initial pilot covers only restart/gating and evidence semantics; it is not quali
 From the repository root:
 
     npm run build
-    node --test experiments/contract-tests/pilot.mjs experiments/contract-tests/audit-smoke.mjs experiments/contract-tests/git-boundary.mjs experiments/contract-tests/delivery-boundaries.mjs experiments/contract-tests/plan-authority.mjs
+    node --test experiments/contract-tests/pilot.mjs experiments/contract-tests/audit-smoke.mjs experiments/contract-tests/git-boundary.mjs experiments/contract-tests/delivery-boundaries.mjs experiments/contract-tests/plan-authority.mjs experiments/contract-tests/functional-regressions.mjs
 
 The Windows build and prototype took 26.97 seconds: eight passed, no skips.
 This does not qualify untested behavior or replace the existing release gate.
@@ -28,3 +28,5 @@ This does not qualify untested behavior or replace the existing release gate.
 | Git path fidelity | Real index and dirty working tree; nested-root refusal; original index unchanged | Owned worktree/snapshot cleanup across a restart and failed Git probe |
 | Shipped product behavior | Real checkout wrappers; offline npm tarball contents and its audit prompt; actual timeout reaps the tool-owned child | Fresh install and generated host assets; cancellation with a subprocess tree, not just one child |
 | Release and development checks | Unchanged and still run through the current documented entry points | Explicit inventory and comparison before any default or release change |
+
+Recent functional regressions covered directly: false route evidence from comments or a tag prefix (2490e40); Make test discovery must remain advisory and honor the first active Makefile (e8685a3).
