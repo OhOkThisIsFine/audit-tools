@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/cli-args-utils.test.ts, tests/audit/functional-preflight.test.ts
+// sites-pinned: tests/audit-smoke.test.mjs
 import { createReadStream, existsSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { join, resolve } from "node:path";
@@ -10,7 +10,6 @@ import {
   discoverRepoRoot,
   isCanonicalResultFilename,
   quotePromptCommandArg,
-  renderPromptCommand,
   resolveRepoRoot,
   toPromptPathToken,
 } from "audit-tools/shared";
@@ -54,10 +53,6 @@ export { artifactNameForId, isCanonicalResultFilename };
 
 export const quoteCommandArg = quotePromptCommandArg;
 export const toPosixCommandToken = toPromptPathToken;
-
-export function renderCommand(argv: string[]): string {
-  return renderPromptCommand(argv);
-}
 
 export function normalizePositiveInteger(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {

@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
+// sites-pinned: tests/audit-smoke.test.mjs
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -183,7 +183,7 @@ export function scopeEchoLine(artifactsDir: string): string | null {
  * Set HERE, in the one funnel every audit step emission goes through, so no
  * step kind can be added that forgets it.
  */
-export const AGENT_FEEDBACK_ARTIFACT_KEY = "agent_feedback";
+const AGENT_FEEDBACK_ARTIFACT_KEY = "agent_feedback";
 
 /**
  * Write the audit step contract. Delegates to the shared `writeStepContract`

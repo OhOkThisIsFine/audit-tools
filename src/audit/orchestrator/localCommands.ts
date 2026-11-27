@@ -41,10 +41,6 @@ function toSpawnTuple(candidate: LocalCommandCandidate): {
   return { command: resolved[0], args: resolved.slice(1) };
 }
 
-export function __resolveFromPathForTests(command: string): string | null {
-  return resolveFromPath(command);
-}
-
 function resolveFromPath(command: string): string | null {
   if (command.trim().length === 0) {
     return null;

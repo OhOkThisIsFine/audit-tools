@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/cli-dispatcher.test.ts, tests/audit/functional-preflight.test.ts
+// sites-pinned: tests/audit-smoke.test.mjs
 import { validateAuditArguments, auditArgumentNames, auditHelpRequested, NEXT_STEP_ARGUMENTS, type AuditArgumentContract } from "./cli/argumentContract.js";
 import { requireFunctionalPreflight } from "./cli/functionalPreflight.js";
 import { resolve } from "node:path";
@@ -6,18 +6,7 @@ import { fileURLToPath } from "node:url";
 import { assertCliCommandAllowedFromCwd } from "audit-tools/shared";
 import { errorMessage } from "../shared/io/json.js";
 
-import {
-  DIRECT_CLI_DEFAULTS,
-  getFlag,
-  hasFlag,
-  getArtifactsDir,
-  getRootDir,
-  getBatchResultsDir,
-  getTimeoutMs,
-  looksLikeCliFlag,
-  countLines,
-  warnIfNotGitRepo,
-} from "./cli/args.js";
+import { getArtifactsDir, getFlag, getRootDir } from "./cli/args.js";
 import { cmdNextStep } from "./cli/nextStepCommand.js";
 import { cmdStatus } from "./cli/statusCommand.js";
 import { runSample } from "./cli/sampleRunCommand.js";
@@ -35,18 +24,6 @@ import { cmdCleanup } from "./cli/cleanupCommand.js";
 import { cmdScoreAudit } from "./cli/scoreAuditCommand.js";
 import { cmdRecoverSubmission } from "./cli/recoverSubmissionCommand.js";
 
-export const cliTestUtils = {
-  defaults: DIRECT_CLI_DEFAULTS,
-  getFlag,
-  hasFlag,
-  getArtifactsDir,
-  getRootDir,
-  getBatchResultsDir,
-  getTimeoutMs,
-  looksLikeCliFlag,
-  countLines,
-  warnIfNotGitRepo,
-};
 
 /**
  * Worker-safe subcommands: the only commands a dispatched worker may run from

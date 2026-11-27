@@ -539,6 +539,22 @@
         "src/audit/orchestrator/unitBuilder.ts": "128cbea3ca4352f7dfd37e2501ab827a7eb68733"
       }
     },
+    "6e3589038042a318": {
+      "reviewed_by": "independent Audit Tools graph reviewer",
+      "attester_class": "agent",
+      "checked": "Compared staged localCommands.ts blob e206cb67 to 865dbfc and searched all tracked source, wrappers, scripts and current tests for callers. Removed unused test wrapper only; live resolveFromPath implementation and calling site unchanged.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "044a0f15650c9bd287b909a537522f0aae31007a",
+        "ran_at": "2026-11-27T20:46:39.009Z"
+      },
+      "attested_at": "2026-11-27T20:47:00.001Z",
+      "vouches": {
+        "src/audit/orchestrator/localCommands.ts": "e206cb67a4ea1be84299739069e66e74ffdcbf14"
+      }
+    },
     "6e602a027f50ded0": {
       "reviewed_by": "OpenAI Dot with independent review agents",
       "attester_class": "agent",
@@ -1227,7 +1243,7 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/localCommands.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "6e3589038042a318"
     },
     "src/audit/orchestrator/nextStep.ts": {
       "review": "d9632808536dd1ea"
