@@ -1,6 +1,8 @@
+import { acceptQuestionReview, projectQuestionReview } from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
+import { buildReviewQuestionPlan } from "../../src/audit/orchestrator/questionPlanning.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { deriveCurrentQuestionBindings, deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
@@ -2178,4 +2180,84 @@ test("ingestion executor applies the operator lens gate to the requeue fold", ()
     run.updated.audit_tasks!.map((t) => t.task_id).filter((id) => id.includes("performance")),
     "an operator-excluded lens must never re-enter dispatch through the requeue fold",
   ).toEqual([]);
+});
+
+test("scopes frozen project rule excerpts to the question's source folders and lens", async () => {
+  const root = await mkdtemp(join(tmpdir(), "audit-project-rules-"));
+  try {
+    const contents: Record<string, string> = {
+      "AGENTS.md": "# Behavior\n- State changes must retain recovery data unless the operator resets.\n"
+        + "# Performance\n- Throughput budgets must be measured.\n"
+        + ' `'.trim().repeat(3) + "\n- State must run an example command.\n" + ' `'.trim().repeat(3) + "\n",
+      "src/local/CLAUDE.md": "# Behavior\n- Retry must retain accepted answers unless the local cache is disposable.\n",
+      "src/local/AGENTS.md": "# Behavior\n- Retry must always retain accepted answers.\n",
+      "src/peer/AGENTS.md": "# Behavior\n- State should not be confused with the local package.\n",
+      "src/local/task.ts": "export const localTask = 1;\n",
+      "src/peer/task.ts": "export const peerTask = 2;\n",
+    };
+    for (const [path, content] of Object.entries(contents)) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), content);
+    }
+    const declaredQuestions = ["local", "peer", "cross"].map(id => ({
+      key: id, lens: "behavior" as const, kind: "invariant" as const, title: id,
+      source_refs: (id === "cross" ? ["local", "peer"] : [id]).map(directory => ({ path: "src/" + directory + "/task.ts" })),
+      expectation: "Check this operation.",
+    }));
+    const artifacts = (localHash = hashContent(contents["src/local/CLAUDE.md"]!)): ArtifactBundle => ({
+      repo_manifest: { repository: {name: "rules"}, generated_at: "2026-11-27T00:00:00Z",
+        files: Object.entries(contents).map(([path, content]) => ({ path, language: path.endsWith(".md") ? "markdown" : "typescript", size_bytes: Buffer.byteLength(content),
+          hash: path === "src/local/CLAUDE.md" ? localHash : hashContent(content) })) },
+      file_disposition: { files: Object.keys(contents).map(path => ({
+        path, status: path.endsWith(".md") ? "doc_only" : "included",
+      })) },
+    });
+    const bundle = artifacts();
+    const options = { snapshotId: "frozen", declaredQuestions };
+    const planned = buildReviewQuestionPlan(bundle, options);
+    const changed = buildReviewQuestionPlan(artifacts("revised-local"), options);
+    const { bindings } = await deriveCurrentQuestionBindings({ ...bundle, review_plan: planned }, root);
+    const local = bindings.find(item => item.question.expected_outcome.startsWith("Review local."))!;
+    const peer = bindings.find(item => item.question.expected_outcome.startsWith("Review peer."))!;
+    expect(local.assignment.suggested_sources.map(ref => ref.path)).toEqual(expect.arrayContaining(["AGENTS.md", "src/local/CLAUDE.md"]));
+    expect(local.assignment.suggested_sources.map(ref => ref.path)).not.toContain("src/peer/AGENTS.md");
+    expect(local.evidence.map(row => row.description)).toEqual(expect.arrayContaining([
+      expect.stringContaining("Candidate project rule exception"),
+      expect.stringContaining("Retry must retain accepted answers unless the local cache is disposable."),
+    ]));
+    expect(local.evidence.map(row => row.description).join(" ")).not.toMatch(/Throughput|example command|peer/);
+    const cross = bindings.find(item => item.question.expected_outcome.startsWith("Review cross."))!;
+    const crossText = cross.evidence.map(row => row.description);
+    expect(crossText).toEqual(expect.arrayContaining([
+      expect.stringContaining("disposable. Applies to src/local/ (that subtree only)"),
+      expect.stringContaining("Applies to repository root (all in-scope paths)"),
+      expect.stringContaining("State should not be confused with the local package. Applies to src/peer/"),
+      expect.stringContaining("always retain accepted answers. Applies to src/local/"),
+    ]));
+    expect(crossText.every(description => description.includes("report the conflict rather than assume an override"))).toBe(true);
+    expect(changed.questions.find(row => row.question_id === local.question.question_id)?.revision_id).not.toBe(local.question.revision_id);
+    expect(changed.questions.find(row => row.question_id === peer.question.question_id)?.revision_id).toBe(peer.question.revision_id);
+    const { schema_version, question_id, revision_id, snapshot_id, assignment_id } = peer.assignment;
+    const identity = { schema_version, question_id, revision_id, snapshot_id };
+    const part_id = peer.question.requested_parts[0]!.part_id;
+    const ref = { path: "src/peer/task.ts", start_line: 1 };
+    const accepted = acceptQuestionReview([], peer, {
+      ...identity, assignment_id, submission_id: "peer-answer", inspected_sources: [ref],
+      evidence_ids: [], limitations: [],
+      answer: { outcome: "clean", parts: [{ part_id, outcome: "clean", observation_ids: ["checked"] }],
+        observations: [{ ...identity, observation_id: "checked", part_id, kind: "source_confirmed",
+          statement: "Peer output is unchanged.", source_refs: [ref], evidence_refs: [] }], findings: [] },
+    }, "2026-11-27T00:00:00Z").record;
+    const updated = "src/local/CLAUDE.md";
+    contents[updated] = "# Behavior\n- Retry must retain unfinished work.\n";
+    await writeFile(join(root, updated), contents[updated]!);
+    const revised = artifacts();
+    const { bindings: afterUpdate } = await deriveCurrentQuestionBindings({
+      ...revised, review_plan: buildReviewQuestionPlan(revised, options),
+    }, root);
+    const peerAfter = afterUpdate.find(item => item.question.question_id === question_id)!;
+    expect(projectQuestionReview(peerAfter.question, [accepted], peerAfter.dependencies).current).toEqual([accepted]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

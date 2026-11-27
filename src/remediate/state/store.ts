@@ -1,4 +1,5 @@
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/phase-triage.test.ts
+import { WaveSimplificationSchema, type WaveSimplification } from "./types.js";
 import { DecisionApplicationReceiptSchema, reconcileDecisionCleanup, type DecisionApplicationReceipt } from "./decisionConsumption.js";
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/artifacts-validation.test.ts, tests/remediate/store.test.ts
 import { z } from "zod";
@@ -74,6 +75,7 @@ export type OperatorLifecycle = z.infer<typeof OperatorLifecycleSchema>;
 export type OperatorLifecycleAction = "pause" | "resume" | "cancel" | "plan-only";
 
 export interface RemediationState {
+  wave_simplifications?: WaveSimplification[];
   /**
    * Schema version of this persisted state. Optional on the TYPE because a
    * state written before the field existed is a legal input; see
@@ -259,6 +261,7 @@ export function validateRemediationState(value: unknown): string[] {
     }
   }
   if (obj["decision_applications"] !== undefined && !z.array(DecisionApplicationReceiptSchema).safeParse(obj["decision_applications"]).success) errors.push("decision_applications contains invalid application receipts");
+  if (obj["wave_simplifications"] !== undefined && !z.array(WaveSimplificationSchema).safeParse(obj["wave_simplifications"]).success) errors.push("wave_simplifications contains invalid wave receipts");
   errors.push(...clarificationQuestionErrors(obj));
   if (status === "closing") {
     const closingPlan = obj["closing_plan"];

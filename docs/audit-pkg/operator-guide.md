@@ -215,6 +215,13 @@ continues from that live state. Cancel is terminal for the current run and
 preserves its work and diagnostics. Follow the emitted continuation after each
 command; pause and cancel are not cleanup commands.
 
+Remediation planning and plan review can query dependency links on demand. A matching
+audit graph is reused, including the compact copy retained when the audit is
+cleaned up. If that graph is missing or its source bytes have changed, remediation
+builds a native graph using the same extractor. Links guide source inspection;
+they do not replace verification. This handoff does not require a host-local
+Codebase Memory index to survive the audit.
+
 Remediation runs the target repository's declared build, typecheck, lint and test
 commands at verification boundaries. If no executable verification is available,
 the workflow asks for a command or a stop instead of reporting success. An approved

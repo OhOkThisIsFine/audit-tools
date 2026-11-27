@@ -110,7 +110,7 @@ async function dirtyRepo(): Promise<{ root: string; artifactsDir: string }> {
 }
 
 describe("ensureRunSnapshot — git root", () => {
-  test("pins the working tree as it is, dirt included, without touching the live index or HEAD", async () => {
+  test("pins working bytes and preserves Git state and ignored dependencies on resume", async () => {
     const { root, artifactsDir } = await dirtyRepo();
     const headBefore = await gitOut(root, ["rev-parse", "HEAD"]);
     const statusBefore = await gitOut(root, ["status", "--porcelain"]);
@@ -128,6 +128,17 @@ describe("ensureRunSnapshot — git root", () => {
     expect(await gitOut(root, ["rev-parse", "HEAD"])).toBe(headBefore);
     expect(await gitOut(root, ["status", "--porcelain"])).toBe(statusBefore);
     expect(existsSync(join(snapshot.source_root, ".audit-tools"))).toBe(false);
+
+    // The same acquisition links ignored dependency directories, copies
+    // ignored files, and stays pinned once the live source changes.
+    expect((await lstat(join(snapshot.source_root, "node_modules"))).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(snapshot.source_root, "node_modules", "dep", "index.js"), "utf8")).toBe("module.exports = 1;\n");
+    const env = await lstat(join(snapshot.source_root, ".env"));
+    expect(env.isFile() && !env.isSymbolicLink()).toBe(true);
+    await writeFile(join(root, "src", "a.ts"), "export const a = 3;\n");
+    const resumed = await ensureRunSnapshot(root, artifactsDir);
+    expect(resumed).toEqual(snapshot);
+    expect(await readFile(join(resumed.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 2;\n");
   });
 
   test.each(["lstat", "copyFile"] as const)("an admitted source %s failure refuses the snapshot and permits retry", async (operation) => {
@@ -292,24 +303,6 @@ describe("ensureRunSnapshot — git root", () => {
     await git(root, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "moved"]);
     expect(await resolveRunSince(root, artifactsDir, "HEAD")).toBe(head);
     expect(await lookupRunSince(artifactsDir, "HEAD")).toBe(head);
-  });
-
-  test("links ignored directories and copies ignored files", async () => {
-    const { root, artifactsDir } = await dirtyRepo();
-    const snapshot = await ensureRunSnapshot(root, artifactsDir);
-    expect((await lstat(join(snapshot.source_root, "node_modules"))).isSymbolicLink()).toBe(true);
-    expect(await readFile(join(snapshot.source_root, "node_modules", "dep", "index.js"), "utf8")).toBe("module.exports = 1;\n");
-    const env = await lstat(join(snapshot.source_root, ".env"));
-    expect(env.isFile() && !env.isSymbolicLink()).toBe(true);
-  });
-
-  test("a live edit after run start does not reach the snapshot; a second call returns the same pin", async () => {
-    const { root, artifactsDir } = await dirtyRepo();
-    const first = await ensureRunSnapshot(root, artifactsDir);
-    await writeFile(join(root, "src", "a.ts"), "export const a = 3;\n");
-    const second = await ensureRunSnapshot(root, artifactsDir);
-    expect(second).toEqual(first);
-    expect(await readFile(join(second.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 2;\n");
   });
 
   test("a clean tree's snapshot sits at HEAD with a clean status", async () => {

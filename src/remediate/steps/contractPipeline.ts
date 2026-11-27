@@ -12,6 +12,7 @@ import { readIntakeRiskSignal, adversarialDepthForTier, escalateRiskSignal, writ
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import { loaderCommand } from "./prompts.js";
+import { preparePlanningGraph } from "./planningGraph.js";
 import { renderPlanAuthorPrompt, renderPlanReviewPrompt, reviewRequirementForRole } from "./contractPipelinePrompts.js";
 import {
   executionPlanPaths, PlanSourceSchema, readPlanSource, readCanonicalPlan, ingestExecutionPlan,
@@ -25,6 +26,7 @@ export { readApprovedExecutionPlan } from "../contractPipeline/executionPlan.js"
 
 export interface ContractPipelineStepOptions {
   root: string; artifactsDir: string; runId: string; sourcePaths?: string[]; forceRevision?: boolean;
+  planningGraph?: () => Promise<string>;
 }
 
 export async function resolveAdversarialDepth(artifactsDir: string) {
@@ -108,7 +110,8 @@ async function authorStep(options: ContractPipelineStepOptions, source: PlanSour
   const paths = executionPlanPaths(options.artifactsDir);
   return emit(options, renderPlanAuthorPrompt({ root: options.root, source, canonical,
     history: await readPlanReviewHistory(options.artifactsDir), sourcePath: paths.source,
-    planPath: paths.canonical, outputPath: paths.submission, reason }));
+    planPath: paths.canonical, outputPath: paths.submission, reason,
+    graphHint: await options.planningGraph?.() }));
 }
 
 /** Review dependencies are declarations over one revision, never a second artifact-state graph. */
@@ -126,7 +129,8 @@ async function reviewStep(options: ContractPipelineStepOptions, canonical: Canon
   const { adversarialDepth } = await resolveAdversarialDepth(options.artifactsDir);
   const requirement = reviewRequirementForRole(role, adversarialDepth);
   const body = renderPlanReviewPrompt({ role, root: options.root, sourcePath: paths.source, planPath: paths.canonical,
-    canonical, history, priorReviewPaths: REVIEW_DEPENDENCIES[role].map(dependency => paths.review(dependency).accepted), requirement });
+    canonical, history, priorReviewPaths: REVIEW_DEPENDENCIES[role].map(dependency => paths.review(dependency).accepted), requirement,
+    graphHint: await options.planningGraph?.() });
   const bound = bindWorkerPrompt(body + `\nInput binding: ${inputSha}`, prompt_sha256 => JSON.stringify({
     contract_version: "review-submission/v1", prompt_sha256,
     review: { mode: requirement === "independent" ? "independent" : "degraded", reason: "<how the context meets the review policy>" },
@@ -200,6 +204,8 @@ async function mergedCounterexamples(artifactsDir: string, revision: string, his
 
 /** One author/revision loop, with independent review over the executable plan itself. */
 export async function buildNextContractPipelineStep(options: ContractPipelineStepOptions): Promise<RemediationStep | null> {
+  let graph: Promise<string> | undefined;
+  options = { ...options, planningGraph: () => graph ??= preparePlanningGraph(options) };
   const source = await ensureSource(options);
   const paths = executionPlanPaths(options.artifactsDir);
   if (stableStringify(source.intent ?? null) !== stableStringify(await readExecutionIntent(options.artifactsDir) ?? null)) {

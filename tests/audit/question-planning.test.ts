@@ -4,7 +4,7 @@ import { buildReviewQuestionPlan, reviewSourceScope } from "../../src/audit/orch
 import { buildGraphBundle } from "../../src/audit/extractors/graph.js";
 import { buildSurfaceManifest } from "../../src/audit/extractors/surfaces.js";
 import { buildCriticalFlowManifest } from "../../src/audit/extractors/flows.js";
-import { ReviewPlanSchema } from "../../src/shared/types/reviewQuestion.js";
+import { DISCONFIRMATION_PART_ID, ReviewPlanSchema } from "../../src/shared/types/reviewQuestion.js";
 import type { Finding } from "../../src/shared/types/finding.js";
 import { questionWorkloadBindings } from "../../src/audit/cli/questionWorkloadBindings.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
@@ -106,6 +106,9 @@ describe("question-led audit planning", () => {
       expect(bySignal.get(key)).toMatchObject({ outcome: "not_promoted" });
       expect(bySignal.get(key)).not.toHaveProperty("question_id");
     }
+    expect(target("design-contract:DR-001").requested_parts.map(part => part.part_id)).toContain(DISCONFIRMATION_PART_ID);
+    expect(plan.questions.filter(question => question.evidence_dependencies.length === 0)
+      .every(question => question.requested_parts.every(part => part.part_id !== DISCONFIRMATION_PART_ID))).toBe(true);
     expect(target("charter:material").expected_outcome).toContain("stated: Older changes are included.");
     expect(target("charter:material").expected_outcome).toContain("Prior fidelity review (interpretation)");
     expect(bySignal.get("design-lead:seam-b")).toMatchObject({ outcome: "grouped" });

@@ -1,6 +1,7 @@
 // sites-pinned: tests/audit/next-step-question-workload.test.ts, tests/audit/result-submit.test.ts
 import { compareCodeUnits, hashContent, stableStringify, toPosixPath } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { projectRuleMatchesLens } from "../orchestrator/projectRuleEvidence.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewEvidence, type ReviewReopenEvent, type ReviewSourceRef, questionReopenDependencies } from "../../shared/types/reviewQuestion.js";
 import type { AuditQuestionBinding } from "./dispatch/questionReviewAcceptance.js";
@@ -88,7 +89,8 @@ export async function questionWorkloadBindings(
     }
     const scopedEvidence = [...matches].sort((a, b) =>
       compareCodeUnits(evidence[a]!.evidence_id, evidence[b]!.evidence_id) || a - b)
-      .map(position => evidence[position]!);
+      .map(position => evidence[position]!)
+      .filter(record => projectRuleMatchesLens(record.evidence_id, question.lens));
     const epoch = epochs.get(question.question_id);
     const dependencies = [...question.source_dependencies, ...question.evidence_dependencies, ...(epoch ? [epoch] : [])];
     const issued = {

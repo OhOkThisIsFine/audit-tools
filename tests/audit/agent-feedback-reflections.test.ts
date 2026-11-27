@@ -1,9 +1,10 @@
-import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
-import { runWrapper } from "./helpers/run-wrapper.mjs";
-import type { ReviewAssignment, ReviewQuestion } from "../../src/shared/types/reviewQuestion.js";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { advanceToDispatchReady, callNextStep } from "./helpers/completion-harness.js";
+import { presentQuestionReport, readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
+import { cmdResynthesize } from "../../src/audit/cli/resynthesizeCommand.js";
 import { test, expect } from "vitest";
-import { mkdir, writeFile, readFile, appendFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { writeFile, readFile, appendFile } from "node:fs/promises";
+import { join } from "node:path";
 
 // Disk-load + staleness wiring for the opt-in worker feedback channel
 // (agent-feedback.jsonl → bundle.agent_reflections → "Process Feedback").
@@ -141,49 +142,27 @@ test("changed reflections re-stale audit-report.md exactly once; unchanged refle
 // Exercise the real question-review next-step loop and promoted pair.
 test("a reflection appended after synthesis re-synthesizes once and the run still converges", async () => {
   await withTempRepo(async (root) => {
-    const call = async (...args: string[]) => JSON.parse((await runWrapper(args, { cwd: root })).stdout);
     const artDir = join(root, ".audit-tools", "audit");
+    const nextStep = () => callNextStep(root, artDir);
     const reportPath = join(artDir, "audit-report.md");
     const findingsPath = join(artDir, "audit-findings.json");
-    const dispatch = await advancePastDesignReview(root);
-    expect(dispatch.step_kind).toBe("dispatch_review");
-    const workload = JSON.parse(await readFile(dispatch.artifact_paths.host_workload, "utf8")) as {
-      contract_version: string; run_id: string;
-      work_items: { binding: { question: ReviewQuestion; assignment: ReviewAssignment } }[];
-    };
-    expect(workload.work_items.length).toBeGreaterThan(0);
-    const submissionPath = join(root, "feedback-smoke-answer.json");
-    const submissions: string[] = [];
-    for (const { binding: { question, assignment } } of workload.work_items) {
-      const submission_id = `feedback-${assignment.assignment_id}`;
-      await writeFile(submissionPath, JSON.stringify({
-        schema_version: workload.contract_version, submission_id, assignment_id: assignment.assignment_id,
-        question_id: question.question_id, revision_id: question.revision_id, snapshot_id: question.snapshot_id,
-        inspected_sources: [], evidence_ids: [], limitations: ["Synthetic feedback fixture."],
-        answer: { outcome: "inconclusive", findings: [], observations: [],
-          parts: question.requested_parts.map(({ part_id }) => ({
-            part_id, outcome: "inconclusive", observation_ids: [], reason: "No behavioral observation.",
-          })) },
-      }));
-      const receipt = await call("submit", "--work-item", assignment.assignment_id, "--from", submissionPath);
-      expect(receipt.disposition).toBe("accepted");
-      submissions.push(submission_id);
-    }
+    const workload = await readQuestionWorkload(await advanceToDispatchReady(root));
+    const submissions = await submitQuestions(root, workload.work_items);
 
-    const before = await call("next-step");
+    const before = await nextStep();
     expect(before.step_kind).toBe("synthesis_narrative");
     expect(await hasCurrentQuestionReport(artDir)).toBe(true);
     expect(await readFile(reportPath, "utf8")).not.toMatch(/## Process Feedback/);
     const machine = await readFile(findingsPath, "utf8");
     expect(JSON.parse(machine).question_review.accepted.map(
       (entry: { submission: { submission_id: string } }) => entry.submission.submission_id,
-    ).sort()).toEqual(submissions.sort());
+    ).sort()).toEqual(submissions.map(answer => answer.submission_id).sort());
     const ledgerPath = join(artDir, "runs", workload.run_id, "host-accepted-results-ledger.json");
     const ledger = await readFile(ledgerPath, "utf8");
 
     await appendFile(join(artDir, FEEDBACK_FILE), JSON.stringify(REFLECTION) + "\nworker crashed mid-line{\n");
     expect(await hasCurrentQuestionReport(artDir)).toBe(false);
-    const resynthesized = await call("next-step");
+    const resynthesized = await nextStep();
     expect(resynthesized.step_kind).toBe("synthesis_narrative");
     expect(await hasCurrentQuestionReport(artDir)).toBe(true);
     const rendered = await readFile(reportPath, "utf8");
@@ -193,36 +172,17 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
 
     await appendFile(join(artDir, FEEDBACK_FILE), "malformed-only-line{\n");
     expect(await hasCurrentQuestionReport(artDir)).toBe(true);
-    const unchanged = await call("next-step");
+    const unchanged = await nextStep();
     expect(unchanged.step_kind).toBe("synthesis_narrative");
     expect(await readFile(reportPath, "utf8")).toBe(rendered);
-    const narrativePath = unchanged.artifact_paths.synthesis_narrative_results;
-    await mkdir(dirname(narrativePath), { recursive: true });
-    await writeFile(narrativePath, JSON.stringify({ themes: [], top_risks: [] }));
-
-    const trail: string[] = [];
-    let complete = false;
-    for (let i = 0; i < 8; i++) {
-      const step = await call("next-step");
-      trail.push(`${step.step_kind}:${step.status}`);
-      if (step.step_kind === "present_report" && step.status === "complete") { complete = true; break; }
-      const friction = step.artifact_paths?.friction_record;
-      if (step.step_kind === "present_report" && friction) {
-        const existing = JSON.parse(await readFile(friction, "utf8").catch(() => "{}"));
-        existing.category_attestations = ["ambiguous_direction", "tool_should_decide", "inefficient_feeding"]
-          .map(category => ({ category, note: "Synthetic feedback fixture." }));
-        await mkdir(dirname(friction), { recursive: true });
-        await writeFile(friction, JSON.stringify(existing));
-      }
-    }
-    expect(complete, trail.join(" -> ")).toBe(true);
+    await presentQuestionReport(root);
     expect(await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8")).toBe(rendered);
     expect(await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8")).toBe(machine);
     expect(await readFile(ledgerPath, "utf8")).toBe(ledger);
     expect(await readFile(join(root, ".audit-tools", "audit-agent-feedback.jsonl"), "utf8"))
       .toBe(await readFile(join(artDir, FEEDBACK_FILE), "utf8"));
     expect(await hasCurrentQuestionReport(artDir)).toBe(true);
-    await call("resynthesize");
+    await cmdResynthesize(["--root", root, "--artifacts-dir", artDir]);
     expect(await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8")).toBe(rendered);
   });
 });

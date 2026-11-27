@@ -1,13 +1,14 @@
 // sites-pinned: tests/audit/question-planning.test.ts
 import { compareCodeUnits, hashContent, pathMatchesPrefix, stableStringify } from "audit-tools/shared";
 import {
-  BUILT_IN_REVIEW_LENSES, REVIEW_QUESTION_CONTRACT_VERSION, ReviewLensSchema,
+  BUILT_IN_REVIEW_LENSES, DISCONFIRMATION_PART_ID, REVIEW_QUESTION_CONTRACT_VERSION, ReviewLensSchema,
   type ReviewInventoryItem, type ReviewPlan, type ReviewQuestion, type ReviewSourceRef,
 } from "../../shared/types/reviewQuestion.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import { EXTRACTOR_HEURISTIC_NOTE, isTestPath } from "../extractors/pathPatterns.js";
 import { getExternalSignalPaths } from "./requeueUtils.js";
+import { applicableProjectRulePaths } from "./projectRuleEvidence.js";
 import { fingerprintDiscoveredSet } from "./questionEvidence.js";
 import { REVIEW_LENS_PLAYBOOKS } from "./reviewLensPlaybooks.js";
 import { resolveIntentLensSelection } from "./lensSelection.js";
@@ -230,8 +231,11 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     const startKey = start && stableStringify(start);
     const startIndex = startKey === undefined ? -1 : refs.findIndex(ref => stableStringify(ref) === startKey);
     const startingRefs = startIndex > 0 ? [refs[startIndex]!, ...refs.slice(0, startIndex), ...refs.slice(startIndex + 1)] : refs;
+    const contractPaths = new Set(contract.map(ref => ref.path));
+    const applicableRules = applicableProjectRulePaths(startingRefs,
+      path => !contractPaths.has(path) && sourceStatus(path, true) === undefined).map(source);
     const item: ReviewInventoryItem = { inventory_item_id: ids(kind, key), kind,
-      title, source_refs: startingRefs, contract_refs: contract, scope: "in_scope" };
+      title, source_refs: startingRefs, contract_refs: [...contract, ...applicableRules], scope: "in_scope" };
     if (!inventory.some(({ inventory_item_id }) => inventory_item_id === item.inventory_item_id)) inventory.push(item);
     subjects.push({ lens, inventory: item, expectation,
       parts: linked?.parts ?? [{ part_id: "supported-outcome", expectation }],
@@ -439,6 +443,8 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     if (!selected.has(lens)) continue;
     const questionId = ids(lens, item.inventory_item_id);
     if (questions.has(questionId)) throw new Error(`Duplicate review question identity for ${item.inventory_item_id}`);
+    // Rules bind their whole frozen file, not just the lens shortlist. An edit
+    // may create an applicable rule or exception where none was excerpted before.
     const sourceDependencies: ReviewQuestion["source_dependencies"] = ordered([...item.source_refs, ...item.contract_refs].map(({ path }) => path))
       .map((path) => ({ kind: "source", key: path, fingerprint: files.get(path)!.hash! }));
     if (subject.membership !== undefined) sourceDependencies.push(
@@ -537,7 +543,14 @@ function routePriorReviewSignals(
     const lens = claimLens(claim.lens);
     const expectation = `Verify the accepted ${lane} claim without assuming its conclusion: ${claim.title}. ${claim.summary}\n` +
       "Trace the implicated callers and resulting state. Decide whether the claimed consequence is supported, current behavior is justified, or essential evidence is missing.";
-    const target = add(lens, key, "invariant", claim.title, refs, [], expectation, { evidence: [[key, digest(claim)]] });
+    const needsCountercheck = claim.severity === "critical" || claim.severity === "high" ||
+      claim.grounding?.status !== "grounded";
+    const parts = needsCountercheck ? [
+      { part_id: "supported-outcome", expectation },
+      { part_id: DISCONFIRMATION_PART_ID, expectation:
+        "Check the strongest plausible counterexample, exception, or unreachable-caller explanation. Use a separate precise source location or already-authorized executed evidence. Mark this part clean only when the checked alternative does not overturn a supported defect; if evidence is missing, leave the claim a lead. Do not create a reproduction or run new commands." },
+    ] : undefined;
+    const target = add(lens, key, "invariant", claim.title, refs, [], expectation, { evidence: [[key, digest(claim)]], parts });
     disposition(key, "promoted", `Accepted ${lane} claim preserved for verification, not treated as proof.`, refs, target);
   }
 

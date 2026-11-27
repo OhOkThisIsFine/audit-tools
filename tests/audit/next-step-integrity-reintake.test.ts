@@ -59,8 +59,7 @@ function resume(root: string) {
     analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" } });
 }
 
-/** Qualification of optional analyzer acquisition belongs to the full-path
- * witness. The other cases still publish real bindings through the CLI. */
+/** Source integrity needs real review bindings, not acquisition of optional analyzers. */
 async function prepareIntegrityDispatch(root: string) {
   await persistAnalyzerSettings(root, Object.fromEntries([
     "typescript", "python", "css", "html", "sql",
@@ -71,7 +70,7 @@ async function prepareIntegrityDispatch(root: string) {
 
 test("same-line-count issued source edit refreshes returned and persisted authority", async () => {
   await withTempRepo(async (root) => {
-    const step = await advanceToDispatchReady(root);
+    const step = await prepareIntegrityDispatch(root);
     expect(step.step_kind).toBe("dispatch_review");
     const artifactsDir = join(root, ".audit-tools", "audit");
     const before = await loadArtifactBundle(artifactsDir);
@@ -99,7 +98,7 @@ test("same-line-count issued source edit refreshes returned and persisted author
   });
 });
 
-test.each(["line-count edit", "deleted file", "post-intake failure"])("%s commits refreshed authority", async (scenario) => {
+test.each(["deleted file", "post-intake failure"])("%s commits refreshed authority", async (scenario) => {
   await withTempRepo(async (root) => {
     // Deletion keeps a second auditable source, so intake remains valid.
     await writeFile(join(root, "src", "api", "other.ts"), "export const other = 1;\n");

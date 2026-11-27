@@ -47,6 +47,11 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     const handoff = await readFile(step.prompt_path, "utf8");
     expect(handoff).toContain("Read only the routing metadata");
     expect(handoff).toContain("The command returns a prompt_path, not the prompt.");
+    expect(handoff).toContain("With delegation, pass that file directly to the reviewer harness");
+    expect(handoff).toContain("If the host truly cannot delegate, prepare exactly one pending assignment");
+    expect(handoff).toContain("run the continuation once to ingest it, then stop for fresh context");
+    expect(handoff).toContain("or substitute self-review for any step that requires independence");
+    expect(handoff).toContain("retain the exact query, its returned status or stderr, and the frozen source identity");
     expect(handoff).not.toContain(step.artifact_paths.host_workload);
     expect(step.step_kind).toBe("dispatch_review");
     expect(step.allowed_commands).toHaveLength(1);
@@ -116,7 +121,20 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     await expect(prepare(first.binding.assignment.assignment_id)).rejects.toThrow(/incomplete fold receipt/);
     await unlink(receipt);
     const selected = await loadPacket(first);
-    const second = await loadPacket(workItems[1]!);
+    const other = workItems[1]!;
+    const second = await loadPacket(other);
+    const firstId = first.binding.assignment.assignment_id;
+    const otherId = other.binding.assignment.assignment_id;
+    const prepareBatch = (ids: string, digest = routing.workload_sha256) =>
+      runWrapper([...routing.prepare_review_argv_prefix.slice(0, -1), digest, "--work-items", ids], { cwd: dirname(root) });
+    const batch = JSON.parse((await prepareBatch(otherId + ",unissued," + firstId)).stdout);
+    expect(batch).toEqual({ run_id: step.run_id, workload_sha256: routing.workload_sha256, outcomes: [
+      { status: "ready", packet: second.handle },
+      { status: "refused", assignment_id: "unissued", message: "Review assignment is not in the current issued workload" },
+      { status: "ready", packet: selected.handle },
+    ] });
+    await expect(prepareBatch(firstId + "," + firstId)).rejects.toThrow(/distinct review assignment IDs/);
+    await expect(prepareBatch(firstId, "0".repeat(64))).rejects.toThrow(/fingerprint is not current/);
     expect(second.handle.prompt_path).not.toBe(selected.handle.prompt_path);
     expect(second.packet.source_index).toBe(selected.packet.source_index);
     expect(second.packet.graph_index).toBe(selected.packet.graph_index);
@@ -201,6 +219,11 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
         const accepted = await runWrapper(["submit", "--root", root, ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: dirname(root) });
         expect(JSON.parse(accepted.stdout)).toMatchObject({ disposition: "accepted", submission_id: response.submission_id });
         await expect(prepare(assignment.assignment_id)).rejects.toThrow(/already has an accepted answer/);
+        const partiallyAccepted = JSON.parse((await prepareBatch(firstId + "," + otherId)).stdout);
+        expect(partiallyAccepted.outcomes).toEqual([
+          { status: "refused", assignment_id: firstId, message: "Review assignment already has an accepted answer." },
+          { status: "ready", packet: second.handle },
+        ]);
       } else {
         // Later answers only fill the real durable ledger for synthesis; CLI argv,
         // stdout and rejection have already been exercised above.

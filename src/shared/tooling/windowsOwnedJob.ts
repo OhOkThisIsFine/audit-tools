@@ -114,9 +114,9 @@ export async function runWindowsOwnedJob(
       });
       child.once("exit", (code, signal) => {
         runtime.send({ type: "root_exit", code, signal });
-        poll = setInterval(() => {
+        const finishIfEmpty = (): boolean => {
           try {
-            if (job.activeCount() !== 1) return;
+            if (job.activeCount() !== 1) return false;
             clearInterval(poll);
             releaseEmptyJob(code ?? 1);
           } catch (error) {
@@ -124,7 +124,11 @@ export async function runWindowsOwnedJob(
             runtime.send({ type: "error", code: "EOWNERSHIP", message: error instanceof Error ? error.message : "Windows Job accounting failed" });
             exit(1);
           }
-        }, 10);
+          return true;
+        };
+        // Most local commands have no surviving descendants. Prove that
+        // immediately instead of imposing a timer tick on every command.
+        if (!finishIfEmpty()) poll = setInterval(finishIfEmpty, 10);
       });
     } catch (error) {
       runtime.send({ type: "error", code: "EOWNERSHIP", message: error instanceof Error ? error.message : "Windows Job start failed" });

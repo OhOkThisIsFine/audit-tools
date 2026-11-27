@@ -1,7 +1,8 @@
 // sites-pinned: tests/audit/question-review-acceptance.test.ts
 import { compareCodeUnits, pathMatchesPrefix, stableStringify } from "audit-tools/shared";
+import { isProjectRulePath } from "../../orchestrator/projectRuleEvidence.js";
 import { analyzerReceiptFingerprint } from "../../orchestrator/questionEvidence.js";
-import { questionReopenKey } from "../../../shared/types/reviewQuestion.js";
+import { DISCONFIRMATION_PART_ID, questionReopenKey } from "../../../shared/types/reviewQuestion.js";
 import type { CurrentQuestionDependencies, ReviewDependency, ReviewAcceptedAnswer, ReviewAdjudication, ReviewAnswer, ReviewAssignment, ReviewEvidence, ReviewQuestion, ReviewSourceRef, ReviewSubmission } from "../../../shared/types/reviewQuestion.js";
 
 export interface AuditQuestionBinding {
@@ -109,6 +110,42 @@ export function acceptQuestionReview(answers: readonly ReviewAcceptedAnswer[], b
           stableStringify(issued.analyzer_provenance) === stableStringify(obligation.provenance);
       })) throw new Error("Analyzer comparison receipt must come from cited issued evidence; use an assertion obligation for independently checkable behavior when no receipt is available");
     }
+
+    if (finding.kind === "confirmed_defect" &&
+        question.requested_parts.some(part => part.part_id === DISCONFIRMATION_PART_ID)) {
+      const countercheck = submission.answer.parts.find(part => part.part_id === DISCONFIRMATION_PART_ID);
+      const findingsParts = new Set(submission.answer.parts
+        .filter(part => part.part_id !== DISCONFIRMATION_PART_ID && part.outcome === "findings")
+        .flatMap(part => part.observation_ids));
+      const supporting = links.map(id => observations.get(id)!)
+        .filter(observation => findingsParts.has(observation.observation_id) && observation.kind !== "unverified");
+      const precise = (ref: ReviewSourceRef) => ref.start_line !== undefined && !isProjectRulePath(ref.path);
+      const support = supporting.flatMap(observation => observation.source_refs);
+      const supportingEvidence = new Set(finding.evidence_ids);
+      const supportingObservations = new Set(supporting.map(observation => observation.observation_id));
+      for (const observation of supporting) {
+        for (const ref of observation.evidence_refs) {
+          supportingEvidence.add(ref.evidence_id);
+          if (ref.observation_id) supportingObservations.add(ref.observation_id);
+        }
+      }
+      const independentSpan = (ref: ReviewSourceRef) => precise(ref) && !support.some(other =>
+        other.path === ref.path && (other.start_line === undefined ||
+          (ref.start_line! <= (other.end_line ?? other.start_line) &&
+            other.start_line <= (ref.end_line ?? ref.start_line!))));
+      const checked = countercheck?.outcome === "clean" && countercheck.observation_ids.some(id => {
+        const observation = observations.get(id);
+        if (observation?.kind === "runtime_observed") {
+          return observation.evidence_refs.some(ref => ref.observation_id !== undefined &&
+            !supportingEvidence.has(ref.evidence_id) && !supportingObservations.has(ref.observation_id));
+        }
+        return observation?.kind === "source_confirmed" && observation.source_refs.some(independentSpan);
+      }) && support.some(precise);
+      if (!checked) {
+        throw new Error("A targeted confirmed defect needs a source-anchored finding and a distinct, checked disconfirmation observation; report a lead when the countercheck is inconclusive.");
+      }
+    }
+
     for (const id of links) {
       if (observations.get(id)?.kind !== "unverified") claimedObservations.add(id);
     }

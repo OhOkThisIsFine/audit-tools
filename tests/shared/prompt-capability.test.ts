@@ -45,6 +45,9 @@ describe("canonical planning prompt capabilities", () => {
     expect(prompt).toContain("Read /run/source.json");
     expect(prompt).toContain("Write ONLY /run/plan.input.json");
     expect(prompt).toContain("Inspect actual source");
+    expect(prompt).toContain("Choose focused required_tests for each unit");
+    expect(prompt).toContain("Leave repository-wide verification to the final check");
+    expect(prompt).toContain("Do not omit required evidence to save time");
     expect(prompt).not.toContain("obligation_ledger.json");
   });
   for (const role of ["critique", "critic", "judge"] as const) it(`${role} reads accepted records and may check actual source`, () => {

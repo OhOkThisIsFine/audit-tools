@@ -42,6 +42,19 @@ test("an expired start never launches user code", async () => {
   expect(f.releaseEmpty).toHaveBeenCalledOnce();
 });
 
+test("a child with no surviving descendants releases without waiting for a timer", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  await runWindowsOwnedJob(f.runtime, async () => f);
+  f.start({ argv: ["fixture"], env: {} });
+  f.child.emit("exit", 0, null);
+  expect(f.activeCount).toHaveBeenCalledOnce();
+  expect(f.releaseEmpty).toHaveBeenCalledOnce();
+  expect(f.messages.at(-1)).toEqual({ type: "empty" });
+  expect(f.exit).toHaveBeenCalledWith(0);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 test("root exit retains ownership until accounting observes only the helper", async () => {
   vi.useFakeTimers();
   const f = fixture();

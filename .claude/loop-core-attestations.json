@@ -874,6 +874,37 @@
         "src/shared/submission/submissionScan.ts": "86726d05792322664bb576d0f9ca6b901888d175"
       }
     },
+    "eadba2ff8958aa32": {
+      "reviewed_by": "dot integration, suite_audit_one, asante_verify, adapters_fresh",
+      "attester_class": "agent",
+      "checked": "Reviewed bounded packet isolation, scoped evidence/authority, matching graph inputs, exact combined-wave review before dispatch and replanning, and no state-to-execution dependency cycle. Verified generated registry coverage and a full native Windows suite.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "29d9a5e3c013b72a9e00439233d35749bb80d012",
+        "ran_at": "2026-11-27T08:39:12.148Z"
+      },
+      "attested_at": "2026-11-27T08:39:12.445Z",
+      "vouches": {
+        ".claude/hooks/loop-core-patterns.mjs": "6a1f95ca13237773cab515eba51cffe054da863b",
+        "src/audit/cli/dispatch/hostHandoff.ts": "2fc7a5383fb743afd35288b82a8eb4abc18b4afa",
+        "src/audit/cli/dispatch/questionReviewAcceptance.ts": "462042e48038d08479a38021e30c5dbc808891e8",
+        "src/audit/cli/nextStepCommand.ts": "d482b61b0731b419a1c90c0a18e66597dbd10f7e",
+        "src/audit/cli/questionReviewCycle.ts": "4015f8d175aa3d98bd33d4680e4a80b44d8476a5",
+        "src/audit/cli/questionWorkloadBindings.ts": "2095e0f654d7b25e89f4b8406caf4ebbe316bed2",
+        "src/audit/orchestrator/projectRuleEvidence.ts": "718db22ba5258c3e160a8b2d636d6bdef91318da",
+        "src/audit/orchestrator/questionEvidence.ts": "03a9992625029479cf28aefedf0b7d27d92b6ddb",
+        "src/audit/orchestrator/questionPlanning.ts": "c3b5c7c970cbe258473efaf208ce0e7d374cb383",
+        "src/remediate/steps/contractPipeline.ts": "71a138e2fe8f2dc04a35fc10c3e05b1a01d38993",
+        "src/remediate/steps/contractPipelinePrompts.ts": "f828f53975c6c862a76962d6eed86c44cc195464",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "8f7d39b1f95893ef3c7c2345c05005b9b5303168",
+        "src/remediate/steps/nextStep.ts": "beeaadec6291eaeba065706e2d64860d8156d714",
+        "src/remediate/steps/planningGraph.ts": "7169075398f30fb5d768dd60b8668ebb1c4e6ef8",
+        "src/remediate/steps/waveSimplification.ts": "bf4f5a984bc364b420fc783c3ba7db60d2f6acc6",
+        "src/shared/loopCorePaths.ts": "0d51fe5fbea3a30f0a781b772b486badba5f701a"
+      }
+    },
     "f20b857654eebefb": {
       "reviewed_by": "claude-opus-5-5 session 48f746a3 (orchestrator) + four simplify reviewer subagents (reuse, simplification, efficiency, altitude)",
       "attester_class": "agent",
@@ -930,7 +961,7 @@
   },
   "entries": {
     ".claude/hooks/loop-core-patterns.mjs": {
-      "review": "e36223304299f9c6"
+      "review": "eadba2ff8958aa32"
     },
     "scripts/check-loop-core-attestations.mjs": {
       "review": "4318b8e7432c3e06"
@@ -954,13 +985,13 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "eadba2ff8958aa32"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/dispatch/questionReviewAcceptance.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "eadba2ff8958aa32"
     },
     "src/audit/cli/fanoutLanes.ts": {
       "review": "380a3e547fdf760b"
@@ -975,7 +1006,7 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "eadba2ff8958aa32"
     },
     "src/audit/cli/nextStepHelpers.ts": {
       "review": "3ac795cb6300b0c0"
@@ -984,10 +1015,10 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/questionReviewCycle.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "eadba2ff8958aa32"
     },
     "src/audit/cli/questionWorkloadBindings.ts": {
-      "review": "aef2aac1e2d57f15"
+      "review": "eadba2ff8958aa32"
     },
     "src/audit/cli/submitCommand.ts": {
       "review": "2fa9e1fc4c35f94e"
@@ -1157,14 +1188,17 @@
     "src/audit/orchestrator/pendingTasks.ts": {
       "review": "42e42270e8c264c9"
     },
+    "src/audit/orchestrator/projectRuleEvidence.ts": {
+      "review": "eadba2ff8958aa32"
+    },
     "src/audit/orchestrator/questionEvidence.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "eadba2ff8958aa32"
     },
     "src/audit/orchestrator/questionPlanExecutor.ts": {
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "3ac795cb6300b0c0"
+      "review": "eadba2ff8958aa32"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"
@@ -1314,10 +1348,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/contractPipeline.ts": {
-      "review": "0279a0adf3e99489"
+      "review": "eadba2ff8958aa32"
     },
     "src/remediate/steps/contractPipelinePrompts.ts": {
-      "review": "0279a0adf3e99489"
+      "review": "eadba2ff8958aa32"
     },
     "src/remediate/steps/dispatch/contractConformanceReview.ts": {
       "review": "185e1a9338c25bfc"
@@ -1329,7 +1363,7 @@
       "review": "185e1a9338c25bfc"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "eadba2ff8958aa32"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "cfe244114db006a2"
@@ -1338,7 +1372,10 @@
       "review": "3e7d0736a83209a4"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "2fa9e1fc4c35f94e"
+      "review": "eadba2ff8958aa32"
+    },
+    "src/remediate/steps/planningGraph.ts": {
+      "review": "eadba2ff8958aa32"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "e36223304299f9c6"
@@ -1346,11 +1383,14 @@
     "src/remediate/steps/recoverIngest.ts": {
       "review": "74f5fdb4c95e9366"
     },
+    "src/remediate/steps/waveSimplification.ts": {
+      "review": "eadba2ff8958aa32"
+    },
     "src/shared/engine/obligationEngine.ts": {
       "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/loopCorePaths.ts": {
-      "review": "e36223304299f9c6"
+      "review": "eadba2ff8958aa32"
     },
     "src/shared/observability/rootLogObservations.ts": {
       "review": "d46e8dfc8b0eeb7e"

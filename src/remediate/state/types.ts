@@ -24,6 +24,22 @@ import { PER_FINDING_DISPOSITIONS } from "./disposition.js";
 /** A full-length lowercase hex SHA-256 digest. */
 const Sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
 
+// sites-pinned: tests/remediate/execution-unit-runtime.test.ts, tests/remediate/wave-simplification.test.ts
+const sha = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
+const key = z.string().regex(/^[a-f0-9]{64}$/);
+const note = z.string().trim().min(1).max(2000);
+export const WaveSimplificationResponseSchema = z.discriminatedUnion("disposition", [
+  z.object({ receipt: key, disposition: z.enum(["no_changes", "unavailable", "follow_up"]), note }).strict(),
+  z.object({ receipt: key, disposition: z.literal("applied"), note, commit: sha }).strict(),
+]);
+export const WaveSimplificationSchema = z.object({
+  receipt: key, revision: key, workload: key, baseline: sha, integrated: sha,
+  unit_ids: z.array(z.string()).min(2), landed: z.array(sha).min(2), files: z.array(z.string()),
+  test_grants: z.array(z.object({ files: z.array(z.string()), commands: z.array(z.string()) }).strict()), problem: note.optional(),
+  response: WaveSimplificationResponseSchema.optional(), applied_files: z.array(z.string()).optional(),
+}).strict();
+export type WaveSimplification = z.infer<typeof WaveSimplificationSchema>;
+
 /** One reviewed semantic plan, carrying immutable source provenance. */
 export const RemediationPlanSchema = ExecutableChangePlanSchema.extend({
   goal_id: z.string().optional(),

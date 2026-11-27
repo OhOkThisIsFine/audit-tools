@@ -14,6 +14,11 @@ test("a planning continuation cannot bypass the confirmed intent checkpoint",asy
 });
 test("a confirmed source request yields a bounded dependency-ready host workload after review",async()=>{
  await h.writeIntentCheckpoint();await h.writeApprovedExecutionPlan();const step=await decideNextStep({root:h.REPO_DIR,artifactsDir:h.ARTIFACTS_DIR});expect(step.step_kind).toBe("dispatch_implement");
+ const prompt=await readFile(step.prompt_path,"utf8");
+ expect(prompt).toContain("Only a landed change needs its commit on HEAD");
+ expect(prompt).toContain("A no-change, blocked, or clarification result does not need a commit");
+ expect(prompt).toContain("When a batch of bound results is available");
+ expect(prompt).toContain("Do not self-review when independence is required");
  const workload=JSON.parse(await readFile(step.artifact_paths.host_workload!,"utf8"));expect(workload.work_items).toHaveLength(1);expect(workload.work_items[0].source_finding_ids).toEqual([]);expect(workload.work_items[0].obligation_ids).toEqual(["REQ-auth"]);
  const state=await new StateStore(h.ARTIFACTS_DIR).loadState();expect(state?.plan?.findings).toEqual([]);
 });

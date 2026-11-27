@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { acceptQuestionReview, indexQuestionDependencies, projectQuestionReview, reviewAnswerDisposition, type AuditQuestionBinding } from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
 import { adjudicateAuditQuestionResult, consolidateAuditQuestionFindings, ingestAuditQuestionResults, publishAuditQuestionWorkload, readAuditQuestionLedger, readAuditQuestionWorkload, reopenAuditQuestions, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
-import { REVIEW_QUESTION_CONTRACT_VERSION, questionReopenDependencies, type ReviewAcceptedAnswer, type ReviewEvidence, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
+import { DISCONFIRMATION_PART_ID, REVIEW_QUESTION_CONTRACT_VERSION, questionReopenDependencies, type ReviewAcceptedAnswer, type ReviewEvidence, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
 const v = REVIEW_QUESTION_CONTRACT_VERSION;
 const identity = { schema_version: v, question_id: "resume", revision_id: "r1", snapshot_id: "s1" } as const;
@@ -45,6 +45,68 @@ async function fixture(run: (root: string) => Promise<void>) {
 }
 
 describe("question review acceptance", () => {
+
+  it("only gates explicitly planned disconfirmation, preserving a lead when the source countercheck is missing", () => {
+    const binding = makeBinding("counter");
+    const answer = submission("counter", "findings");
+    const finding = answer.answer.findings[0]!;
+    finding.kind = "confirmed_defect";
+    expect(acceptQuestionReview([], binding, answer, "now").kind).toBe("accepted");
+    binding.question.requested_parts.push({ part_id: DISCONFIRMATION_PART_ID, expectation: "Check the plausible counterexample" });
+    expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/distinct, checked disconfirmation/);
+    finding.kind = "lead";
+    expect(acceptQuestionReview([], binding, answer, "now").kind).toBe("accepted");
+    finding.kind = "confirmed_defect";
+    answer.answer.parts.push({ part_id: DISCONFIRMATION_PART_ID, outcome: "clean", observation_ids: ["checked"] });
+    const check = { ...identity, part_id: DISCONFIRMATION_PART_ID, observation_id: "checked",
+      kind: "source_confirmed" as const, statement: "Alternate caller does not repair the lost state.",
+      source_refs: [ref], evidence_refs: [] };
+    answer.answer.observations.push(check);
+    expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/distinct, checked disconfirmation/);
+    check.source_refs = [{ path: "src/scheduled.ts", start_line: 1 }];
+    expect(acceptQuestionReview([], binding, answer, "now").kind).toBe("accepted");
+  });
+
+  it("requires independently grounded runtime counterevidence and precise verified findings support", () => {
+    const binding = makeBinding("runtime-countercheck");
+    const answer = submission(binding.assignment.assignment_id, "findings");
+    const finding = answer.answer.findings[0]!;
+    finding.kind = "confirmed_defect";
+    const runtime = (evidence_id: string, observation_id: string): ReviewEvidence => ({
+      schema_version: v, evidence_id, snapshot_id: identity.snapshot_id, kind: "fixture",
+      source_refs: [ref], dependencies: [source], status: "observed", description: "Executed fixture",
+      execution: { tool: "test runner", tool_version: "1", config_fingerprint: "c",
+        input_fingerprint: evidence_id, environment_fingerprint: "env", exclusions: [], executed: true },
+      observations: [{ observation_id, statement: "Recorded outcome" }, { observation_id: "another", statement: "Other outcome" }],
+    });
+    binding.evidence = [runtime("supporting", "recorded"), runtime("other", "recorded"), runtime("independent", "checked")];
+    binding.assignment.available_evidence_ids = answer.evidence_ids = binding.evidence.map(row => row.evidence_id);
+    const support = answer.answer.observations[0]!;
+    support.evidence_refs = [{ evidence_id: "supporting", observation_id: "recorded" }];
+    binding.question.requested_parts.push({ part_id: DISCONFIRMATION_PART_ID, expectation: "Check the alternate path" });
+    answer.answer.parts.push({ part_id: DISCONFIRMATION_PART_ID, outcome: "clean", observation_ids: ["check"] });
+    const check: ReviewSubmission["answer"]["observations"][number] = { ...identity, part_id: DISCONFIRMATION_PART_ID,
+      observation_id: "check", kind: "runtime_observed", statement: "Checked the alternative.",
+      source_refs: [], evidence_refs: [] };
+    answer.answer.observations.push(check);
+
+    for (const [evidence_id, observation_id] of [["supporting", "another"], ["other", "recorded"]]) {
+      check.evidence_refs = [{ evidence_id: evidence_id!, observation_id }];
+      expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/distinct, checked disconfirmation/);
+    }
+    check.evidence_refs = [{ evidence_id: "independent", observation_id: "checked" }];
+    expect(acceptQuestionReview([], binding, answer, "now").kind).toBe("accepted");
+    support.source_refs = [{ path: ref.path }];
+    const extra = { ...support, observation_id: "extra", part_id: "scheduled", source_refs: [ref] };
+    answer.answer.observations.push(extra);
+    finding.observation_ids!.push(extra.observation_id);
+    answer.answer.parts.push({ part_id: extra.part_id, outcome: "clean", observation_ids: [extra.observation_id] });
+    expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/distinct, checked disconfirmation/);
+    answer.answer.parts.at(-1)!.outcome = "inconclusive";
+    extra.kind = "unverified";
+    expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/distinct, checked disconfirmation/);
+  });
+
   it("only accepts comparison receipts matching the analyzer lead in cited issued evidence", () => {
     const binding = makeBinding("a");
     const answer = submission("a", "findings");
@@ -177,6 +239,23 @@ describe("question review acceptance", () => {
     expect(reviewAnswerDisposition(["manual", "scheduled"], [
       { part_id: "manual", outcome: "clean", observation_ids: ["manual-observed"] },
     ])).toEqual({ answered: ["manual"], open: ["scheduled"] });
+  });
+
+  it("publishes identical workloads for shared and equal source inventories, and rejects different inventories", async () => {
+    await fixture(async root => {
+      const params = { root, sourceRoot: root, artifactsDir: join(root, ".audit-tools", "audit"), runId: "question-run" };
+      const a = makeBinding("a"), b = makeBinding("b");
+      const publish = (sourceFiles: AuditQuestionBinding["sourceFiles"]) =>
+        publishAuditQuestionWorkload({ ...params, bindings: [a, { ...b, sourceFiles }] });
+      const shared = await publish(a.sourceFiles);
+      const bytes = await readFile(shared.workload_path, "utf8");
+      const distinct = await publish([...b.sourceFiles].reverse());
+      expect(distinct.workload_path).toBe(shared.workload_path);
+      expect(await readFile(distinct.workload_path, "utf8")).toBe(bytes);
+      await expect(publish(b.sourceFiles.map(file => file.path === ref.path
+        ? { ...file, fingerprint: "different" } : file))).rejects.toThrow("same pinned source inventory");
+      expect(await readAuditQuestionWorkload(params)).toEqual(shared.workload);
+    });
   });
 
   it.each([["a", "b"], ["b", "a"]])("retains contradictory answers across resume in order %s then %s", async (first, second) => {

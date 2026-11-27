@@ -78,7 +78,7 @@ export const COMMAND_ROUTES: ReadonlyArray<
   ["validate", cmdValidate, {}],
   ["submit", cmdSubmit, { values: ["--work-item", "--from"] }],
   ["review-graph", cmdReviewGraph, { values: ["--graph-index", "--graph-sha256", "--path", "--direction", "--relation", "--offset", "--limit", "--detail", "--symbol", "--cursor"] }],
-  ["prepare-review", cmdPrepareReview, { values: ["--work-item", "--workload-sha256"] }],
+  ["prepare-review", cmdPrepareReview, { values: ["--work-item", "--work-items", "--workload-sha256"] }],
   ["consolidate-findings", cmdConsolidateFindings, { values: ["--from"] }],
   ["reopen-questions", cmdReopenQuestions, { values: ["--from"] }],
   ["mcp", cmdMcp, {}],

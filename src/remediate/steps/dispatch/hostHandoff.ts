@@ -1,3 +1,4 @@
+import { bindWaveSimplification } from "../waveSimplification.js";
 import { intakePaths } from "../../intake.js";
 import { admitRemediationDirtyBaseline } from "../../state/dirtyBaseline.js";
 import { DecisionApplicationReceiptSchema } from "../../state/decisionConsumption.js";
@@ -174,6 +175,7 @@ export function remediationIssueRemedy(
 type BoundaryPaths = HostHandoffPaths;
 
 const CURRENT_STATE_KEYS = new Set([
+  "wave_simplifications",
   "decision_applications",
   "applied_edit_surface",
   "closing_context",
@@ -514,13 +516,21 @@ export function remediationHostResultFilePath(params: {
   );
 }
 
-/**
- * Pure dependency/phase partitioning shared by next-step and the host workload
- * boundary. Only level zero is safe to emit before the host has landed and
- * verified its prerequisites.
+/** Exact file grants and slash-terminated directory grants share descendants
+ * only at directory boundaries (e.g. src/ is unrelated to src-backup/).
+ * Serialize case aliases conservatively on Windows; do not rewrite grants.
  */
-export function hostDependencyLevels(
-  state: Pick<RemediationState, "plan" | "items">,
+function writeGrantsOverlap(left: string, right: string): boolean {
+  if (process.platform === "win32") {
+    left = left.toLowerCase();
+    right = right.toLowerCase();
+  }
+  return left === right || (left.endsWith("/") && right.startsWith(left)) ||
+    (right.endsWith("/") && left.startsWith(right));
+}
+
+function dependencyLevels(
+  state: Pick<RemediationState, "plan" | "items">, avoidWriteOverlap: boolean,
 ): ExecutionUnit[][] {
   const { plan, items } = state;
   if (!plan || !items) return [];
@@ -536,11 +546,28 @@ export function hostDependencyLevels(
     const ready = remaining.filter(unit => lowerPhases(unit).every(lower => isVerifiedCompleteStatus(items[lower.id]?.status)) &&
       unit.dependencies.every(id => byId.has(id) && (isVerifiedCompleteStatus(items[id]?.status) || placed.has(id))));
     if (!ready.length) break;
-    levels.push(ready);
-    for (const unit of ready) placed.add(unit.id);
+    // Stable arbitration among equally ready units. No new dependency edges:
+    // the deferred writer can proceed even if the earlier writer is declined.
+    const wave: ExecutionUnit[] = [];
+    const grants: string[] = [];
+    for (const unit of ready.sort((a, b) => compareCodeUnits(a.id, b.id))) {
+      if (avoidWriteOverlap &&
+          unit.allowed_files.some(path => grants.some(existing => writeGrantsOverlap(path, existing)))) continue;
+      wave.push(unit);
+      if (avoidWriteOverlap) grants.push(...unit.allowed_files);
+    }
+    levels.push(wave);
+    for (const unit of wave) placed.add(unit.id);
     remaining = remaining.filter(unit => !placed.has(unit.id));
   }
   return levels;
+}
+
+/** Partition dependency/phase-ready work into write-disjoint waves. Only the
+ * first wave can be issued before prerequisite results are verified.
+ */
+export function hostDependencyLevels(state: Pick<RemediationState, "plan" | "items">): ExecutionUnit[][] {
+  return dependencyLevels(state, true);
 }
 
 /** Questions remain live; skipped/failed prerequisites never authorize a dependent. */
@@ -1434,6 +1461,11 @@ export async function prepareRemediationHostHandoff(params: {
       const item = state.items[unit.id];
       return item?.host_landed_commit ? [{ allowed_files: [...unit.allowed_files], landed_commit: item.host_landed_commit }] : [];
     });
+    for (const wave of state.wave_simplifications ?? []) {
+      if (wave.response?.disposition === "applied" && wave.applied_files) accepted.push({
+        landed_commit: wave.response.commit, allowed_files: wave.applied_files,
+      });
+    }
     const contextIssues = await executionPlanContextIssues(paths.root, approved.canonical, accepted);
     if (contextIssues.length) throw new RemediationHostPreparationError("plan_repair_required", contextIssues.join("; "));
   }
@@ -1918,7 +1950,10 @@ async function validateHostResultBundle(input: {
       nextState,
       effectiveWorkload: workload,
       eligibleIds: new Set(
-        (hostDependencyLevels(state)[0] ?? []).map((block) => block.id),
+        // An active workload already owns these IDs and its baseline. Do not
+        // re-arbitrate them against work that became ready after a partial
+        // ingest, or strand a workload issued before overlap arbitration.
+        (dependencyLevels(state, state.host_handoff === undefined)[0] ?? []).map(block => block.id),
       ),
       // Can this ingest be corroborated against ground truth AT ALL? A git root
       // supplies the tree; a persisted `host_handoff` supplies the trusted
@@ -2227,12 +2262,12 @@ async function executeHostVerificationReruns(
  * is the order they were emitted, and each writes only its own work item's
  * state (the workload's ids are unique).
  */
-function commitRemediationStateUpdates(
+async function commitRemediationStateUpdates(
   ctx: HostIngestContext,
   acc: HostIngestAccumulators,
   verdicts: readonly HostItemVerdict[],
   issues: readonly RemediationHostIngestIssue[],
-): RemediationHostIngestSummary {
+): Promise<RemediationHostIngestSummary> {
   const { nextState } = ctx;
   for (const verdict of verdicts) {
     const item = nextState.items[verdict.workItem.id]!;
@@ -2290,6 +2325,7 @@ function commitRemediationStateUpdates(
     .map((workItem) => workItem.id);
   let stateChanged = acc.completed.length > 0;
   if (nextState.host_handoff && pendingWorkItemIds.length === 0) {
+    await bindWaveSimplification(ctx.paths.root, nextState);
     delete nextState.host_handoff;
     stateChanged = true;
   }

@@ -252,6 +252,32 @@ describe("resolveIntakeStep", () => {
     await expect(readFile(paths.sourceManifest)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+
+  it("keeps a non-JSON sibling as a document beside the classified audit", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-mixed-json");
+    const source = join(TEST_DIR, "audit-findings.json");
+    const notes = join(TEST_DIR, "notes.json");
+    await writeFile(source, JSON.stringify(buildSampleAuditBundle().auditFindings));
+    await writeFile(notes, "Plain notes saved with a JSON extension.");
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: true, existing: [source, notes], checked: [source, notes],
+        allExisting: [source, notes], missing: [],
+      },
+      ...makeStubs(),
+    });
+
+    expect(result).toMatchObject({ kind: "step", step: { step_kind: "synthesize_intake" } });
+    const manifest = JSON.parse(await readFile(intakePaths(artifactsDir).sourceManifest, "utf8"));
+    expect(manifest.sources).toEqual([
+      expect.objectContaining({ path: source, type: "structured_audit" }),
+      expect.objectContaining({ path: notes, type: "document" }),
+    ]);
+  });
+
   it("N-R06: ready structured_audit intake returns pipeline_ready (no fast path, no extract_findings)", async () => {
     // After N-R06: structured_audit no longer calls runPlanPhase directly.
     // resolveIntakeStep returns { kind: "pipeline_ready" } so the caller routes

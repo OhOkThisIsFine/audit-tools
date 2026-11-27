@@ -1909,6 +1909,13 @@ export function buildRemediationReportMarkdown(
     reportContent += `\nMechanical re-verify (analyzer-born findings): ${count("verified_mechanically")} verified by analyzer re-run, ${count("lead_persists")} lead(s) persisting, ${count("skipped")} skipped (coverage or comparable scope/config not established).\n`;
   }
 
+  const waveReviews = state.wave_simplifications ?? [];
+  if (waveReviews.length) {
+    reportContent += "\n## Combined-wave simplification\n\n" + waveReviews.map(wave =>
+      `- ${wave.integrated.slice(0, 12)}: ${wave.response?.disposition ?? "pending"} — ${wave.response?.note ?? "No response was recorded"}`,
+    ).join("\n") + "\n";
+  }
+
   const combined = closeSuiteEvidence(combinedTest);
   reportContent += `\nCombined test suite: ${combined.status.replace("_", " ")}\n`;
   if (combined.status === "failed") {

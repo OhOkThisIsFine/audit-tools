@@ -38,11 +38,11 @@ const KNOWN_SCHEMA_VERSIONS: ReadonlySet<string> = new Set([
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
 ]);
 
-export function validateSuppliedInput(
+function parseSuppliedInput(
   path: string,
   content: string,
   allowDocumentFallback = false,
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true; parsed?: unknown } | { ok: false; reason: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -57,7 +57,7 @@ export function validateSuppliedInput(
     if (parsed.contract_version === QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION) {
       const report = QuestionAuditFindingsReportSchema.safeParse(parsed);
       if (!report.success) return { ok: false, reason: `Invalid audit report: ${report.error.issues.map(issue => issue.message).join("; ")}` };
-      return { ok: true };
+      return { ok: true, parsed };
     }
     if (typeof parsed.contract_version === "string" && parsed.contract_version.startsWith("audit-tools/audit-findings/")) {
       return { ok: false, reason: `Unsupported audit report version: ${parsed.contract_version}.` };
@@ -66,7 +66,16 @@ export function validateSuppliedInput(
       return { ok: false, reason: `unrecognised schema_version: ${sv}` };
     }
   }
-  return { ok: true };
+  return { ok: true, parsed };
+}
+
+export function validateSuppliedInput(
+  path: string,
+  content: string,
+  allowDocumentFallback = false,
+): { ok: true } | { ok: false; reason: string } {
+  const result = parseSuppliedInput(path, content, allowDocumentFallback);
+  return result.ok ? { ok: true } : result;
 }
 
 export type IntakeResult =
@@ -471,15 +480,12 @@ async function selectIntakeSource(
       const reports: string[] = [];
       for (const path of inputResolution.existing.filter(path => path.toLowerCase().endsWith(".json"))) {
         const content = await readFile(path, "utf8");
-        const validation = validateSuppliedInput(path, content, true);
+        const validation = parseSuppliedInput(path, content, true);
         if (!validation.ok) return collectStartingPointStep([path], validation.reason);
-        try {
-          const parsed: unknown = JSON.parse(content);
-          if (isAuditFindingsReport(parsed)) {
-            reports.push(path);
-            classifiedAudit = { path, content, parsed };
-          }
-        } catch { /* Non-audit documents retain the usual intake path. */ }
+        if (isAuditFindingsReport(validation.parsed)) {
+          reports.push(path);
+          classifiedAudit = { path, content, parsed: validation.parsed };
+        }
       }
       if (reports.length > 1) return collectStartingPointStep(reports, "Select one canonical audit report for remediation.");
       if (reports.length === 1) {
@@ -494,24 +500,16 @@ async function selectIntakeSource(
       const content = await readFile(singleInput, "utf8");
       // Recognize an explicit audit even alongside guidance, while preserving
       // mixed document intake's existing fallback for non-audit JSON content.
-      {
-        const allowDocumentFallback = !inputResolution.supplied || (Boolean(conversationStart) && requestedSelection === undefined && previousManifest?.finding_selection === undefined);
-        const validation = validateSuppliedInput(singleInput, content, allowDocumentFallback);
-        if (!validation.ok) {
-          return collectStartingPointStep(
-            [singleInput],
-            `Stop after providing a valid remediation starting point. Error: ${validation.reason}`,
-          );
-        }
+      const allowDocumentFallback = !inputResolution.supplied || (Boolean(conversationStart) && requestedSelection === undefined && previousManifest?.finding_selection === undefined);
+      const validation = parseSuppliedInput(singleInput, content, allowDocumentFallback);
+      if (!validation.ok) {
+        return collectStartingPointStep(
+          [singleInput],
+          `Stop after providing a valid remediation starting point. Error: ${validation.reason}`,
+        );
       }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        parsed = undefined;
-      }
-      if (isAuditFindingsReport(parsed)) {
-        classifiedAudit = { path: singleInput, content, parsed };
+      if (isAuditFindingsReport(validation.parsed)) {
+        classifiedAudit = { path: singleInput, content, parsed: validation.parsed };
         nextManifest = buildStructuredAuditSourceManifest(
           singleInput,
           inputResolution.supplied ? "input" : "default_candidates",

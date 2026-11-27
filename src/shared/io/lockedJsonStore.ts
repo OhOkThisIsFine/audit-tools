@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/locked-json-store.test.ts
 import { withFileLock, STALE_LOCK_MS, type AssertLockOwnership } from "./fileLock.js";
 import {
   isJsonParseError,
@@ -125,23 +126,18 @@ export function createLockedJsonStore<T>(
 
   const store: LockedJsonStore<T> = {
     read,
-    async mutate(fn) {
-      let result!: T;
-      await withFileLock(
+    mutate(fn) {
+      return withFileLock(
         lockPath,
         async (assertOwnership) => {
           const current = await read();
           const next = await fn(current);
-          if (next === SKIP_WRITE) {
-            result = current;
-            return;
-          }
+          if (next === SKIP_WRITE) return current;
           await persist(next, assertOwnership);
-          result = next;
+          return next;
         },
         LOCKED_JSON_STORE_TIMEOUT_MS,
       );
-      return result;
     },
     async replace(next) {
       await withFileLock(

@@ -106,8 +106,10 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/remediate/steps/dispatch/",
   "src/remediate/steps/frictionCloseout.ts",
   "src/remediate/steps/nextStep.ts",
+  "src/remediate/steps/planningGraph.ts",
   "src/remediate/steps/prompts.ts",
   "src/remediate/steps/recoverIngest.ts",
+  "src/remediate/steps/waveSimplification.ts",
   "src/shared/engine/",
   "src/shared/loopCorePaths.ts",
   // Both host boundaries own this persisted, create-once observation history.

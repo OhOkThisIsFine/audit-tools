@@ -9,11 +9,11 @@ import { queryReviewerCbm, ReviewerCbmSchema, type ReviewerCbm } from "./reviewe
 const Relation = z.enum(["imports", "calls", "references"]);
 const Direction = z.enum(["inbound", "outbound", "both"]);
 const Edge = z.tuple([Relation, z.string(), z.string(), z.string()]);
-const ReviewGraph = z.strictObject({ version: z.literal(1), paths: z.array(z.string()), edges: z.array(Edge), indexed: ReviewerCbmSchema.optional() });
+const ReviewGraph = z.strictObject({ version: z.literal(1), paths: z.array(z.string()), edges: z.array(Edge), source_sha256: z.string().refine(isSha256).optional(), indexed: ReviewerCbmSchema.optional() });
 type Link = z.infer<typeof Edge>;
 
 /** Only navigation hints between files already admitted to the frozen review. */
-export function buildReviewerGraph(graph: GraphBundle, admitted: readonly string[], indexed?: ReviewerCbm): string {
+export function buildReviewerGraph(graph: GraphBundle, admitted: readonly string[], indexed?: ReviewerCbm, sourceSha256?: string): string {
   const paths = [...new Set(admitted)].sort(compareCodeUnits);
   const allowed = new Set(paths);
   const edges = new Map<string, Link>();
@@ -27,9 +27,18 @@ export function buildReviewerGraph(graph: GraphBundle, admitted: readonly string
   return JSON.stringify({
     version: 1,
     paths,
+    ...(sourceSha256 && { source_sha256: sourceSha256 }),
     ...(indexed && { indexed }),
     edges: [...edges].sort(([a], [b]) => compareCodeUnits(a, b)).map(([, edge]) => edge),
   }) + "\n";
+}
+
+export function readReviewGraphSourceDigest(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  try {
+    const result = ReviewGraph.safeParse(JSON.parse(text));
+    return result.success ? result.data.source_sha256 : undefined;
+  } catch { return undefined; }
 }
 
 const Query = z.strictObject({
@@ -57,7 +66,7 @@ export async function queryReviewerGraph(index: string, digest: string, rawQuery
     return queryReviewerCbm(index, graph.indexed, allowed, { ...query, detail: query.detail });
   }
   if (query.cursor || query.symbol) throw new Error("--cursor and --symbol require indexed details.");
-  const edges = [];
+  const edges: Array<{ relation: Link[0]; from: string; to: string; kind?: string }> = [];
   let total = 0;
   for (const [relation, from, to, kind] of graph.edges) {
     if (query.relation && relation !== query.relation) continue;

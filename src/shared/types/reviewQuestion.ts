@@ -5,6 +5,7 @@ import { FindingConfidenceSchema, FindingSeveritySchema } from "./findingVocabul
 
 /** The question workflow is a cutover, not an alias for legacy lens-task results. */
 export const REVIEW_QUESTION_CONTRACT_VERSION = "audit-tools/question-review/v1";
+export const DISCONFIRMATION_PART_ID = "audit:disconfirmation";
 const version = { schema_version: z.literal(REVIEW_QUESTION_CONTRACT_VERSION) };
 const value = z.string().trim().min(1);
 const id = z.string().min(1).refine((s) => s === s.trim(), "ID must not contain leading or trailing whitespace");

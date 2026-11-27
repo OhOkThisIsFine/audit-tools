@@ -5,6 +5,11 @@ import { cp, lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { errorMessage } from "../../shared/io/json.js";
 import { hashContent } from "../../shared/hash.js";
+import { hashArtifactValue } from "../../shared/artifactFreshness.js";
+import { GraphBundleSchema } from "audit-tools/shared";
+import { RepoManifestSchema } from "../types.js";
+import { buildReviewerGraph } from "../cli/reviewGraphCommand.js";
+import { auditNavigationGraphPath, navigationSourceDigest } from "./navigationGraph.js";
 import { auditRunConsentPath } from "../../shared/analyzerRunConsent.js";
 import {
   AuditFindingsReportSchema,
@@ -596,6 +601,46 @@ async function ensurePlainArchiveDir(path: string, verifyOnly: boolean): Promise
   if (!(await lstat(path)).isDirectory()) throw new Error(`Not an archive directory: ${path}`);
 }
 
+/** A current audit graph which can survive removal of the audit snapshot and workspace. */
+// sites-pinned: tests/remediate/planning-graph.test.ts
+export async function readWorkingAuditNavigationGraph(artifactsDir: string, expectedSource?: string): Promise<string | undefined> {
+  const repoName = ARTIFACT_DEFINITIONS.repo_manifest.fileName;
+  const graphName = ARTIFACT_DEFINITIONS.graph_bundle.fileName;
+  const dependencyNames = [
+    ARTIFACT_DEFINITIONS.file_disposition.fileName,
+    ARTIFACT_DEFINITIONS.external_analyzer_results.fileName,
+  ];
+  const metadataPath = join(artifactsDir, ARTIFACT_DEFINITIONS.artifact_metadata.fileName);
+  const [rawRepo, rawGraph, metadata] = await Promise.all([
+    readOptionalJsonFile<unknown>(join(artifactsDir, repoName)),
+    readOptionalJsonFile<unknown>(join(artifactsDir, graphName)),
+    readOptionalJsonFile<ArtifactMetadataManifest>(metadataPath),
+  ]);
+  const repo = RepoManifestSchema.safeParse(rawRepo);
+  const graph = GraphBundleSchema.safeParse(rawGraph);
+  const repoStamp = metadata?.artifacts?.[repoName];
+  const graphStamp = metadata?.artifacts?.[graphName];
+  if (!repo.success || !graph.success || !repoStamp || !graphStamp ||
+      repoStamp.content_hash !== hashArtifactValue(repoName, rawRepo) ||
+      graphStamp.content_hash !== hashArtifactValue(graphName, rawGraph) ||
+      graphStamp.dependency_revisions?.[repoName] !== repoStamp.revision ||
+      Object.entries(graphStamp.dependency_revisions ?? {}).some(([name, revision]) => (metadata?.artifacts[name]?.revision ?? 0) !== revision)) return undefined;
+  const source = navigationSourceDigest(repo.data.files);
+  if (!source || (expectedSource && source !== expectedSource)) return undefined;
+  // An artifact can change before (or without) its metadata being replaced.
+  // Read only the graph's known dependencies, never paths supplied by stamps.
+  const dependenciesCurrent = await Promise.all(dependencyNames.map(async name => {
+    const payload = await readOptionalJsonFile<unknown>(join(artifactsDir, name));
+    const stamp = metadata?.artifacts[name];
+    const revision = graphStamp.dependency_revisions?.[name] ?? 0;
+    return payload === undefined
+      ? stamp === undefined && revision === 0
+      : stamp !== undefined && revision === stamp.revision && stamp.content_hash === hashArtifactValue(name, payload);
+  }));
+  if (!dependenciesCurrent.every(Boolean)) return undefined;
+  return buildReviewerGraph(graph.data, repo.data.files.map(file => file.path), undefined, source);
+}
+
 /** Archive-only v1 bytes. Never feed these files back into an audit bundle. */
 async function archiveRetiredRunFiles(
   artifactsDir: string,
@@ -861,6 +906,20 @@ export async function promoteFinalAuditReport(params: {
         `${AUDIT_FINDINGS_FILENAME} (${errorMessage(error)})`,
       );
     }
+  }
+  // sites-pinned: tests/remediate/planning-graph.test.ts
+  // Missing, malformed, or unreadable advisory input supplies no graph.
+  // Failure to preserve a usable graph remains a normal archival failure.
+  const graph = await readWorkingAuditNavigationGraph(params.artifactsDir).catch(() => undefined);
+  try {
+    if (graph !== undefined) {
+      const path = auditNavigationGraphPath(dirname(destination));
+      if (!options.verifyOnly) await writeTextFile(path, graph);
+      const mismatch = await verifyArchivedBytes(path, Buffer.from(graph));
+      if (mismatch) lost.push("the audit navigation graph (" + mismatch + ")");
+    }
+  } catch (error) {
+    lost.push("the audit navigation graph (" + errorMessage(error) + ")");
   }
   const diagnostics = await archiveRunDiagnostics({ artifactsDir: params.artifactsDir }, { copy, warn, verifyOnly: options.verifyOnly });
   lost.push(...diagnostics.lost);

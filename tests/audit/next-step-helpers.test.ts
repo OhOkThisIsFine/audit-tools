@@ -1472,11 +1472,19 @@ test("a failed indexed graph qualification tells the orchestrator to repair and 
     } as Parameters<typeof row>[0]);
     expect(plan.via).toBe("current");
     if (plan.via !== "current") throw new Error("Expected a review dispatch prompt");
-    expect(plan.params.prompt).toMatch(/do that and rerun .*next-step.*before dispatching/u);
-    expect(plan.params.prompt).toContain("If you cannot repair it, use the issued native file links and frozen source");
-    expect(plan.params.prompt).toContain("return usable results on the same frozen source");
+    expect(plan.params.prompt).toMatch(/repair the problem and rerun .*next-step.*before dispatching/u);
+    expect(plan.params.prompt).toContain("Codebase Memory index unavailable:` diagnostic on stderr from this next-step invocation");
+    expect(plan.params.prompt).toContain("Retry only after a concrete change");
+    expect(plan.params.prompt).toContain("read_paths.graph_index");
+    expect(plan.params.prompt).toContain("--work-items <id1,id2,...> instead of --work-item, up to 64 distinct current IDs");
+    expect(plan.params.prompt).toContain("send only its own packet.prompt_path and authorized read_paths to its reviewer");
+    expect(plan.params.prompt).toContain("A refused outcome has no packet");
+    expect(plan.params.prompt).toContain("read_paths.graph_sha256");
+    expect(plan.params.prompt).toContain("--detail symbols --symbol <known-symbol>");
+    expect(plan.params.prompt).toContain("Verify a usable result on the same frozen source");
     expect(plan.params.prompt).toContain("Retain the query and its result");
-    expect(plan.params.prompt).toContain("Record the missing indexed coverage and why");
+    expect(plan.params.prompt).toContain("If you cannot repair it, use the issued native file links and frozen source");
+    expect(plan.params.prompt).toContain("Record the missing indexed coverage and why in the affected answers");
   });
 });
 

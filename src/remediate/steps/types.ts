@@ -47,6 +47,7 @@ export type RemediationStepKind =
   | "collect_review_approval"
   | "collect_clarifications"
   | "dispatch_implement"
+  | "review_wave_simplification"
   | "repair_handoff"
   | "review_contract_conformance"
   | "phase_busy"

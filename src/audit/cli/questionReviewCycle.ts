@@ -11,6 +11,7 @@ import { computeStaleArtifacts, type StaleArtifactSet } from "../orchestrator/st
 import { ingestAuditQuestionResults, readAuditQuestionLedger } from "./dispatch/hostHandoff.js";
 import { indexQuestionDependencies, projectQuestionReview, type AuditQuestionBinding } from "./dispatch/questionReviewAcceptance.js";
 import { ensureQuestionReviewRunIdUnlocked } from "./questionReviewSession.js";
+import { isProjectRulePath } from "../orchestrator/projectRuleEvidence.js";
 import { questionWorkloadBindings } from "./questionWorkloadBindings.js";
 import type { ReviewReopenEvent } from "../../shared/types/reviewQuestion.js";
 
@@ -50,6 +51,7 @@ export async function deriveCurrentQuestionBindings(
   const evidence = await collectQuestionEvidence({
     snapshot_id: plan.snapshot_id, sourceRoot, sourceFiles, analyzerResults: bundle.external_analyzer_results ?? [],
     analyzerStatuses,
+    rulePaths: [...new Set(plan.inventory.flatMap(item => item.contract_refs.map(ref => ref.path)))].filter(isProjectRulePath),
   });
   const bindings = await questionWorkloadBindings(bundle, sourceRoot, evidence, verifiedSourceFiles, reopens);
   return { bindings, evidence, sourceFiles };

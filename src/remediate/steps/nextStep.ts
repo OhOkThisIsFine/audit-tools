@@ -134,6 +134,7 @@ import {
 } from "./contractPipeline.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import { executionPlanPaths, readCanonicalPlan, readPlanSource } from "../contractPipeline/executionPlan.js";
+import { completeWaveSimplification, pendingWaveSimplification, waveResponsePath, waveWritablePaths } from "./waveSimplification.js";
 import type { ExecutionUnit } from "../../shared/types/executionPlan.js";
 import {
   buildReviewRequest,
@@ -891,13 +892,15 @@ async function buildImplementDispatchStep(ctx: {
     "",
     `\`${handoff.workload_path}\``,
     "",
-    "The file lists every work item that is ready now. Give each item's prompt to a worker. You choose the order, the groups, and how many run at the same time.",
+    "The file lists the issued wave. Give each item's prompt to a worker. Do not start unissued units; units with overlapping write scope wait for a later wave.",
     "",
     ...report,
     ...(reportNamesResultFiles(ingested) ? ["Change only the result files named above.", ""] : []),
-    "Do not edit the workload file.",
+    "Do not edit the workload file. If the host cannot delegate, complete exactly one emitted item in this context, ingest its bound result, then stop for fresh context. Do not self-review when independence is required.",
     "",
-    "When each item has its commit on HEAD and its result file, run:",
+    "Submit each item's bound result. Only a landed change needs its commit on HEAD. A no-change, blocked, or clarification result does not need a commit.",
+    "",
+    "When a batch of bound results is available, ingest it by running:",
     "",
     `\`${nextCommand}\``,
   ];
@@ -917,7 +920,7 @@ async function buildImplementDispatchStep(ctx: {
         nextCommand,
       ],
       stopCondition:
-        "Stop after every emitted work item has a complete result and next-step has been run.",
+        "Submit and ingest the completed batch. For a host without delegation, complete and ingest exactly one item, then stop for fresh context.",
       artifactPaths: { host_workload: handoff.workload_path, required_test_logs: remediationRequiredTestLogsDir(root) },
       access: {
         read_paths: [root, handoff.workload_path, remediationRequiredTestLogsDir(root)],
@@ -3236,7 +3239,7 @@ Then run:
  * which lives in the pre-intake engine — emits the report directly rather than
  * transitioning (a main transition could never select it).
  */
-export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
+export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false): RemediateObligation[] {
   const { root, artifactsDir, options, runLogger, store } = ctx;
   const clarificationResolutionPath = join(
     artifactsDir,
@@ -3354,6 +3357,46 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         state?.status === "implementing" ? "missing" : "satisfied",
       execute: async (state) => {
         const s = requireState(state);
+        const wave = pendingWaveSimplification(s);
+        if (wave) {
+          const next = loaderCommand(options.forceReplan ? ["next-step", "--force-replan"] : ["next-step"]);
+          const problem = await completeWaveSimplification({ root, artifactsDir, state: s, wave });
+          if (!problem) {
+            await store.saveState(s);
+            runLogger.event({ phase: "next-step", kind: "outcome", obligation: "wave_simplification",
+              note: wave.response!.disposition + ": " + wave.response!.note });
+            if (deferredReplan) return { kind: "emit", step: await writeCurrentStep({
+              stepKind: "contract_pipeline", status: "ready", runId: requireStateRunId(s), repoRoot: root, artifactsDir,
+              prompt: `The combined-wave review is recorded. Plan revision was requested in the same call, so no further work was dispatched. Run ${next} before continuing implementation.`,
+              allowedCommands: [next],
+              stopCondition: "Resume the requested plan revision before dispatching another implementation wave.",
+              artifactPaths: { execution_plan: executionPlanPaths(artifactsDir).canonical },
+            }) };
+            return { kind: "transition", state: s };
+          }
+          const response = waveResponsePath(artifactsDir, wave);
+          const writable = waveWritablePaths(wave, s);
+          const diff = `git diff --no-ext-diff --no-textconv ${wave.baseline} ${wave.integrated}`;
+          return { kind: "emit", step: await writeCurrentStep({
+            stepKind: "review_wave_simplification", status: wave.problem ? "blocked" : "ready",
+            runId: requireStateRunId(s), repoRoot: root, artifactsDir,
+            prompt: [
+              "# Simplify the combined landed wave", problem,
+              ...(wave.problem ? [wave.problem, "Record unavailable with the concrete reason; do not review an unrelated diff."]
+                : [`Review only this combined diff from this run: ${diff}`,
+                  "In one defensive, provider-neutral /simplify review of local source, check reuse or duplication, code quality and simplicity, avoidable inefficiency, and unnecessary abstraction.",
+                  "Weigh the concrete value and guard behavior. The coordinator alone may apply a value-positive simplification within the already reviewed files. Do not invent a commit.",
+                  "When conformance review applies, or for work outside the verified files or with no bound focused tests, record follow_up and route the proposal through the reviewed plan.",
+                  "For applied, include the full id of the one coordinator commit on integration HEAD; the tool reruns approved focused tests for the affected units. Final integration/landing checks still apply."]),
+              `Write ${response} as JSON: {"receipt":"${wave.receipt}","disposition":"no_changes|unavailable|follow_up|applied","note":"concrete conclusion"} (applied also requires "commit").`,
+              `Then run ${next}. Do not dispatch the next wave before this review is recorded.`,
+            ].join("\n\n"),
+            allowedCommands: wave.problem ? [next] : [diff, next],
+            stopCondition: "Stop before any new implementation wave; return the exact bound simplification review first.",
+            artifactPaths: { wave_simplification_response: response },
+            access: { read_paths: [root], write_paths: [response, ...writable.map(file => resolve(root, file))] },
+          }) };
+        }
         // A non-empty dispatch frontier dispatches; triage only runs once every
         // item has left "pending".
         const pendingBlocks = dispatchFrontier(s);
@@ -3621,7 +3664,9 @@ async function advanceUnderPhaseLock(deps: {
   // Preamble — forceReplan re-grounds from existing intake. The whole decide loop
   // runs once per host call (the engine folds planning → implementing → … through
   // transitions, never a recursive decideNextStepLoop), so this fires at most once.
-  if (state != null && (options.forceReplan || pendingPlanSubmission || revisionMismatch)) {
+  const replanRequested = Boolean(options.forceReplan || pendingPlanSubmission || revisionMismatch);
+  const deferredReplan = replanRequested && pendingWaveSimplification(state) !== undefined;
+  if (state != null && replanRequested && !deferredReplan) {
     await countStep(state);
     const replanOutcome = await forceReplanFromExistingIntake(
       root,
@@ -3706,9 +3751,12 @@ async function advanceUnderPhaseLock(deps: {
     existingCheckpoint,
     rejectedCheckpointFields: checkpointRead?.rejected ?? [],
     resumeAck,
-    boundSubmissionReturned: !inputResolution.supplied && resumeAck === undefined && state?.host_handoff !== undefined
-      ? await hasBoundRemediationSubmission({ root, artifactsDir, runId: requireStateRunId(state), state: currentHostBoundaryState(state) })
-      : false,
+    boundSubmissionReturned: !inputResolution.supplied && resumeAck === undefined && (
+      (pendingWaveSimplification(state) !== undefined && existsSync(waveResponsePath(artifactsDir, pendingWaveSimplification(state)!))) ||
+      (state?.host_handoff !== undefined && await hasBoundRemediationSubmission({
+        root, artifactsDir, runId: requireStateRunId(state), state: currentHostBoundaryState(state),
+      }))
+    ),
     entryState: state,
     suppliedInputUnchanged,
     sourceAlreadyBound: boundSource !== undefined,
@@ -3753,7 +3801,7 @@ async function advanceUnderPhaseLock(deps: {
   // store without returning the persisted value, so the main fold reads from disk
   // exactly as it did when it owned its own lock acquisition.
   const advanceState = (await store.loadState()) ?? state;
-  const mainObligations = buildMainObligations(ctx);
+  const mainObligations = buildMainObligations(ctx, deferredReplan);
   const main = await advance(
     { priority: mainObligations.map(def => def.id), obligations: mainObligations },
     advanceState,
