@@ -15,10 +15,16 @@ import {
 } from "../../src/remediate/intake.js";
 import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
+import { hashContent } from "../../src/shared/hash.js";
 import { normalizePromptBodyPaths } from "../../src/shared/tooling/exec.js";
 import { runBounded } from "../helpers/spawn.mjs";
 import { scratchDir } from "../helpers/scratch.js";
 import { buildSampleAuditBundle, SAMPLE_REPORT_FINDING } from "../../src/audit/cli/sampleRunCommand.js";
+
+vi.mock("node:fs/promises", async (load) => {
+  const fs = await load<typeof import("node:fs/promises")>();
+  return { ...fs, readFile: vi.fn(fs.readFile) };
+});
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-intake-resolver");
@@ -191,6 +197,39 @@ describe("resolveIntakeStep", () => {
         label: "audit-findings",
       },
     ]);
+  });
+
+  it("selects and fingerprints the same single read of a classified audit report", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-selection");
+    const paths = intakePaths(artifactsDir);
+    const sourcePath = join(TEST_DIR, "audit-findings.json");
+    const report = buildSampleAuditBundle([SAMPLE_REPORT_FINDING]).auditFindings;
+    const content = JSON.stringify(report);
+    await writeFile(sourcePath, content);
+    const reads = () => vi.mocked(readFile).mock.calls.filter(([path]) => path === sourcePath).length;
+    const before = reads();
+
+    await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: true,
+        existing: [sourcePath],
+        missing: [],
+        checked: [sourcePath],
+        allExisting: [sourcePath],
+      },
+      findingSelection: { findingIds: [report.findings[0]!.id] },
+      ...makeStubs(),
+    });
+
+    expect(reads() - before).toBe(1);
+    const manifest = JSON.parse(await readFile(paths.sourceManifest, "utf8"));
+    expect(manifest.finding_selection).toMatchObject({
+      source_path: sourcePath, source_hash: hashContent(content), selected_count: 1,
+    });
+    const projected = JSON.parse(await readFile(manifest.finding_selection.projected_path, "utf8"));
+    expect(projected.findings.map((finding: { id: string }) => finding.id)).toEqual([report.findings[0]!.id]);
   });
 
   it("refuses two explicit canonical audit reports without selecting either", async () => {

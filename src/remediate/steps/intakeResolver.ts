@@ -313,6 +313,8 @@ async function selectIntakeSource(
 ): Promise<IntakePause | { kind: "selected"; manifest: IntakeSourceManifest }> {
   const { root, artifactsDir, inputResolution } = params;
   let manifest: IntakeSourceManifest | undefined = previousManifest;
+  // Classification and native selection must use the same report bytes.
+  let classifiedAudit: { path: string; content: string; parsed: unknown } | undefined;
 
   if (
     !inputResolution.supplied &&
@@ -472,7 +474,11 @@ async function selectIntakeSource(
         const validation = validateSuppliedInput(path, content, true);
         if (!validation.ok) return collectStartingPointStep([path], validation.reason);
         try {
-          if (isAuditFindingsReport(JSON.parse(content))) reports.push(path);
+          const parsed: unknown = JSON.parse(content);
+          if (isAuditFindingsReport(parsed)) {
+            reports.push(path);
+            classifiedAudit = { path, content, parsed };
+          }
         } catch { /* Non-audit documents retain the usual intake path. */ }
       }
       if (reports.length > 1) return collectStartingPointStep(reports, "Select one canonical audit report for remediation.");
@@ -505,6 +511,7 @@ async function selectIntakeSource(
         parsed = undefined;
       }
       if (isAuditFindingsReport(parsed)) {
+        classifiedAudit = { path: singleInput, content, parsed };
         nextManifest = buildStructuredAuditSourceManifest(
           singleInput,
           inputResolution.supplied ? "input" : "default_candidates",
@@ -552,8 +559,10 @@ async function selectIntakeSource(
       throw new Error("Finding selection requires one structured audit report supplied with --input.");
     }
     const source = audits[0]!;
-    const content = await readFile(source.path, "utf8");
-    const selected = selectAuditFindings(JSON.parse(content), criteria);
+    // A resumed manifest may not have classified this file in this invocation.
+    const report = classifiedAudit?.path === source.path ? classifiedAudit : undefined;
+    const content = report?.content ?? await readFile(source.path, "utf8");
+    const selected = selectAuditFindings(report ? report.parsed : JSON.parse(content), criteria);
     const projectedPath = join(paths.dir, "selected-audit-findings.json");
     manifest = { ...manifest, finding_selection: {
       criteria, source_path: source.path, source_hash: hashContent(content),
