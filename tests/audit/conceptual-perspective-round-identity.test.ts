@@ -254,6 +254,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     );
 
     expect(firstStep.step_kind).toBe("design_review_conceptual");
+    expect(firstStep.allowed_commands).toContainEqual(expect.stringContaining("review-graph --graph-index"));
     const firstManifest = JSON.parse(await readFile(firstStep.artifact_paths.conceptual_round_manifest, "utf8"));
     const firstPerspectivePaths = firstManifest.perspectives.map((p: { result_path: string }) => p.result_path) as string[];
     return { dir, root, firstStep, firstPerspectivePaths, firstManifest };

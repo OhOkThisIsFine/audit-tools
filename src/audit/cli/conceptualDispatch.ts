@@ -191,6 +191,7 @@ export type ConceptualDispatch = (
   artifactPaths: Record<string, string>;
   /** Prompt files the review lanes read. */
   readPaths: string[];
+  graphLookupCommand?: string;
   /** Result files the review lanes write. */
   writePaths: string[];
   /** What a previous emission of this pass's lanes is still owed. */
@@ -224,6 +225,7 @@ export async function prepareConceptualDispatch(opts: {
   /** Repair feedback is prompt context, never part of the review round identity. */
   rejectionNotice?: string;
   recon?: DesignReviewRecon;
+  graphLookup?: { path: string; command: string };
 }): Promise<ConceptualDispatch> {
   const { artifactsDir, bundle, settings } = opts;
   const notes = [opts.reReviewSection, opts.rejectionNotice].filter(Boolean).join("\n\n");
@@ -255,6 +257,15 @@ export async function prepareConceptualDispatch(opts: {
   // only its summary.
   const recon = opts.recon ?? prepareDesignReviewRecon(bundle, reviewOptions);
   const fileMapContext = recon.fileMap.contextFiles;
+  const contextPaths = opts.graphLookup ? [opts.graphLookup.path] : [];
+  const graphGuidance = opts.graphLookup ? [
+    "",
+    "## On-demand dependency lookup",
+    "The call-site map covers starting points only. To explore any admitted file, including a unit not in that map, replace REPO_RELATIVE_PATH in:",
+    "`" + opts.graphLookup.command + "`",
+    "Follow --offset when results have another page. Treat graph links as navigation hints and verify them in frozen source.",
+  ].join("\n") : "";
+
   // A round that is about to be superseded — by a re-review, or by a switch to
   // the shallow pass — will never be ingested, so this is the last moment its
   // perspectives' dispatch rows can be closed with what they actually
@@ -284,9 +295,10 @@ export async function prepareConceptualDispatch(opts: {
           ...SEMANTIC_REVIEW_DEMAND,
           label: "Conceptual review (generative)",
           promptFilename: "design-review-conceptual-prompt.md",
+          contextPaths,
           generatedContext: fileMapContext,
           promptText:
-            renderConceptualReviewPrompt(bundle, reviewOptions, recon) + reReviewSuffix,
+            renderConceptualReviewPrompt(bundle, reviewOptions, recon) + graphGuidance + reReviewSuffix,
         },
       ],
     });
@@ -296,6 +308,7 @@ export async function prepareConceptualDispatch(opts: {
     await clearConceptualReviewRoundManifest(artifactsDir);
     return {
       deep: false,
+      graphLookupCommand: opts.graphLookup?.command,
       conceptualResultsPath,
       instructionLines: [
         ...(settings.ignored_review_notice ? [settings.ignored_review_notice] : []),
@@ -308,7 +321,7 @@ export async function prepareConceptualDispatch(opts: {
         conceptual_prompt: conceptualPromptPath,
         conceptual_results: conceptualResultsPath,
       },
-      readPaths: [conceptualPromptPath, ...mapPaths, opts.sourceRoot],
+      readPaths: [conceptualPromptPath, ...mapPaths, ...contextPaths, opts.sourceRoot],
       writePaths: [conceptualResultsPath],
       shortfall: fanout.shortfall,
     };
@@ -323,7 +336,7 @@ export async function prepareConceptualDispatch(opts: {
   const perspectives = selectPerspectives(settings.perspectives);
   const total = perspectives.length;
   const perspectiveTexts = perspectives.map((p, i) =>
-    renderConceptualPerspectivePrompt(bundle, p, i, total, reviewOptions, recon),
+    renderConceptualPerspectivePrompt(bundle, p, i, total, reviewOptions, recon) + graphGuidance,
   );
   // The round the perspectives are being asked about: the prompts themselves
   // and shared evidence files each perspective reads, plus the judge's
@@ -367,7 +380,7 @@ export async function prepareConceptualDispatch(opts: {
       roundToken,
       reviewOptions,
       recon,
-    ) + reReviewSuffix;
+    ) + graphGuidance + reReviewSuffix;
 
   const perspectiveRefusals = await readTrailingSubmissionRefusals(
     artifactsDir,
@@ -385,6 +398,7 @@ export async function prepareConceptualDispatch(opts: {
         ...SEMANTIC_REVIEW_DEMAND,
         label: `Conceptual perspective — ${f.name}`,
         promptFilename: f.promptFilename,
+        contextPaths,
         generatedContext: deepContext,
         promptText: f.promptText + (refusal
           ? `\n\n## Previous submission rejected\n\n${refusal.message}`
@@ -404,6 +418,7 @@ export async function prepareConceptualDispatch(opts: {
       ...SEMANTIC_REVIEW_DEMAND,
       label: "Conceptual review judge (independent merge)",
       promptFilename: "design-review-conceptual-judge-prompt.md",
+      contextPaths,
       generatedContext: deepContext,
       promptText: judgePromptText,
     },
@@ -473,6 +488,7 @@ export async function prepareConceptualDispatch(opts: {
 
   return {
     deep: true,
+    graphLookupCommand: opts.graphLookup?.command,
     workload: {
       pending_perspectives: pendingPerspectives.map(({ f }) => ({
         lane_id: f.lane,
@@ -531,6 +547,7 @@ export async function prepareConceptualDispatch(opts: {
       ...perspectivePrompts.map((f) => f.resultsPath),
       judgePromptPath,
       ...new Set(fanout.lanes.flatMap((lane) => lane.generatedContextPaths)),
+      ...contextPaths,
       // The snapshot every prompt tells its reader to verify against.
       opts.sourceRoot,
     ],

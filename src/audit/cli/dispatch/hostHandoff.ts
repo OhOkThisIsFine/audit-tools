@@ -781,13 +781,13 @@ export async function publishAuditEvidenceGraph(
   sourceRoot: string,
   sourceFiles: readonly { path: string; fingerprint: string }[],
   graph: ArtifactBundle["graph_bundle"],
-  indexSourceOnly = false,
+  indexSourceOnly: boolean | "native-only" = false,
 ) {
   const files = sourceFiles.map(({ path, fingerprint }) => ({ path, fingerprint }))
     .sort((a, b) => compareCodeUnits(a.path, b.path));
   let indexed;
   let graphIndexError: string | undefined;
-  if (graph || indexSourceOnly) {
+  if (indexSourceOnly !== "native-only" && (graph || indexSourceOnly)) {
     try { indexed = await prepareReviewerCbm(artifactsDir, sourceRoot, files); }
     catch (error) {
       graphIndexError = errorMessage(error);

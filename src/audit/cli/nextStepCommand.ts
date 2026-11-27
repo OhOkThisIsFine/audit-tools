@@ -208,12 +208,15 @@ async function prepareConceptualPass(
     bundle,
     "conceptual",
   );
+  // A conceptual step only needs file links; do not re-qualify an external index on resume.
+  const { graph, query } = await evidenceGraphForStep(artifactsDir, sourceRoot, bundle, "native-only");
   return prepareConceptualDispatch({
     artifactsDir,
     sourceRoot,
     bundle,
     settings,
     recon,
+    ...(graph.graphIndex && query ? { graphLookup: { path: graph.graphIndex, command: query } } : {}),
     ...notesSection,
   });
 }
@@ -804,7 +807,7 @@ const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
       stepKind: "design_review_parallel",
       status: "ready",
       runId: null,
-      allowedCommands: [continueCommand],
+      allowedCommands: [continueCommand, ...(conceptual.graphLookupCommand ? [conceptual.graphLookupCommand] : [])],
       stopCondition:
         "Run the contract and conceptual reviews in parallel independent contexts, then run next-step once both results are written.",
       repoRoot: root,
@@ -903,7 +906,7 @@ const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
       stepKind: "design_review_conceptual",
       status: "ready",
       runId: null,
-      allowedCommands: [continueCommand],
+      allowedCommands: [continueCommand, ...(conceptual.graphLookupCommand ? [conceptual.graphLookupCommand] : [])],
       stopCondition: conceptual.workload
         ? conceptual.workload.judge.ready
           ? "Run the independent judge, then run next-step once the merged conceptual results are written."
@@ -1402,12 +1405,12 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
 );
 
 async function evidenceGraphForStep(
-  artifactsDir: string, sourceRoot: string, bundle: NextStepResult["bundle"], qualifySourceIndex = false,
+  artifactsDir: string, sourceRoot: string, bundle: NextStepResult["bundle"], qualifySourceIndex: boolean | "native-only" = false,
 ) {
   const scope = reviewSourceScope(bundle);
   const files = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])]
     .map(path => ({ path, fingerprint: scope.files.get(path)!.hash! }));
-  const nativeGraph = qualifySourceIndex && computeStaleArtifacts(bundle, { emit: false }).has("graph_bundle.json")
+  const nativeGraph = qualifySourceIndex === true && computeStaleArtifacts(bundle, { emit: false }).has("graph_bundle.json")
     ? undefined : bundle.graph_bundle;
   const graph = await publishAuditEvidenceGraph(artifactsDir, sourceRoot, files, nativeGraph, qualifySourceIndex);
   const query = graph.graphIndex && graph.graphSha256

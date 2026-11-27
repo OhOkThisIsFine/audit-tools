@@ -7,9 +7,11 @@ import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { toPromptPathToken } from "audit-tools/shared";
+import { hashContent, toPromptPathToken } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { readAuditReviewBinding } from "../../src/audit/cli/auditReviewBindings.js";
+import { buildReviewerGraph, queryReviewerGraph } from "../../src/audit/cli/reviewGraphCommand.js";
+import { renderAuditCommand } from "../../src/audit/cli/prompts.js";
 import { prepareConceptualDispatch } from "../../src/audit/cli/conceptualDispatch.js";
 import { materializeFanoutLanes } from "../../src/audit/cli/fanoutLanes.js";
 import { AUDIT_GATE_SUBMISSION_SCOPE, GATE_LANES } from "../../src/audit/cli/laneSubmissions.js";
@@ -245,4 +247,37 @@ test("a rewired call site re-stales a pending systemic round though its prompt s
   expect(systemicReviewInputRevision(withCaller("src/caller.ts"))).not.toBe(
     systemicReviewInputRevision(withCaller("src/other.ts")),
   );
+});
+
+test.each(["shallow", "deep"] as const)("conceptual %s lanes can query a unit outside the starting map", async (depth) => {
+  const artifactsDir = await tempArtifacts("map-query-");
+  const bundle = reviewBundle();
+  bundle.repo_manifest!.files.push({ path: "src/other.ts", language: "typescript", size_bytes: 10 });
+  bundle.unit_manifest!.units.push({ unit_id: "other", name: "Other", files: ["src/other.ts"], required_lenses: ["architecture"] });
+  bundle.graph_bundle!.graphs.calls!.push({ from: "src/other.ts", to: "src/caller.ts" });
+  const graphText = buildReviewerGraph(bundle.graph_bundle!, bundle.repo_manifest!.files.map(file => file.path));
+  const path = join(artifactsDir, "review-graph.json");
+  await writeFile(path, graphText);
+  const digest = hashContent(graphText);
+  const command = renderAuditCommand(["review-graph", "--graph-index", path, "--graph-sha256", digest, "--path", "REPO_RELATIVE_PATH"]);
+  const dispatch = await prepareConceptualDispatch({
+    artifactsDir, sourceRoot: artifactsDir, bundle,
+    settings: { conceptual_depth: depth, perspectives: 2, max_units: 1 },
+    graphLookup: { path, command },
+  });
+  expect(dispatch.readPaths).toContain(path);
+  const mapPath = dispatch.readPaths.find(readPath => readPath.endsWith(MAP_FILENAME))!;
+  expect(await readFile(mapPath, "utf8")).not.toContain("src/other.ts");
+  const prompts = dispatch.readPaths.filter(readPath => readPath.endsWith("-prompt.md"));
+  expect(prompts).toHaveLength(depth === "deep" ? 3 : 1);
+  for (const prompt of prompts) {
+    const text = await readFile(prompt, "utf8");
+    expect(text).toContain("On-demand dependency lookup");
+    expect(text).toContain(digest);
+    expect(text).not.toContain(graphText);
+  }
+  expect((await readAuditReviewBinding(artifactsDir, LANE))?.inputs.map(input => input.path)).toContain(path);
+  expect(await queryReviewerGraph(path, digest, { path: "src/other.ts" })).toMatchObject({
+    edges: [{ from: "src/other.ts", to: "src/caller.ts", relation: "calls" }],
+  });
 });
