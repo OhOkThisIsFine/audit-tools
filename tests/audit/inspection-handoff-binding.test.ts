@@ -34,8 +34,8 @@ test("issued question assignments bind their scope, submission and fallback path
     expect(prompt).toContain("Use the frozen source and admitted source index");
     expect(prompt).toContain("Suggested sources are starting points, not the review boundary");
     expect(prompt).toContain("Copy the exact assignment_id, question_id, revision_id and snapshot_id");
-    expect(prompt).toContain("this assignment_id as work_item_id");
-    expect(prompt).toContain("bound result_path relative to repo_root");
+    expect(prompt).toContain("work_item_id: " + workload.work_items[0]!.binding.assignment.assignment_id);
+    expect(prompt).toMatch(/bound file `(?:[A-Z]:)?\//u);
 
     expect(workload.work_items.length).toBeGreaterThan(1);
     expect(step.progress?.pending_tasks).toBe(workload.work_items.length);

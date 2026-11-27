@@ -16,20 +16,21 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { deriveResultId } from "audit-tools/shared";
 
 import { submitRemediationWorkItemResult } from "../../src/remediate/steps/submitResult.js";
 import { prepareRemediationHostHandoff } from "../../src/remediate/steps/dispatch/hostHandoff.js";
-import { REMEDIATION_STATE_CONTRACT_VERSION } from "../../src/remediate/state/store.js";
+import { REMEDIATION_STATE_CONTRACT_VERSION, StateStore } from "../../src/remediate/state/store.js";
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { createNextStepHarness, makePlanningState } from "./helpers/nextStepHarness.js";
-import { spawnSyncHidden } from "../helpers/spawn.mjs";
+import { runBounded, spawnSyncHidden } from "../helpers/spawn.mjs";
 
 const harness = createNextStepHarness(".test-result-submit");
-const { REPO_DIR, ARTIFACTS_DIR, saveState, resetTestRepo, cleanupTestRepo } = harness;
+const { REPO_DIR, ARTIFACTS_DIR, resetTestRepo, cleanupTestRepo } = harness;
 
 beforeEach(async () => {
   await resetTestRepo();
@@ -48,11 +49,11 @@ interface BoundItem {
   readonly id: string;
   readonly result_path: string;
   readonly obligation_ids: readonly string[];
-  readonly prompt: { readonly sha256: string };
+  readonly prompt: { readonly sha256: string; readonly text: string };
 }
 
 /** A persisted run whose workload the production handoff minted. */
-async function persistRunnableState(): Promise<BoundItem> {
+async function persistRunnableState(artifactsDir = ARTIFACTS_DIR): Promise<BoundItem> {
   const state = makePlanningState({
     contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
     status: "implementing",
@@ -62,16 +63,16 @@ async function persistRunnableState(): Promise<BoundItem> {
   for (const file of ["src/a.ts", "src/b.ts"]) await writeFile(join(REPO_DIR, file), "// reviewed fixture source\n");
   git(["add", "src"]);
   git(["commit", "-m", "reviewed fixture baseline"]);
-  await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+  await writeApprovedPlanFixture(artifactsDir, state, REPO_DIR);
   const prepared = await prepareRemediationHostHandoff({
     root: REPO_DIR,
-    artifactsDir: ARTIFACTS_DIR,
+    artifactsDir,
     runId: "RUN-1",
     baselineCommit: git(["rev-parse", "HEAD"]),
     state,
   });
   if (prepared === "unsupported_retired_state") throw new Error("fixture state unexpectedly rejected");
-  await saveState({ ...state, host_handoff: prepared.handoff_record });
+  await new StateStore(artifactsDir).saveState({ ...state, host_handoff: prepared.handoff_record });
   return prepared.workload.work_items[0]!;
 }
 
@@ -92,13 +93,18 @@ function landedResult(item: BoundItem, promptSha256: string): Record<string, unk
 }
 
 test("submit writes a judged result to its bound path byte-exact, and refuses one the contract refuses", async () => {
-  const item = await persistRunnableState();
+  const artifactsDir = join(REPO_DIR, "custom artifacts");
+  const item = await persistRunnableState(artifactsDir);
   const boundPath = join(REPO_DIR, item.result_path);
+  const alternateCwd = dirname(REPO_DIR);
+  const normalized = (path: string) => path.split(sep).join("/").replace(/^[a-z](?=:)/u, letter => letter.toUpperCase());
+  expect(item.prompt.text).toContain("artifacts_dir: " + normalized(artifactsDir));
+  expect(item.prompt.text).toContain("write it with a file-write tool to " + "`" + normalized(boundPath) + "`");
 
   // Refused: a wrong prompt digest fails the identity check ingestion applies.
   const refused = await submitRemediationWorkItemResult({
     root: REPO_DIR,
-    artifactsDir: ARTIFACTS_DIR,
+    artifactsDir,
     workItemId: item.id,
     source: JSON.stringify(landedResult(item, "0".repeat(64))),
   });
@@ -109,12 +115,15 @@ test("submit writes a judged result to its bound path byte-exact, and refuses on
   // Accepted: the bound path holds the submitted bytes, backslash intact.
   const bytes = JSON.stringify(landedResult(item, item.prompt.sha256), null, 2);
   expect(bytes).toContain("\\\\s+");
-  const accepted = await submitRemediationWorkItemResult({
-    root: REPO_DIR,
-    artifactsDir: ARTIFACTS_DIR,
-    workItemId: item.id,
-    source: bytes,
-  });
+  const file = join(artifactsDir, "worker supplied response.json");
+  await writeFile(file, bytes, "utf8");
+  const wrapper = fileURLToPath(new URL("../../remediate-code.mjs", import.meta.url));
+  const submit = (...rootArgs: string[]) => runBounded(process.execPath, [
+    wrapper, "submit", "--root", REPO_DIR, ...rootArgs, "--work-item", item.id, "--from", file,
+  ], { cwd: alternateCwd });
+  await expect(submit()).rejects.toThrow(/no remediation run exists here/);
+  expect(existsSync(boundPath)).toBe(false);
+  const accepted = JSON.parse((await submit("--artifacts-dir", artifactsDir)).stdout);
   expect(accepted.issues).toEqual([]);
   expect(accepted.written).toBe(true);
   expect(accepted.result_path).toBe(item.result_path);

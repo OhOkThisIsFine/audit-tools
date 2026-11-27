@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
+import { DEFAULT_ACQUIRED_ANALYZER_IDS } from "../helpers/analyzerConsentFixture.js";
+import { prepareFixtureRun } from "../helpers/functionalPreflightFixture.js";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS, withTempRepo } from "./helpers/next-step-harness.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
@@ -24,8 +26,7 @@ async function runCommand(argv: string[], { cwd }: { cwd: string }) {
   return result;
 }
 
-function prepareWorkload(root: string) {
-  const artifactsDir = join(root, ".audit-tools", "audit");
+function prepareWorkload(root: string, artifactsDir = join(root, ".audit-tools", "audit")) {
   return walkStepsUntilTerminal({
     transport: () => callNextStep(root, artifactsDir),
     terminalKinds: ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS,
@@ -39,7 +40,10 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     await mkdir(dirname(join(root, neighbor)), { recursive: true });
     await writeFile(join(root, "src/neighbor/helper.ts"), "export const value = 1;\n");
     await writeFile(join(root, neighbor), "import { value } from './helper.js';\nexport const unrelated = value;\n");
-    const step = await prepareWorkload(root);
+    const artifactsDir = join(root, "custom audit artifacts");
+    const artifactArgs = ["--artifacts-dir", artifactsDir];
+    await prepareFixtureRun(root, { artifactsDir, declinedAnalyzerIds: DEFAULT_ACQUIRED_ANALYZER_IDS, preflight: true });
+    const step = await prepareWorkload(root, artifactsDir);
     const handoff = await readFile(step.prompt_path, "utf8");
     expect(handoff).toContain("Read only the routing metadata");
     expect(handoff).toContain("The command returns a prompt_path, not the prompt.");
@@ -96,6 +100,9 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       const packet = JSON.parse(prompt.slice(prompt.indexOf("\n\n{") + 2));
       expect(packet.binding).toEqual(item.binding);
       expect(packet.result_path).toBe(item.result_path);
+      const normalized = (path: string) => path.split(sep).join("/").replace(/^[a-z](?=:)/u, letter => letter.toUpperCase());
+      expect(prompt).toContain("artifacts_dir: " + normalized(artifactsDir));
+      expect(prompt).toContain("bound file " + "`" + normalized(resolve(root, item.result_path)) + "`");
       expect(packet.evidence).toEqual((workload as { evidence: { evidence_id: string }[] }).evidence
         .filter(({ evidence_id }) => item.binding.assignment.available_evidence_ids.includes(evidence_id)));
       expect(packet.source_files).toBeUndefined();
@@ -157,7 +164,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     const contextualRead = workItems.find(item =>
       !item.binding.assignment.suggested_sources.some(({ path }) => path === neighbor));
     expect(contextualRead).toBeDefined();
-    const ledgerFile = join(root, ".audit-tools", "audit", "runs", (workload as { run_id: string }).run_id, "host-accepted-results-ledger.json");
+    const ledgerFile = join(artifactsDir, "runs", (workload as { run_id: string }).run_id, "host-accepted-results-ledger.json");
     for (const [index, item] of workItems.entries()) {
       const { question, assignment } = item.binding;
       const response: ReviewSubmission = {
@@ -180,18 +187,18 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       if (index === 0) {
         const readLedger = () => existsSync(ledgerFile) ? readFile(ledgerFile) : undefined;
         const ledgerBeforeRefusal = await readLedger();
-        await expect(runCommand(["force-synthesis"], { cwd: root })).rejects.toThrow(/report-ready state/);
+        await expect(runCommand(["force-synthesis", ...artifactArgs], { cwd: root })).rejects.toThrow(/report-ready state/);
         expect(await readLedger()).toEqual(ledgerBeforeRefusal);
         await writeFile(file, JSON.stringify({ ...response, answer: {
           ...response.answer, parts: [{ part_id: "not-an-assigned-part", outcome: "inconclusive", observation_ids: [] }],
         } }));
-        await expect(runWrapper(["submit", "--work-item", assignment.assignment_id, "--from", file], { cwd: root }))
+        await expect(runWrapper(["submit", "--root", root, ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: dirname(root) }))
           .rejects.toThrow(/Unknown or duplicate requested part/);
         expect(await readLedger()).toEqual(ledgerBeforeRefusal);
         await writeFile(file, JSON.stringify(response));
       }
       if (index === 0) {
-        const accepted = await runWrapper(["submit", "--work-item", assignment.assignment_id, "--from", file], { cwd: root });
+        const accepted = await runWrapper(["submit", "--root", root, ...artifactArgs, "--work-item", assignment.assignment_id, "--from", file], { cwd: dirname(root) });
         expect(JSON.parse(accepted.stdout)).toMatchObject({ disposition: "accepted", submission_id: response.submission_id });
         await expect(prepare(assignment.assignment_id)).rejects.toThrow(/already has an accepted answer/);
       } else {
@@ -204,14 +211,14 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       }
     }
     const ledgerBefore = await readFile(ledgerFile, "utf8");
-    const { stdout } = await runCommand(["synthesize"], { cwd: root });
+    const { stdout } = await runCommand(["synthesize", ...artifactArgs], { cwd: root });
     expect(JSON.parse(stdout)).toMatchObject({ selected_executor: "synthesis_executor" });
-    const working = join(root, ".audit-tools", "audit", "audit-findings.json");
+    const working = join(artifactsDir, "audit-findings.json");
     const report = QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(working, "utf8")));
     expect(report.question_review.questions).toHaveLength(workItems.length);
     expect(report.question_review.completion).toBe("incomplete");
     expect(await readFile(ledgerFile, "utf8")).toBe(ledgerBefore);
-    const next = await runCommand(["next-step"], { cwd: root });
+    const next = await runCommand(["next-step", ...artifactArgs], { cwd: root });
     expect(JSON.parse(next.stdout).step_kind).toBe("synthesis_narrative");
   });
 });

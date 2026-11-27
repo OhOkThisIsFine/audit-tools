@@ -607,6 +607,7 @@ function buildPrompt(item: {
  */
 function renderResultTemplate(item: {
   readonly root: string;
+  readonly artifactsDir: string;
   readonly runId: string;
   readonly blockId: string;
   readonly resultPath: string;
@@ -634,7 +635,7 @@ function renderResultTemplate(item: {
     outcome: "<one of the three forms below>",
   };
   return [
-    `When HEAD contains your commit, submit this JSON with the submit_result tool (root: ${workerPromptPath(item.root, ".")}, work_item_id: ${item.blockId}). ` +
+    `When HEAD contains your commit, submit this JSON with the submit_result tool (root: ${workerPromptPath(item.root, ".")}, artifacts_dir: ${workerPromptPath(item.artifactsDir, ".")}, work_item_id: ${item.blockId}). ` +
     `If you do not have that tool, write it with a file-write tool to \`${item.resultPath}\`. Do not write it through a shell. Change only the ${item.obligationIds.length > 0 ? "marked values" : "marked value"}:`,
     "",
     "```json",
@@ -730,6 +731,7 @@ function buildWorkItem(
     return finding;
   });
   const resultPath = resultPathFor(paths, unit.id);
+  const resultFile = workerPromptPath(paths.root, resultPath);
   const obligationIds = [...unit.requirement_ids].sort(compareCodeUnits);
   const prompt = bindWorkerPrompt(buildPrompt({
     unit, requirements, sourceFindings, revision: state.plan.review_revision_sha256,
@@ -738,7 +740,7 @@ function buildWorkItem(
       ...(item.clarification_context ? { clarification_context: item.clarification_context } : {}),
       ...(item.failure_context ? { failure_context: item.failure_context } : {}),
     }, baselineCommit, resultPath, hasLandingGates: discoverLandingGates(paths.root).length > 0,
-  }), promptDigest => renderResultTemplate({ root: paths.root, runId, blockId: unit.id, resultPath, obligationIds, promptDigest }));
+  }), promptDigest => renderResultTemplate({ root: paths.root, artifactsDir: paths.artifactsDir, runId, blockId: unit.id, resultPath: resultFile, obligationIds, promptDigest }));
   const tokenEstimate = estimateTokensFromBytes(Buffer.byteLength(prompt.text, "utf8"));
   return {
     id: unit.id, source_finding_ids: [...unit.source_finding_ids],

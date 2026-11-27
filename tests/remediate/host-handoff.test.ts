@@ -1976,13 +1976,14 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
     // Owner decision 2026-11-07 (the remediate twin of audit line 2): a result
     // written through a shell can lose a backslash, and the tool checks a
     // submitted result before it writes the bound file.
-    const { root, handoff } = await prepareFixture();
-    const workerRoot = resolve(root).replaceAll("\\", "/").replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
+    const { root, artifactsDir, handoff } = await prepareFixture();
+    const normalize = (path: string) => resolve(path).replaceAll("\\", "/").replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
+    const workerRoot = normalize(root);
     for (const item of handoff.workload.work_items) {
       const text = item.prompt.text;
       expect(text).toContain(
-        `When HEAD contains your commit, submit this JSON with the submit_result tool (root: ${workerRoot}, work_item_id: ${item.id}). ` +
-        `If you do not have that tool, write it with a file-write tool to \`${item.result_path}\`. Do not write it through a shell.`,
+        `When HEAD contains your commit, submit this JSON with the submit_result tool (root: ${workerRoot}, artifacts_dir: ${normalize(artifactsDir)}, work_item_id: ${item.id}). ` +
+        `If you do not have that tool, write it with a file-write tool to \`${normalize(resolve(root, item.result_path))}\`. Do not write it through a shell.`,
       );
       expect(text).toContain("If no edit should land, submit this JSON instead.");
       expect(text).not.toContain("write this JSON to");
