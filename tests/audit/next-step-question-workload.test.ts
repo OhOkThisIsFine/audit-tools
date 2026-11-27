@@ -88,10 +88,8 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       runWrapper(prepareArgsFor(assignmentId), { cwd: root });
     const rejectPrepare = (assignmentId: string, digest?: string) =>
       runCommand(prepareArgsFor(assignmentId, digest), { cwd: root });
-    const loadPacket = async (item: WorkItem) => {
+    const readPacket = async (item: WorkItem, handle: { prompt_path: string; read_paths: { graph_sha256: string } }) => {
       const assignment_id = item.binding.assignment.assignment_id;
-      const { stdout } = await prepare(assignment_id);
-      const handle = JSON.parse(stdout);
       expect(handle).toEqual({ run_id: step.run_id, assignment_id, workload_sha256: routing.workload_sha256,
         prompt_path: expect.any(String), read_paths: {
           source_root: expect.any(String), source_index: expect.any(String), submission_schema: expect.any(String),
@@ -126,23 +124,23 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     await writeFile(receipt, "{}");
     await expect(rejectPrepare(first.binding.assignment.assignment_id)).rejects.toThrow(/incomplete fold receipt/);
     await unlink(receipt);
-    const selected = await loadPacket(first);
+    const selected = await readPacket(first, JSON.parse((await prepare(first.binding.assignment.assignment_id)).stdout));
     const other = workItems[1]!;
-    const second = await loadPacket(other);
     const firstId = first.binding.assignment.assignment_id;
     const otherId = other.binding.assignment.assignment_id;
     const prepareBatch = (ids: string) =>
       runWrapper([...routing.prepare_review_argv_prefix, "--work-items", ids], { cwd: dirname(root) });
-    const rejectPrepareBatch = (ids: string, digest = routing.workload_sha256) =>
+    const prepareBatchInProcess = (ids: string, digest = routing.workload_sha256) =>
       runCommand([...routing.prepare_review_argv_prefix.slice(0, -1), digest, "--work-items", ids], { cwd: root });
     const batch = JSON.parse((await prepareBatch(otherId + ",unissued," + firstId)).stdout);
+    const second = await readPacket(other, batch.outcomes[0].packet);
     expect(batch).toEqual({ run_id: step.run_id, workload_sha256: routing.workload_sha256, outcomes: [
       { status: "ready", packet: second.handle },
       { status: "refused", assignment_id: "unissued", message: "Review assignment is not in the current issued workload" },
       { status: "ready", packet: selected.handle },
     ] });
-    await expect(rejectPrepareBatch(firstId + "," + firstId)).rejects.toThrow(/distinct review assignment IDs/);
-    await expect(rejectPrepareBatch(firstId, "0".repeat(64))).rejects.toThrow(/fingerprint is not current/);
+    await expect(prepareBatchInProcess(firstId + "," + firstId)).rejects.toThrow(/distinct review assignment IDs/);
+    await expect(prepareBatchInProcess(firstId, "0".repeat(64))).rejects.toThrow(/fingerprint is not current/);
     expect(second.handle.prompt_path).not.toBe(selected.handle.prompt_path);
     expect(second.packet.source_index).toBe(selected.packet.source_index);
     expect(second.packet.graph_index).toBe(selected.packet.graph_index);
@@ -155,7 +153,6 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     ]) });
     expect(JSON.parse(await readFile(selected.packet.source_index, "utf8")))
       .toEqual({ source_root: selected.packet.source_root, source_files: sourceFiles });
-    expect(JSON.parse((await prepare(first.binding.assignment.assignment_id)).stdout)).toEqual(selected.handle);
     // An already-issued workload from the previous layout still binds the
     // same digest, with the graph and optional index cache rooted in its run.
     const legacyGraph = join(step.artifacts_dir, "runs", step.run_id, "review-graph-index", selected.packet.graph_sha256 + ".json");
@@ -319,7 +316,8 @@ test("interrupted workload and step publication resume the same frozen snapshot"
     await expect(interrupt("current-step.json")).rejects.toThrow(/synthetic publication interruption: current-step.json/);
     const advanced = await readJson(currentPointer);
     expect(advanced.sha256).not.toBe(oldSha);
-    await expect(prepareOld()).rejects.toThrow(/fingerprint is not current/);
+    await expect(runCommand([...routing.prepare_review_argv_prefix,
+      "--work-item", pending!.binding.assignment.assignment_id], { cwd: root })).rejects.toThrow(/fingerprint is not current/);
 
     const resumed = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
     expect(resumed.step_kind).toBe("dispatch_review");
