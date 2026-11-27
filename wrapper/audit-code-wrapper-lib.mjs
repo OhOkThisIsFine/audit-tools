@@ -21,6 +21,7 @@ import {
   installerVerbSummaries,
 } from './installer-verb-help.mjs';
 import { resolveWrapperRoot } from './repo-root.mjs';
+import { windowsStdioCwd } from './stdio-cwd.mjs';
 
 export { shouldBuildDistForPaths, assertWorkspaceInstalled };
 export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile, _renderGeminiCommandToml };
@@ -216,20 +217,21 @@ export { quoteForCmd, resolveSpawn };
 
 // sites-pinned: tests/audit/cleanup.test.ts
 /** @returns {Promise<void>} */
-function run(command, args, env) {
+function run(command, args, env, stdioServer) {
+  const callerCwd = process.cwd();
   return new Promise((resolvePromise, rejectPromise) => {
     const resolved = resolveSpawn(command, args);
     const child = spawn(resolved.command, resolved.args, {
-      cwd: repoRoot,
+      cwd: stdioServer && process.platform === 'win32' ? windowsStdioCwd(repoRoot, callerCwd) : repoRoot,
       stdio: 'inherit',
-      // Node-worktree guard: this spawn pins cwd to the PACKAGE root, so the
-      // backend's process.cwd() carries no evidence of where the CALLER ran
+      // Node-worktree guard: the backend's process.cwd() carries no
+      // evidence of where the CALLER ran
       // from. Stamp the caller's true cwd so the backend guard can refuse
       // driver lifecycle commands invoked from inside a tool-created worktree.
       // Literal must match AUDIT_TOOLS_CALLER_CWD_ENV in
       // src/shared/io/nodeWorktreeGuard.ts (pinned by
       // tests/shared/node-worktree-guard.test.mjs).
-      env: { ...env, AUDIT_TOOLS_CALLER_CWD: process.cwd() }
+      env: { ...env, AUDIT_TOOLS_CALLER_CWD: callerCwd }
     });
 
     child.on('error', rejectPromise);
@@ -304,7 +306,7 @@ async function runDistCommand(commandName, argv) {
   await run(process.execPath, [distEntry, commandName, ...commandArgs], {
     ...process.env,
     ...await selfInvocationEnv(),
-  });
+  }, commandName === 'mcp');
 }
 
 /** @param {{usageName: string, argv?: string[], preferredEntrypoint?: string}} options */

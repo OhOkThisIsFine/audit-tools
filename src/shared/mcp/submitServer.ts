@@ -13,8 +13,8 @@
  * Each bin supplies its own submit core; the server owns only the transport,
  * the argument shape and the verdict wording.
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync, statSync } from "node:fs";
+import { isAbsolute, parse } from "node:path";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -48,6 +48,32 @@ export interface SubmitServerOptions {
     readonly submit: (request: GateSubmitToolRequest) => Promise<{ readonly written: boolean }>;
   };
   readonly submit: (request: SubmitToolRequest) => Promise<{ readonly written: boolean }>;
+}
+
+function packageIdentity(manifest: URL) {
+  const root = statSync(new URL(".", manifest), { bigint: true });
+  const file = statSync(manifest, { bigint: true });
+  const metadata: unknown = JSON.parse(readFileSync(manifest, "utf8"));
+  if (typeof metadata !== "object" || metadata === null ||
+      !("name" in metadata) || metadata.name !== "audit-tools" ||
+      !("version" in metadata) || typeof metadata.version !== "string" || !metadata.version) {
+    throw new Error("Invalid audit-tools package manifest");
+  }
+  return {
+    version: metadata.version,
+    // npm may force-reinstall the same version. Check the package and manifest
+    // filesystem identities, not just the version advertised during handshake.
+    installation: `${root.dev}:${root.ino}:${file.dev}:${file.ino}:${file.mtimeNs}:${file.size}`,
+  };
+}
+
+function requireAbsolutePaths(request: { root: string; artifactsDir?: string }, relativeDefault?: string) {
+  const absolute = (path: string) =>
+    isAbsolute(path) && (process.platform !== "win32" || parse(path).root.length > 1);
+  if (!absolute(request.root)) throw new Error("Use the absolute repository root named by the prompt.");
+  if (request.artifactsDir !== undefined && request.artifactsDir !== relativeDefault && !absolute(request.artifactsDir)) {
+    throw new Error("Use the absolute artifacts directory named by the prompt, or omit it to use the repository default.");
+  }
 }
 
 const SUBMIT_TOOL_DESCRIPTION =
@@ -116,13 +142,36 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
  * goes to stderr: one stray `console.log` line would corrupt the stream, and
  * the cores were written for a CLI that prints freely.
  */
-export async function serveSubmitMcpOverStdio(options: Omit<SubmitServerOptions, "version">): Promise<void> {
+export async function serveSubmitMcpOverStdio(
+  options: Omit<SubmitServerOptions, "version">,
+  relativeDefault?: string,
+): Promise<void> {
   console.log = console.error;
   console.info = console.error;
   console.warn = console.error;
   // src/shared/mcp/ and dist/shared/mcp/ both sit three levels under the package root.
-  const { version } = JSON.parse(
-    readFileSync(fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8"),
-  ) as { version: string };
-  await createSubmitMcpServer({ ...options, version }).connect(new StdioServerTransport());
+  const manifest = new URL("../../../package.json", import.meta.url);
+  const original = packageIdentity(manifest);
+  // Refuse a submit when the installation already changed. This is not a lock
+  // against an upgrade beginning while a submission is already in flight.
+  const requireOriginalPackage = () => {
+    try {
+      const current = packageIdentity(manifest);
+      if (current.installation === original.installation && current.version === original.version) return;
+    } catch {
+      // npm may be in the middle of replacing the directory.
+    }
+    throw new Error("The audit-tools installation changed or is unavailable. Restart this MCP server before resubmitting. No result was written.");
+  };
+  const checkRequest = (request: { root: string; artifactsDir?: string }) => {
+    requireOriginalPackage();
+    requireAbsolutePaths(request, relativeDefault);
+  };
+  const gate = options.gateSubmission;
+  await createSubmitMcpServer({
+    ...options,
+    version: original.version,
+    submit: request => { checkRequest(request); return options.submit(request); },
+    ...(gate && { gateSubmission: { ...gate, submit: request => { checkRequest(request); return gate.submit(request); } } }),
+  }).connect(new StdioServerTransport());
 }

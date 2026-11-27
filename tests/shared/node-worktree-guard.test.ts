@@ -124,12 +124,13 @@ describe("assertNotNodeWorktreeCwd — writer-side defense-in-depth", () => {
 });
 
 describe("caller-cwd env propagation pins (wrapper cannot import the TS module)", () => {
-  it("the audit wrapper stamps the exact env var the guard reads", () => {
+  it.each(["../../wrapper/audit-code-wrapper-lib.mjs", "../../remediate-code.mjs"])("%s stamps the exact env var the guard reads", (entry) => {
     const wrapper = readFileSync(
-      new URL("../../wrapper/audit-code-wrapper-lib.mjs", import.meta.url),
+      new URL(entry, import.meta.url),
       "utf8",
     );
-    expect(wrapper).toContain(`${AUDIT_TOOLS_CALLER_CWD_ENV}: process.cwd()`);
+    expect(wrapper).toContain("const callerCwd = process.cwd()");
+    expect(wrapper).toContain(`${AUDIT_TOOLS_CALLER_CWD_ENV}: callerCwd`);
   });
 
   it("stripAuditToolsControlEnv scrubs the stamp so child commands never inherit it", () => {

@@ -421,7 +421,7 @@ program
           source: request.source,
         });
       },
-    });
+    }, DEFAULT_ARTIFACTS_DIR_OPTION);
   });
 
 program

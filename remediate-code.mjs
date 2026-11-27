@@ -191,8 +191,17 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
 
+  let stdioOptions;
+  if (verb === "mcp" && process.platform === "win32") {
+    const { windowsStdioCwd } = await import("./wrapper/stdio-cwd.mjs");
+    const callerCwd = process.cwd();
+    stdioOptions = {
+      cwd: windowsStdioCwd(__dirname, callerCwd),
+      env: { ...process.env, AUDIT_TOOLS_CALLER_CWD: callerCwd },
+    };
+  }
   const result = spawnSync(process.execPath, ["--no-warnings", distEntry, ...argv], {
-    stdio: "inherit",
+    stdio: "inherit", ...stdioOptions,
   });
   applyWrapperExitAction(getWrapperExitAction(result));
 }
