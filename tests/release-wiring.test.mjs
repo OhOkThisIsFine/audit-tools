@@ -6,6 +6,11 @@ import YAML from "yaml";
 import { catalogCommands } from "../scripts/shared/verify-steps.mjs";
 import { DOC_MANIFEST } from "../scripts/doc-manifest-data.mjs";
 import { PINS, legCommand } from "../scripts/shared/derived-file-preflight.mjs";
+import {
+  evaluatePreparedRuns,
+  isPreparedVersionBump,
+  verifyPreparedChecksJob,
+} from "../scripts/release-and-publish.mjs";
 
 const root = new URL("../", import.meta.url);
 const read = name => readFileSync(new URL(name, root), "utf8");
@@ -35,4 +40,55 @@ test("staged release metadata has a build-free witness and rejects stray runner 
   const result = spawnSync(process.execPath, ["scripts/shared/run-contract-tests.mjs", "untrusted-filter"], {cwd:root, encoding:"utf8", windowsHide:true});
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /does not support filters/);
+});
+
+test("prepared release requires exact successful default pushes from both canonical workflows", () => {
+  const identity = { headSha: "a".repeat(40), branch: "main", repoId: 42 };
+  const run = {
+    id: 17, name: "ci", path: ".github/workflows/ci.yml", event: "push", head_sha: identity.headSha,
+    head_branch: identity.branch, repository: { id: 42 }, head_repository: { id: 42 },
+    run_attempt: 1, status: "completed", conclusion: "success", created_at: "2026-11-27T00:00:00Z",
+  };
+  const suite = { ...run, id: 18, name: "audit-code-test-suite", path: ".github/workflows/audit-code-test-suite.yml" };
+  const evaluate = (...rows) => evaluatePreparedRuns({ total_count: rows.length, workflow_runs: rows }, identity);
+  assert.equal(evaluate(run, suite), run);
+  assert.equal(evaluate(run), null);
+  for (const wrong of [
+    { event: "pull_request" }, { event: "workflow_dispatch" }, { head_sha: "b".repeat(40) },
+    { head_branch: "feature" }, { path: ".github/workflows/lookalike.yml" }, { head_repository: { id: 43 } },
+    { repository: { id: 43 } }, { status: "in_progress", conclusion: null },
+  ]) assert.equal(evaluate({ ...run, ...wrong }, suite), null);
+  const rerun = { ...run, run_attempt: 2 };
+  assert.equal(evaluate(rerun, suite), rerun);
+  assert.throws(() => evaluate({ ...run, run_attempt: undefined }, suite), /ambiguous/);
+  assert.throws(() => evaluate(run, { ...run, id: 19 }, suite), /ambiguous/);
+  assert.throws(() => evaluate({ ...run, conclusion: "skipped" }, suite), /did not pass/);
+  assert.throws(() => evaluate(run, { ...suite, conclusion: "failure" }), /red CI/);
+  assert.throws(() => evaluatePreparedRuns({ total_count: 3, workflow_runs: [run, suite] }, identity), /incomplete/);
+});
+
+test("prepared release checks attest the exact job and actual verify step, not a green workflow shell", () => {
+  const identity = { runId: 17, headSha: "a".repeat(40) };
+  const step = { name: "Verify release checks (non-test gate)", status: "completed", conclusion: "success" };
+  const job = {
+    id: 19, run_id: 17, name: "checks", head_sha: identity.headSha,
+    status: "completed", conclusion: "success", steps: [step],
+  };
+  const verify = (...jobs) => verifyPreparedChecksJob({ total_count: jobs.length, jobs }, identity);
+  assert.doesNotThrow(() => verify(job));
+  for (const wrong of [
+    { run_id: 16 }, { head_sha: "b".repeat(40) }, { name: "another-check" }, { conclusion: "skipped" },
+    { steps: [] }, { steps: [{ ...step, conclusion: "skipped" }] }, { steps: [step, step] },
+  ]) assert.throws(() => verify({ ...job, ...wrong }), /actual successful checks job/);
+  assert.throws(() => verify(job, job), /actual successful checks job/);
+});
+
+test("prepared version must be the requested conventional bump of the first-parent version", () => {
+  assert.equal(isPreparedVersionBump("0.57.19", "0.57.20", "patch"), true);
+  assert.equal(isPreparedVersionBump("0.57.19", "0.58.0", "minor"), true);
+  assert.equal(isPreparedVersionBump("0.57.19", "1.0.0", "major"), true);
+  assert.equal(isPreparedVersionBump("0.57.19", "0.57.19", "patch"), false);
+  assert.equal(isPreparedVersionBump("0.57.19", "0.57.21", "patch"), false);
+  assert.equal(isPreparedVersionBump("0.57.19", "0.57.20", "minor"), false);
+  assert.equal(isPreparedVersionBump("0.57.19", "0.57.020", "patch"), false);
 });

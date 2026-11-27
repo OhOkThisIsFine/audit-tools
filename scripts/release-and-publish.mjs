@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// sites-pinned: tests/audit/release-resume-main.test.ts, tests/audit/release-ci-gate.test.ts
+// sites-pinned: tests/release-wiring.test.mjs
 // Single-package release helper for `audit-tools`. Bumps the version, tags `vX.Y.Z`,
 // pushes, creates a GitHub Release (which triggers the OIDC trusted-publishing
 // workflow), then waits for the publish run + npm registry propagation.
 //
 // Usage: node scripts/release-and-publish.mjs <patch|minor|major> [--bump-only] [--dry-run] [--skip-ci-green]
+//        node scripts/release-and-publish.mjs <patch|minor|major> --prepare
+//        node scripts/release-and-publish.mjs <patch|minor|major> --publish-prepared <version> [--no-wait]
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -32,6 +34,10 @@ const packageJsonPath = resolve(repoRoot, "package.json");
 const allowedBumps = new Set(["patch", "minor", "major"]);
 const bump = process.argv[2] ?? "patch";
 const bumpOnly = process.argv.includes("--bump-only");
+const prepareOnly = process.argv.includes("--prepare");
+const preparedFlag = process.argv.indexOf("--publish-prepared");
+const publishPrepared = preparedFlag !== -1;
+const preparedVersion = publishPrepared ? process.argv[preparedFlag + 1] : undefined;
 const dryRun = process.argv.includes("--dry-run");
 // --no-wait: tag + push + create the Release, then return WITHOUT blocking on the
 // publish CI run + npm propagation (~minutes). CI still publishes asynchronously;
@@ -422,6 +428,114 @@ function fetchRunsForSha(repoSlug, headSha) {
         "unverified commit — retry, or bypass with --skip-ci-green (not recommended).",
     );
   }
+}
+
+const preparedWorkflows = [".github/workflows/ci.yml", ".github/workflows/audit-code-test-suite.yml"];
+
+/**
+ * Both required workflows must have one unambiguous push run from this
+ * repository's default branch. Their display names are not identity.
+ * @param {any} response
+ * @param {{headSha: string, branch: string, repoId: number}} identity
+ */
+export function evaluatePreparedRuns(response, { headSha, branch, repoId }) {
+  const runs = response?.workflow_runs;
+  if (!Array.isArray(runs) || response.total_count !== runs.length) {
+    throw new Error("Prepared release CI evidence is incomplete.");
+  }
+  const red = evaluateCiGreenForSha(runs, { headSha }).redWorkflows;
+  if (red.length) throw new Error(`Prepared release has red CI on ${headSha}: ${red.join(", ")}.`);
+  const required = preparedWorkflows.map((path) => {
+    const candidates = runs.filter((row) => row?.path === path && row.head_sha === headSha &&
+      row.head_branch === branch && row.event === "push" &&
+      row.repository?.id === repoId && row.head_repository?.id === repoId);
+    if (!candidates.length) return null;
+    if (candidates.length !== 1 || !Number.isSafeInteger(candidates[0].run_attempt) ||
+        candidates[0].run_attempt < 1 || !Number.isSafeInteger(candidates[0].id)) {
+      throw new Error(`Prepared release CI is ambiguous for ${path}.`);
+    }
+    const [candidate] = candidates;
+    if (candidate.status === "completed" && candidate.conclusion !== "success") {
+      throw new Error(`Prepared release CI did not pass for ${path} (${candidate.conclusion}).`);
+    }
+    return candidate;
+  });
+  return required.every((row) => row?.status === "completed") &&
+    !classifyCiInFlight(runs, { headSha }).waiting ? required[0] : null;
+}
+
+/** @param {any} response @param {{runId: number, headSha: string}} identity */
+export function verifyPreparedChecksJob(response, { runId, headSha }) {
+  const jobs = response?.jobs;
+  if (!Array.isArray(jobs) || jobs.length !== response.total_count) {
+    throw new Error("Prepared release checks job evidence is incomplete.");
+  }
+  const checks = jobs.filter((job) => job?.name === "checks");
+  const [job] = checks;
+  const steps = Array.isArray(job?.steps)
+    ? job.steps.filter((step) => step?.name === "Verify release checks (non-test gate)") : [];
+  if (checks.length !== 1 || job.run_id !== runId || job.head_sha !== headSha ||
+      job.status !== "completed" || job.conclusion !== "success" ||
+      steps.length !== 1 || steps[0].status !== "completed" || steps[0].conclusion !== "success") {
+    throw new Error("Prepared release requires the actual successful checks job and verify:checks step on the exact push; skipped jobs do not qualify.");
+  }
+}
+
+/** @param {string} repoSlug @param {string} headSha */
+function requireProtectedDefaultTip(repoSlug, headSha) {
+  const repository = runJson("gh", ["api", `repos/${repoSlug}`]);
+  const branch = repository?.default_branch;
+  if (typeof repository?.full_name !== "string" || repository.full_name.toLowerCase() !== repoSlug.toLowerCase() ||
+      !Number.isSafeInteger(repository.id) || typeof branch !== "string" || !branch) {
+    throw new Error("Cannot establish the prepared release repository/default branch identity.");
+  }
+  const tip = runJson("gh", ["api", `repos/${repoSlug}/branches/${encodeURIComponent(branch)}`]);
+  if (tip.name !== branch || tip.protected !== true || tip.commit?.sha !== headSha) {
+    throw new Error("Prepared publishing requires HEAD to equal the protected GitHub default-branch tip.");
+  }
+  return { branch, repoId: repository.id };
+}
+
+/** @param {string} repoSlug @param {string} headSha */
+async function qualifyPreparedHead(repoSlug, headSha) {
+  const identity = { ...requireProtectedDefaultTip(repoSlug, headSha), headSha };
+  const deadline = Date.now() + ciInFlightWaitMs;
+  console.log(`[release] waiting for the protected default-branch push checks and tests on ${headSha}`);
+  for (;;) {
+    const runs = runJson("gh", ["api", `repos/${repoSlug}/actions/runs?head_sha=${headSha}&per_page=100`]);
+    const ci = evaluatePreparedRuns(runs, identity);
+    if (ci) {
+      const jobs = runJson("gh", ["api", `repos/${repoSlug}/actions/runs/${ci.id}/attempts/${ci.run_attempt}/jobs?per_page=100`]);
+      verifyPreparedChecksJob(jobs, { runId: ci.id, headSha });
+      const current = runJson("gh", ["api", `repos/${repoSlug}/actions/runs/${ci.id}`]);
+      if (current.id !== ci.id || current.run_attempt !== ci.run_attempt || current.status !== "completed" || current.conclusion !== "success") {
+        throw new Error("Prepared release checks changed during qualification; wait for the new attempt and retry.");
+      }
+      const tip = requireProtectedDefaultTip(repoSlug, headSha);
+      if (tip.branch !== identity.branch || tip.repoId !== identity.repoId) {
+        throw new Error("Prepared release default-branch identity changed during CI qualification.");
+      }
+      console.log(`[release] exact default-branch CI qualified ${headSha}: ${ci.html_url}`);
+      return ci.id;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`No unambiguous successful protected default-branch CI evidence for ${headSha}. Nothing was tagged or pushed.`);
+    }
+    await sleep(pollIntervalMs);
+  }
+}
+
+/** @param {string} previous @param {string} next @param {string} kind */
+export function isPreparedVersionBump(previous, next, kind) {
+  const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+  const match = stable.exec(previous);
+  if (!match || !stable.test(next)) return false;
+  const parts = match.slice(1).map(Number);
+  const index = ["major", "minor", "patch"].indexOf(kind);
+  if (index < 0 || parts.some((part) => !Number.isSafeInteger(part))) return false;
+  parts[index] += 1;
+  parts.fill(0, index + 1);
+  return Number.isSafeInteger(parts[index]) && parts.join(".") === next;
 }
 
 // Pre-tag CI-green gate. Resolves the exact SHA `bumpVersionAndTag` is about to
@@ -1080,7 +1194,7 @@ export function releaseJournalPath(root) {
 }
 
 /** @typedef {{repo: string, base: string, previousVersion: string, bump: string, skipped: boolean, prepared?: {tree: string, tag: string, version: string}}} ReleaseIntent */
-/** @typedef {{schema?: string, repo?: string, tag?: string, version?: string, commit?: string, updated_at?: string, phases?: Record<string, unknown>, intent?: ReleaseIntent, preTagCiSkipped?: boolean}} ReleaseJournal */
+/** @typedef {{schema?: string, repo?: string, tag?: string, version?: string, commit?: string, updated_at?: string, phases?: Record<string, unknown>, intent?: ReleaseIntent, preTagCiSkipped?: boolean, preparedCiRun?: number}} ReleaseJournal */
 
 /** @param {string} root @returns {ReleaseJournal | null} */
 export function readReleaseJournal(root) {
@@ -1105,11 +1219,14 @@ function writeReleaseJournal(root, journal) {
   renameSync(temp, path);
 }
 
-/** @param {string} root @param {{repo: string, tag: string, version: string, commit: string, preTagCiSkipped: boolean}} identity */
+/** @param {string} root @param {{repo: string, tag: string, version: string, commit: string, preTagCiSkipped: boolean, preparedCiRun?: number}} identity */
 function checkpointReleaseCommit(root, identity) {
+  const at = new Date().toISOString();
   const journal = {
     schema: "release-journal/v1alpha1", ...identity,
-    phases: { "bump+tag": { at: new Date().toISOString(), tag: identity.tag, version: identity.version } },
+    phases: identity.preparedCiRun === undefined
+      ? { "bump+tag": { at, tag: identity.tag, version: identity.version } }
+      : { land: { at, alreadyLanded: true } },
   };
   writeReleaseJournal(root, journal);
   return journal;
@@ -1270,7 +1387,6 @@ async function finishGlobalInstall(npm, packageName, version) {
     );
   }
 
-  // sites-pinned: tests/audit/release-resume-main.test.ts
   // Exercise the GLOBAL shims, not package entry paths. A silent no-op can exit
   // zero, so require the exact release version and the CLI's own usage line.
   // resolveSpawn preserves Windows .cmd support as well as POSIX symlink coverage.
@@ -1302,8 +1418,12 @@ async function finishGlobalInstall(npm, packageName, version) {
   }
 }
 
-// sites-pinned: tests/audit/release-resume-main.test.ts
 export async function main() {
+  if ((prepareOnly && (publishPrepared || noWait)) ||
+      ((prepareOnly || publishPrepared) && (bumpOnly || skipCiGreen)) ||
+      (publishPrepared && !/^\d+\.\d+\.\d+$/.test(preparedVersion ?? ""))) {
+    throw new Error("Use --prepare alone, or --publish-prepared <version> [--no-wait]. Prepared releases cannot bypass CI.");
+  }
   if (dryRun) return runRelease();
   const releaseWriter = claimReleaseWriter();
   try {
@@ -1322,6 +1442,12 @@ async function runRelease() {
   console.log(`[release] package: ${packageBefore.name}@${packageBefore.version}`);
 
   if (dryRun) {
+    if (prepareOnly || publishPrepared) {
+      console.log(prepareOnly
+        ? `[release] --dry-run: would stage the ${bump} version bump without committing or tagging.`
+        : `[release] --dry-run: would verify the exact protected default-branch tip for ${preparedVersion}, then tag and publish without a new PR.`);
+      return;
+    }
     console.log(`[release] --dry-run: would bump ${bump}, tag v<next>, push, GitHub Release, await publish.`);
     console.log(
       "[release] --dry-run: would verify GitHub Actions has a completed, successful CI run on " +
@@ -1351,8 +1477,33 @@ async function runRelease() {
     throw new Error("Cannot resume release: the finalized journal names a different or missing repository.");
   }
 
+  if ((prepareOnly || publishPrepared) && journal?.intent) {
+    throw new Error("Cannot use the prepared release path while a legacy release intent is pending.");
+  }
+  if (prepareOnly) {
+    if (journal && !journal.phases?.["reinstall+smoke"]) {
+      throw new Error("Cannot prepare a new version while a release is pending in this worktree.");
+    }
+    run(npm, ["version", bump, "--no-git-tag-version", "--ignore-scripts"]);
+    run("git", ["add", "package.json", "package-lock.json"]);
+    const { version } = readPackageJson();
+    console.log(`[release] staged ${version}; land it with the fixes through the normal protected PR, with final commit subject "release: prepare v${version}". No tag was created.`);
+    return;
+  }
+
+  if (publishPrepared) {
+    const lock = JSON.parse(readFileSync(resolve(repoRoot, "package-lock.json"), "utf8"));
+    if (packageBefore.version !== preparedVersion || lock.version !== preparedVersion ||
+        lock.packages?.[""]?.version !== preparedVersion) {
+      throw new Error(`Prepared version ${preparedVersion} does not match package.json and package-lock.json.`);
+    }
+  }
+
   if (bumpOnly) {
-    if (journal && Object.hasOwn(journal, "intent")) throw new Error("Cannot bump only while a full release intent is pending.");
+    if (journal && (Object.hasOwn(journal, "intent") ||
+        (journal.preparedCiRun && !journal.phases?.["reinstall+smoke"]))) {
+      throw new Error("Cannot bump only while a full release intent is pending.");
+    }
     console.log(`[release] bumping ${bump} version`);
     const { packageAfter, tag } = bumpVersionAndTag(npm);
     console.log(`[release] created ${tag} for ${packageAfter.name}@${packageAfter.version}.`);
@@ -1368,6 +1519,14 @@ async function runRelease() {
   // Pending intents name the checked base, then the staged tree produced by
   // npm. Finalized journals name the post-bump version and its exact commit.
   const headAtStart = tryGitSha("HEAD");
+  if (publishPrepared) {
+    const subject = run("git", ["show", "-s", "--format=%s", "HEAD"], { capture: true }).stdout.trim();
+    const previous = runJson("git", ["show", "HEAD^1:package.json"]);
+    if (subject !== `release: prepare v${preparedVersion}` ||
+        !isPreparedVersionBump(previous?.version, preparedVersion ?? "", bump)) {
+      throw new Error(`Prepared publishing requires a landed "release: prepare v${preparedVersion}" commit with a ${bump} version bump against its first parent.`);
+    }
+  }
   if (journal && Object.hasOwn(journal, "intent")) {
     const intent = journal.intent;
     if (!intent || typeof intent !== "object" || Array.isArray(intent)) throw new Error("Cannot resume release: invalid pending intent.");
@@ -1383,12 +1542,18 @@ async function runRelease() {
     tag: `v${packageBefore.version}`,
     headSha: headAtStart,
   });
+  if (resume.resume && Boolean(journal?.preparedCiRun) !== publishPrepared) {
+    throw new Error("Cannot resume this release in a different mode. Retry with the original release command.");
+  }
+  if (publishPrepared && !resume.resume && journal && !journal.phases?.["reinstall+smoke"]) {
+    throw new Error("Cannot begin a prepared release while a different release is pending in this worktree.");
+  }
 
   // A fresh release must start from the remote default branch (ensureMainBranch).
   // A RESUME continues the journal's own bump commit, which is not the remote
   // default while its landing is unfinished — so its gate is the recorded tag
   // naming HEAD, checked below, not the branch gate a fresh release passes.
-  const releaseGate = resume.resume
+  const releaseGate = publishPrepared ? null : resume.resume
     ? { branch: run("git", ["branch", "--show-current"], { capture: true }).stdout.trim(), defaultBranch: getDefaultBranch(), reason: "resume" }
     : ensureMainBranch();
   const published = resume.resume && Boolean(journal?.phases?.["tag+release"]);
@@ -1398,6 +1563,13 @@ async function runRelease() {
     if (journal?.preTagCiSkipped && !skipCiGreen) {
       throw new Error("Cannot resume release: the version commit was prepared with --skip-ci-green, which this invocation did not select.");
     }
+    if (publishPrepared && !published && headAtStart && resume.tag) {
+      verifyReleasePushDestination(repoSlug, getRemoteName());
+      await runPhase("pre-tag-gate(prepared-ci)", () => qualifyPreparedHead(repoSlug, headAtStart));
+      ensureCleanWorktree();
+      if (tryGitSha("HEAD") !== headAtStart) throw new Error("Prepared release HEAD changed; refusing to tag or push.");
+      ensurePreparedLocalTag(resume.tag, headAtStart);
+    }
     if (tryGitSha(`${resume.tag}^{commit}`) !== headAtStart) {
       throw new Error(`Cannot resume ${resume.tag}: its local tag is missing or does not name the recorded release commit. Restore the recorded tag before retrying; no new release was started.`);
     }
@@ -1405,7 +1577,7 @@ async function runRelease() {
       `[release] ${resume.reason} — skipping the pre-tag gate and the bump (both already ran)` +
         (published ? "." : "; the landing and the tag push did not finish, so they run again (both are idempotent)."),
     );
-  } else {
+  } else if (!publishPrepared) {
     // The pre-tag gate runs the WHOLE non-test gate, because a tag is the one thing
     // this script does that cannot be taken back cheaply: once `vX.Y.Z` exists and the
     // GitHub Release is created, a CI failure costs a delete + cleanup-tag + forward-bump.
@@ -1433,6 +1605,25 @@ async function runRelease() {
   if (resume.resume) {
     tag = /** @type {string} */ (resume.tag);
     packageAfter = readPackageJson();
+  } else if (publishPrepared) {
+    if (!headAtStart) throw new Error("Cannot resolve prepared release HEAD.");
+    verifyReleasePushDestination(repoSlug, remoteName);
+    const ciRun = await runPhase("pre-tag-gate(prepared-ci)", () => qualifyPreparedHead(repoSlug, headAtStart));
+    ensureCleanWorktree();
+    if (tryGitSha("HEAD") !== headAtStart || readPackageJson().version !== packageBefore.version) {
+      throw new Error("Prepared release HEAD or version changed; refusing to tag or push.");
+    }
+    if (tryGitSha(`refs/tags/${tag}`) !== null ||
+        run("git", ["ls-remote", "--tags", remoteName, `refs/tags/${tag}`], { capture: true }).stdout.trim()) {
+      throw new Error(`Cannot start prepared release ${tag}: the local or remote tag already exists.`);
+    }
+    // Checkpoint before creating the local tag: a stop between these two
+    // operations can re-qualify and continue without a new bump or landing.
+    journal = checkpointReleaseCommit(repoRoot, {
+      repo: repoSlug, tag, version: packageBefore.version, commit: headAtStart,
+      preTagCiSkipped: false, preparedCiRun: ciRun,
+    });
+    ensurePreparedLocalTag(tag, headAtStart);
   } else {
     if (!headAtStart || ciGate?.headSha !== headAtStart || tryGitSha("HEAD") !== headAtStart || readPackageJson().version !== packageBefore.version) {
       throw new Error("The verified release base changed before version preparation. No new release was started.");
@@ -1496,7 +1687,7 @@ async function runRelease() {
     // A resume after a failed landing simply runs it again; a resume after a
     // landing that succeeded (the tag push or the release failed) skips it.
     const landingBranch = `release/${tag}`;
-    const recordedLand = resume.resume ? journal?.phases?.land : undefined;
+    const recordedLand = resume.resume || publishPrepared ? journal?.phases?.land : undefined;
     let prUrl =
       recordedLand && typeof recordedLand === "object" && "pullRequest" in recordedLand
         ? String(recordedLand.pullRequest)
@@ -1504,6 +1695,7 @@ async function runRelease() {
     if (recordedLand) {
       console.log(`[release] ${tag} already landed (${prUrl || "recorded"}) — skipping the landing.`);
     } else {
+      if (!releaseGate) throw new Error("Prepared release must already be on the default branch; no release PR will be created.");
       const bumpSha = journalBoundCommit ?? tryGitSha("HEAD");
       if (bumpSha === null) throw new Error(`Cannot land ${tag}: HEAD does not resolve to a commit. Nothing was pushed.`);
       console.log(`[release] landing ${tag} on ${remoteName}/${releaseGate.defaultBranch} through a pull request`);
@@ -1534,13 +1726,20 @@ async function runRelease() {
       // already exists is left alone (a re-create is the one unrecoverable-cheaply
       // mistake here — `gh release create` on an existing tag fails, and a retry
       // loop around it would re-upload assets). Every other phase is idempotent.
+      if (publishPrepared) {
+        if (!headSha || tryGitSha(`refs/tags/${tag}^{commit}`) !== headSha || tryGitSha("HEAD") !== headSha) {
+          throw new Error("Prepared release tag or HEAD changed; refusing to push.");
+        }
+        requireProtectedDefaultTip(repoSlug, headSha);
+      }
       console.log(`[release] pushing tag ${tag}`);
-      run("git", ["push", remoteName, tag]);
+      run("git", ["push", remoteName, publishPrepared ? `refs/tags/${tag}:refs/tags/${tag}` : tag]);
       if (releaseExists(repoSlug, tag)) {
         console.log(`[release] GitHub Release ${tag} already exists — leaving it untouched.`);
       } else {
         console.log(`[release] creating GitHub Release ${tag}`);
-        run("gh", ["release", "create", tag, "--repo", repoSlug, "--title", tag, "--generate-notes"]);
+        run("gh", ["release", "create", tag, "--repo", repoSlug, "--title", tag, "--generate-notes",
+          ...(publishPrepared ? ["--verify-tag"] : [])]);
       }
     });
     recordReleasePhase(repoRoot, "tag+release", { tag, headSha, tagPushedAtMs });
