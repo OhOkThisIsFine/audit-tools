@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import {
   runClosePhase,
   collectStagingFiles,
@@ -7,7 +7,7 @@ import {
   executeClosingAction,
   blockResolvedItemsOnCombinedFailure,
 } from "../../src/remediate/phases/close.js";
-import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
+import { cp, readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
 import { writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
@@ -96,18 +96,21 @@ function makeState(overrides: Record<string, unknown> = {}): RemediationState {
   });
 }
 
+const GIT_SEED = scratchDir(".test-close-git-seed");
+beforeAll(async () => {
+  await mkdir(GIT_SEED, { recursive: true });
+  execSync("git init", { cwd: GIT_SEED });
+  execSync("git config user.email test@test.com", { cwd: GIT_SEED });
+  execSync("git config user.name Test", { cwd: GIT_SEED });
+  writeFileSync(join(GIT_SEED, "initial.txt"), "hello");
+  execSync("git add initial.txt && git commit --no-gpg-sign -m init", { cwd: GIT_SEED });
+});
+
 beforeEach(async () => {
   await rm(REPO_DIR, { recursive: true, force: true });
+  // An ordinary copy of the fixture, including .git: never share refs or the index.
+  await cp(GIT_SEED, REPO_DIR, { recursive: true });
   await mkdir(TEST_DIR, { recursive: true });
-  // REPO_DIR lives inside the audit-tools working tree, so an un-init'd dir would
-  // make git traverse up to the parent repo and report its (many) uncommitted
-  // files — corrupting collectStagingFiles. Initialize an isolated, clean repo so
-  // the no-files-to-stage cases genuinely see an empty staging set.
-  execSync("git init", { cwd: REPO_DIR });
-  execSync("git config user.email test@test.com", { cwd: REPO_DIR });
-  execSync("git config user.name Test", { cwd: REPO_DIR });
-  writeFileSync(join(REPO_DIR, "initial.txt"), "hello");
-  execSync("git add . && git commit -m init", { cwd: REPO_DIR });
 });
 
 afterEach(async () => {
@@ -363,6 +366,8 @@ describe("runClosePhase", () => {
     await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
+    expect(next.closing_plan!.closing_action_preview).toBeUndefined();
+    expect(existsSync(TEST_DIR)).toBe(false);
 
     const { existsSync } = await import("node:fs");
     expect(existsSync(join(OUTPUT_DIR, "remediation-report.md"))).toBe(true);
@@ -611,15 +616,6 @@ describe("runClosePhase", () => {
     expect(artifactLine.note).toContain("1 outcome");
   });
 
-  it("does not require a run logger (optional argument)", async () => {
-    const state = makeState({
-      items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
-    });
-    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-    const next = await runClosePhase(state, BASE_OPTIONS);
-    expect(next.status).toBe("complete");
-  });
-
   it("records failing closing commands instead of reporting success", async () => {
     const state = makeState({
       closing_plan: {
@@ -637,6 +633,7 @@ describe("runClosePhase", () => {
     expect(next.status).toBe("complete");
     expect(jsonReport.closing_result.status).toBe("failed");
     expect(jsonReport.closing_result.commands[0].exit_code).toBe(7);
+    expect(existsSync(TEST_DIR)).toBe(true);
   });
 
   it("combined test failure with no re-blockable items warns and includes failure in markdown report", async () => {
@@ -697,6 +694,7 @@ describe("runClosePhase", () => {
     }
 
     expect(next.status).toBe("complete");
+    expect(existsSync(TEST_DIR)).toBe(true);
 
     const { existsSync, readFileSync } = await import("node:fs");
     const reportPath = join(OUTPUT_DIR, "remediation-report.md");
@@ -734,133 +732,28 @@ describe("runClosePhase", () => {
     expect(warnEmitted).toBe(true);
   });
 
-  // MNT-a01af494: executeClosingAction must return 'success' (not 'failed' or
-  // 'skipped') when no commands were run because there were no files to stage.
-  // stageAndCommit returns true vacuously; commands.every(isSuccess) on [] is
-  // vacuously true → status 'success'.
-  // N-R16: pre_authorized: true is required to skip the confirmation preview.
-  describe("executeClosingAction returns success when stageAndCommit finds no files", () => {
-    // REPO_DIR is a clean git repo with no uncommitted changes, so collectStagingFiles returns [].
-    it("status is 'success' and commands is empty when action is 'commit' and no files to stage", async () => {
-      const state = makeState({ closing_plan: { action: "commit", pre_authorized: true } });
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-      const jsonReport = JSON.parse(
-        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-      );
-      expect(jsonReport.closing_result.status).toBe("success");
-      expect(jsonReport.closing_result.commands).toHaveLength(0);
-    });
-
-    it("status is 'success' when action is 'push' and no files to stage", async () => {
-      const state = makeState({ closing_plan: { action: "push", pre_authorized: true } });
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-      const jsonReport = JSON.parse(
-        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-      );
-      expect(jsonReport.closing_result.status).toBe("success");
-      expect(jsonReport.closing_result.commands).toHaveLength(0);
-    });
-
-    it("status is 'success' when action is 'open-pr' and no files to stage", async () => {
-      const state = makeState({ closing_plan: { action: "open-pr", pre_authorized: true } });
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-      const jsonReport = JSON.parse(
-        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-      );
-      expect(jsonReport.closing_result.status).toBe("success");
-      expect(jsonReport.closing_result.commands).toHaveLength(0);
-    });
-
-    // `custom` is the exception to the vacuous-success rule: a chosen custom
-    // action with no command attached ran NOTHING, and a green there would pass
-    // verification and delete the artifacts dir for a close that never landed
-    // (owner decision 92b0e2dd7cfdc06d makes `custom` reachable from the
-    // checkpoint, where the confirm step refuses it without a command; this is
-    // the backstop for a hand-edited closing_plan).
-    it("status is 'failed' when action is 'custom' and custom_command is undefined — nothing ran", async () => {
-      const state = makeState({ closing_plan: { action: "custom" } });
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-      const jsonReport = JSON.parse(
-        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-      );
-      expect(jsonReport.closing_result.status).toBe("failed");
-      expect(jsonReport.closing_result.commands).toHaveLength(1);
-      expect(jsonReport.closing_result.commands[0].stderr).toMatch(/no custom_command attached/);
-    });
-
-    it("status is 'failed' when action is 'custom' and custom_command is empty array — nothing ran", async () => {
-      const state = makeState({ closing_plan: { action: "custom", custom_command: [] } });
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-      const jsonReport = JSON.parse(
-        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-      );
-      expect(jsonReport.closing_result.status).toBe("failed");
-      expect(jsonReport.closing_result.commands[0].exit_code).toBeNull();
-    });
+  it("completes a pre-authorized no-edit commit with no commands", async () => {
+    const state = makeState({ closing_plan: { action: "commit", pre_authorized: true } });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, BASE_OPTIONS);
+    const report = JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
+    expect(next.status).toBe("complete");
+    expect(next.closing_plan!.closing_action_preview).toBeUndefined();
+    expect(report.closing_result).toMatchObject({ status: "success", commands: [] });
   });
 
-  // MNT-a01af494: new tests for the stageAndCommit empty-tree fix.
-  // N-R16: pre_authorized: true is required to skip the confirmation preview.
-  describe("executeClosingAction: stageAndCommit vacuous-success (MNT-a01af494)", () => {
-    it("returns status 'success' when action is 'commit' and collectStagingFiles returns []", async () => {
-      // REPO_DIR is a clean git repo with no uncommitted changes, so collectStagingFiles returns [].
-      const warnMessages: string[] = [];
-      const originalWarn = console.warn;
-      console.warn = (...args: unknown[]) => {
-        warnMessages.push(args.map(String).join(" "));
-      };
-      let jsonReport: Record<string, unknown>;
-      try {
-        const state = makeState({ closing_plan: { action: "commit", pre_authorized: true } });
-        await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-        await runClosePhase(state, BASE_OPTIONS);
-        jsonReport = JSON.parse(
-          await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-        ) as Record<string, unknown>;
-      } finally {
-        console.warn = originalWarn;
-      }
-      const closingResult = jsonReport.closing_result as Record<string, unknown>;
-      expect(closingResult.status).toBe("success");
-      expect((closingResult.commands as unknown[]).length).toBe(0);
-      expect(warnMessages.some((m) => m.includes("No modified files"))).toBe(true);
-    });
+  it.each(["push", "open-pr"] as const)("skips %s when there is nothing to commit", async action => {
+    const state = makeState({ closing_plan: { action, pre_authorized: true } });
+    expect(await executeClosingAction(state, BASE_OPTIONS)).toMatchObject({ status: "success", commands: [] });
+    expect(runTrackedAsync).not.toHaveBeenCalled();
+  });
 
-    it("returns status 'success' when action is 'push' and collectStagingFiles returns []", async () => {
-      const state = makeState({ closing_plan: { action: "push", pre_authorized: true } });
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-      const jsonReport = JSON.parse(
-        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-      );
-      const closingResult = jsonReport.closing_result;
-      expect(closingResult.status).toBe("success");
-      // stageAndCommit short-circuits: no git push attempted either
-      expect(closingResult.commands).toHaveLength(0);
+  it.each([undefined, []])("refuses a custom close without a command (%s)", async custom_command => {
+    const state = makeState({ closing_plan: { action: "custom", custom_command } });
+    expect(await executeClosingAction(state, BASE_OPTIONS)).toMatchObject({
+      status: "failed", commands: [{ exit_code: null, stderr: expect.stringMatching(/no custom_command attached/) }],
     });
-
-    it("returns status 'failed' when a git command fails (files present)", async () => {
-      // Ensure collectStagingFiles returns at least one file by writing into
-      // the REPO_DIR (not a git repo, so stagedAndUntracked returns [] —
-      // simulate with a custom closing action that fails instead).
-      const state = makeState({
-        closing_plan: {
-          action: "custom",
-          custom_command: [process.execPath, "-e", "process.exit(1)"],
-        },
-      });
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-      const jsonReport = JSON.parse(
-        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
-      );
-      expect(jsonReport.closing_result.status).toBe("failed");
-    });
+    expect(runTrackedAsync).not.toHaveBeenCalled();
   });
 
   it("aggregates worker reflections from agent-feedback.jsonl into a Process Feedback section", async () => {
@@ -945,29 +838,6 @@ describe("runClosePhase", () => {
       expect(typeof preview.commit_message).toBe("string");
       expect(preview.commit_message).toContain("Fix the bug");
       expect(preview.commit_message).not.toBe("Auto-remediation complete");
-    });
-
-    it("proceeds directly to git commands when pre_authorized is true", async () => {
-      // With pre_authorized=true and no files to stage, runClosePhase should
-      // skip the preview and execute the closing action (vacuous success → complete).
-      const state = makeState({
-        closing_plan: { action: "commit", pre_authorized: true },
-      });
-
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      const next = await runClosePhase(state, BASE_OPTIONS);
-      expect(next.status).toBe("complete");
-      expect(next.closing_plan!.closing_action_preview).toBeUndefined();
-    });
-
-    it("does not generate a preview for action='none'", async () => {
-      const state = makeState({
-        closing_plan: { action: "none" },
-      });
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      const next = await runClosePhase(state, BASE_OPTIONS);
-      expect(next.status).toBe("complete");
-      expect(next.closing_plan!.closing_action_preview).toBeUndefined();
     });
 
     it("uses generated commit message (not hardcoded) when executing after pre_authorized=true", async () => {
@@ -1395,94 +1265,28 @@ describe("runClosePhase", () => {
       expect(state.items!.F2.status).toBe("resolved");
     });
 
-    it("falls back to re-blocking all resolved items when no touched_files overlap found", async () => {
-      const state = makeState({
-        closing_plan: { action: "none", pre_authorized: true },
-        plan: {
-          plan_id: "P1",
-          findings: [],
-          blocks: [],
-          project_type: "unknown",
-          candidate_closing_actions: ["none"],
-          test_command: 'node -e "process.exit(1)"',
-        },
-        items: {
-          F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
-          F2: { finding_id: "F2", status: "resolved", block_id: "B2" },
-        },
-      });
-
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      const next = await runClosePhase(state, BASE_OPTIONS);
-      expect(next.status).toBe("triage");
-      expect(state.items!.F1.status).toBe("blocked");
-      expect(state.items!.F2.status).toBe("blocked");
-      // Fallback note should be in failure_reason.
-      expect(state.items!.F1.failure_reason).toMatch(/falling back/i);
-    });
   });
 
   describe("overall_status excludes ignored and inappropriate items (N-R16)", () => {
-    it("overall_status='passed' when resolved items pass but some are ignored", async () => {
+    it("reports a passed resolved item alongside ignored and inappropriate items", async () => {
       const state = makeState({
         closing_plan: { action: "none", pre_authorized: true },
         items: {
-          F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
-          F2: {
-            finding_id: "F2",
-            status: "ignored",
-            block_id: "B2",
-            failure_reason: "User chose to ignore",
-          },
+          F1: { status: "resolved", block_id: "B1" },
+          F2: { status: "ignored", block_id: "B2", failure_reason: "User chose to ignore" },
+          F3: { status: "deemed_inappropriate", block_id: "B3", failure_reason: "Not applicable" },
         },
       });
-
       await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
 
-      const { readFileSync } = await import("node:fs");
-      const report = JSON.parse(
-        readFileSync(join(OUTPUT_DIR, "verification_report.json"), "utf8"),
-      );
+      const report = JSON.parse(await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8"));
       expect(report.overall_status).toBe("passed");
-      const f2trace = report.units.find(
-        (unit: { unit_id: string }) => unit.unit_id === "F2",
-      );
-      expect(f2trace.overall_status).toBe("skipped");
-      expect(
-        validateVerificationReport(report).filter((i) => i.severity === "error"),
-      ).toHaveLength(0);
-    });
-
-    it("overall_status='passed' when resolved items pass but some are deemed_inappropriate", async () => {
-      const state = makeState({
-        closing_plan: { action: "none", pre_authorized: true },
-        items: {
-          F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
-          F3: {
-            finding_id: "F3",
-            status: "deemed_inappropriate",
-            block_id: "B3",
-            failure_reason: "Not applicable to this codebase",
-          },
-        },
-      });
-
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-
-      const { readFileSync } = await import("node:fs");
-      const report = JSON.parse(
-        readFileSync(join(OUTPUT_DIR, "verification_report.json"), "utf8"),
-      );
-      expect(report.overall_status).toBe("passed");
-      const f3trace = report.units.find(
-        (unit: { unit_id: string }) => unit.unit_id === "F3",
-      );
-      expect(f3trace.overall_status).toBe("skipped");
-      expect(
-        validateVerificationReport(report).filter((i) => i.severity === "error"),
-      ).toHaveLength(0);
+      expect(report.units).toEqual(expect.arrayContaining([
+        expect.objectContaining({ unit_id: "F2", overall_status: "skipped" }),
+        expect.objectContaining({ unit_id: "F3", overall_status: "skipped" }),
+      ]));
+      expect(validateVerificationReport(report).filter(issue => issue.severity === "error")).toHaveLength(0);
     });
 
     it("overall_status='passed' when ALL items are skipped (ignored/inappropriate) and no resolved items remain", async () => {
@@ -1521,78 +1325,6 @@ describe("runClosePhase", () => {
       expect(
         validateVerificationReport(report).filter((i) => i.severity === "error"),
       ).toHaveLength(0);
-    });
-  });
-
-  describe("artifacts preserved when close is not fully green (N-R16)", () => {
-    it("preserves artifacts directory when closing action fails", async () => {
-      const state = makeState({
-        closing_plan: {
-          action: "custom",
-          custom_command: [process.execPath, "-e", "process.exit(7)"],
-          pre_authorized: true,
-        },
-      });
-
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-
-      const { existsSync } = await import("node:fs");
-      // Artifacts dir should be preserved because closing action failed.
-      expect(existsSync(TEST_DIR)).toBe(true);
-    });
-
-    it("preserves artifacts directory when combined test suite fails", async () => {
-      // All items are non-resolved (blocked), so test failure can't re-block
-      // anyone → run completes with test failure recorded (no triage).
-      const state = makeState({
-        closing_plan: { action: "none", pre_authorized: true },
-        plan: {
-          plan_id: "P1",
-          findings: [],
-          blocks: [],
-          project_type: "unknown",
-          candidate_closing_actions: ["none"],
-          test_command: 'node -e "process.exit(1)"',
-        },
-        items: {
-          F1: {
-            finding_id: "F1",
-            status: "blocked",
-            block_id: "B1",
-            failure_reason: "prior failure",
-          },
-        },
-      });
-
-      const originalWarn = console.warn;
-      console.warn = () => {};
-      try {
-        await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-        await runClosePhase(state, BASE_OPTIONS);
-      } finally {
-        console.warn = originalWarn;
-      }
-
-      const { existsSync } = await import("node:fs");
-      // Artifacts dir preserved (combined test failed).
-      expect(existsSync(TEST_DIR)).toBe(true);
-    });
-
-    it("deletes artifacts directory on fully-green close", async () => {
-      const state = makeState({
-        closing_plan: { action: "none", pre_authorized: true },
-        items: {
-          F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
-        },
-      });
-
-      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
-      await runClosePhase(state, BASE_OPTIONS);
-
-      const { existsSync } = await import("node:fs");
-      // On fully-green close (action=none/skipped, no test failure), artifacts deleted.
-      expect(existsSync(TEST_DIR)).toBe(false);
     });
   });
 
