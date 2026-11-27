@@ -187,13 +187,6 @@ export function validateQuestionAdjudication(answers: readonly ReviewAcceptedAns
   return "accepted";
 }
 
-/** An inconclusive observation remains open; no implicit parent-level credit. */
-export function reviewAnswerDisposition(requested: readonly string[], parts: ReviewAnswer["parts"]) {
-  const supported = new Set(parts.filter((part) => part.outcome !== "inconclusive" && part.observation_ids.length > 0)
-    .map((part) => part.part_id));
-  return { answered: requested.filter((part) => supported.has(part)), open: requested.filter((part) => !supported.has(part)) };
-}
-
 function dependencyIdentity(dependencies: Readonly<ReviewAcceptedAnswer["dependency_bindings"]>): string {
   return stableStringify(dependencies.map((entry) => [entry.kind, entry.key, entry.fingerprint])
     .sort((a, b) => compareCodeUnits(a.join("\0"), b.join("\0"))));

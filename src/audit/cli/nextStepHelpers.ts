@@ -414,10 +414,6 @@ const NEXT_STEP_RETURN_KIND_TABLE: Readonly<
   blocked: true,
 };
 
-/** The kinds `runDeterministicForNextStep` can return, derived from the table's own keys. */
-export const NEXT_STEP_RETURN_KINDS: readonly NextStepResult["kind"][] =
-  Object.keys(NEXT_STEP_RETURN_KIND_TABLE) as NextStepResult["kind"][];
-
 /**
  * Finalization thrashing tolerance (ARC-b8fed771 / the finalization-cycle guard).
  * The deterministic fold may legitimately revisit a prior artifact state a bounded

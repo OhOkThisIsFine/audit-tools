@@ -2036,11 +2036,3 @@ const NEXT_STEP_EMISSION = createStepEmissionScaffold<
     console.log(JSON.stringify(step, null, 2));
   },
 });
-
-/**
- * The handled-kinds set, DERIVED from the table's own keys — never a second,
- * hand-listed copy that could disagree with the table it describes. A drift
- * guard consumes this as the real B side of its seam assertion.
- */
-export const NEXT_STEP_EMISSION_KINDS: ReadonlySet<string> =
-  NEXT_STEP_EMISSION.handledKeys;

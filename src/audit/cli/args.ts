@@ -112,20 +112,11 @@ export function warnIfNotGitRepo(root: string): void {
   }
 }
 
-export function getBatchResultsDir(argv: string[]): string | undefined {
-  const value = getFlag(argv, "--batch-results");
-  return value ? resolve(value) : undefined;
-}
-
 export function getTimeoutMs(argv: string[]): number {
   return (
     parsePositiveIntegerFlag(argv, "--timeout") ??
     DIRECT_CLI_DEFAULTS.timeoutMs
   );
-}
-
-export function looksLikeCliFlag(value: string | undefined): boolean {
-  return isLongFlagToken(value);
 }
 
 export async function countLines(path: string): Promise<number> {

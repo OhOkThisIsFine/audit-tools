@@ -69,15 +69,6 @@ function parseSuppliedInput(
   return { ok: true, parsed };
 }
 
-export function validateSuppliedInput(
-  path: string,
-  content: string,
-  allowDocumentFallback = false,
-): { ok: true } | { ok: false; reason: string } {
-  const result = parseSuppliedInput(path, content, allowDocumentFallback);
-  return result.ok ? { ok: true } : result;
-}
-
 export type IntakeResult =
   | { kind: "step"; step: RemediationStep }
   | { kind: "pipeline_ready" };

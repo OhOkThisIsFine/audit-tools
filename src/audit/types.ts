@@ -122,12 +122,6 @@ export const LENS_REGISTRY: readonly LensDefinition[] = Object.entries(LENS_META
   .map(([id, metadata]) => ({ id: id as Lens, ...metadata }))
   .sort((left, right) => left.order_weight - right.order_weight);
 
-/** Canonical list of every valid {@link Lens}. Derived from {@link LENS_REGISTRY}
- * — import {@link isLens} / `ALL_LENSES` instead of hand-copying lens lists into
- * local guards, which drift (a copy omitting "observability" caused it to be
- * wrongly rejected in flow requeue). */
-export const ALL_LENSES: readonly Lens[] = LENS_REGISTRY.map((d) => d.id);
-
 /** The registry record for `lens`, or undefined for an operator-added custom lens. */
 export function lensDefinition(lens: string): LensDefinition | undefined {
   return LENS_REGISTRY.find((definition) => definition.id === lens);

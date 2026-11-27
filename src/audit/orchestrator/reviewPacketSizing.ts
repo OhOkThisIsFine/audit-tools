@@ -47,18 +47,6 @@ function pathContentTokens(
   return lineCountForPath(path, { task: owner, lineIndex }) * ESTIMATED_TOKENS_PER_LINE;
 }
 
-/** Estimated content tokens for one task across all of its files. */
-export function taskContentTokens(
-  task: AuditTask,
-  sizeIndex?: Record<string, number>,
-  lineIndex?: Record<string, number>,
-): number {
-  return task.file_paths.reduce(
-    (sum, path) => sum + pathContentTokens(task, path, sizeIndex, lineIndex),
-    0,
-  );
-}
-
 /**
  * Estimated content tokens across file paths using their first owning tasks
  * for the line fallback. Each iterable occurrence contributes; packet callers

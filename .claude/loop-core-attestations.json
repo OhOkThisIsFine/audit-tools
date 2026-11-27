@@ -177,6 +177,26 @@
         "src/remediate/steps/contractPipelinePrompts.ts": "caa7f6c3e69b0c48b3414ee5609e9b969afabd76"
       }
     },
+    "03331f0554645b37": {
+      "reviewed_by": "independent Audit Tools graph reviewer",
+      "attester_class": "agent",
+      "checked": "Compared exact staged deletion-only batch against 7eecfbd and searched current source, wrappers, scripts and tests for nine deleted names. Confirmed live question emission and return tables and actual input parser unchanged. No active spec points at the deleted names.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "57f5295cc53a4ef0cba2e12a04168e8a981590ae",
+        "ran_at": "2026-11-27T20:56:24.263Z"
+      },
+      "attested_at": "2026-11-27T20:57:01.595Z",
+      "vouches": {
+        "src/audit/cli/dispatch/questionReviewAcceptance.ts": "bb02903229698e2af99ecd5796f11aa46e75c381",
+        "src/audit/cli/nextStepCommand.ts": "d8b105301b374bb0ef6b6c4fc3167ea27278ded2",
+        "src/audit/cli/nextStepHelpers.ts": "01b75e031f51ee967df638d1acfd17e475e4d12b",
+        "src/audit/orchestrator/auditTaskUtils.ts": "d1421942efba9379691fa1c443d585eb1efde8b0",
+        "src/audit/orchestrator/reviewPacketSizing.ts": "46c12dea95de0d677d377fa367047e2d977476e5"
+      }
+    },
     "0c6c1b84455cdb39": {
       "reviewed_by": "opus-subagent-p01-submission-review",
       "attester_class": "agent",
@@ -1063,7 +1083,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/dispatch/questionReviewAcceptance.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "03331f0554645b37"
     },
     "src/audit/cli/fanoutLanes.ts": {
       "review": "d9632808536dd1ea"
@@ -1078,10 +1098,10 @@
       "review": "3ac795cb6300b0c0"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "585db4eb811349ff"
+      "review": "03331f0554645b37"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "585db4eb811349ff"
+      "review": "03331f0554645b37"
     },
     "src/audit/cli/prompts.ts": {
       "review": "3ac795cb6300b0c0"
@@ -1126,7 +1146,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/auditTaskUtils.ts": {
-      "review": "f20b857654eebefb"
+      "review": "03331f0554645b37"
     },
     "src/audit/orchestrator/autoFixExecutor.ts": {
       "review": "f20b857654eebefb"
@@ -1306,7 +1326,7 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/reviewPacketSizing.ts": {
-      "review": "f20b857654eebefb"
+      "review": "03331f0554645b37"
     },
     "src/audit/orchestrator/reviewPackets.ts": {
       "review": "74f5fdb4c95e9366"
