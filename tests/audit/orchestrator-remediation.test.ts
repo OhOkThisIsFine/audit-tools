@@ -203,7 +203,11 @@ test("question binding withholds a stamped native receipt once its acquisition i
     const staleBundle: ArtifactBundle = { ...bundle, file_disposition: { files: [
       { path, status: "included" }, { path: "unrelated.txt", status: "excluded" },
     ] } };
+    // A plan refresh does not certify the analyzer marker: the two
+    // artifacts have independent revision stamps.
+    staleBundle.artifact_metadata = computeArtifactMetadata(staleBundle, bundle.artifact_metadata, ["surface_manifest.json", "review_plan.json"]);
     const stale = computeStaleArtifacts(staleBundle, { emit: false });
+    expect(stale.has("review_plan.json")).toBe(false);
     expect(stale.has("external_analyzer_acquisition.json")).toBe(true);
     const verifyAdvisoryOnly = async (target: ArtifactBundle, knownStale?: typeof stale) => {
       const review = await deriveCurrentQuestionBindings(target, root, undefined, [], knownStale);
