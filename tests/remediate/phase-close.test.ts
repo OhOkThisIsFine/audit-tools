@@ -748,7 +748,10 @@ describe("runClosePhase", () => {
     expect(runTrackedAsync).not.toHaveBeenCalled();
   });
 
-  it.each([undefined, []])("refuses a custom close without a command (%s)", async custom_command => {
+  it.each([
+    { label: "absent", custom_command: undefined },
+    { label: "empty", custom_command: [] },
+  ])("refuses a custom close without a command ($label)", async ({ custom_command }) => {
     const state = makeState({ closing_plan: { action: "custom", custom_command } });
     expect(await executeClosingAction(state, BASE_OPTIONS)).toMatchObject({
       status: "failed", commands: [{ exit_code: null, stderr: expect.stringMatching(/no custom_command attached/) }],
