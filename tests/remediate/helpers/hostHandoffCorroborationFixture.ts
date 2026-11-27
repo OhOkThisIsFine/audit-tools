@@ -2,8 +2,8 @@
 // single file dominates the suite's wall): the git-backed remediation work item,
 // its bound state, and the required-test scripts.
 import { canonicalStateFromLegacyFixture, writeApprovedPlanFixture } from "./canonicalPlanFixture.js";
-import { expect } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { afterAll, expect } from "vitest";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -43,6 +43,35 @@ export interface Fixture {
   handoff: PreparedRemediationHostHandoff;
   item: RemediationHostWorkItem;
   workItems: readonly RemediationHostWorkItem[];
+}
+
+// Build the configuration and baseline commit once per isolated test module
+// instead of re-running the same Git subprocesses before every scenario.
+let baselineFixture: Promise<{ root: string; sha: string }> | undefined;
+let baselineFixtureRoot: string | undefined;
+afterAll(async () => {
+  if (baselineFixtureRoot) await rm(baselineFixtureRoot, { recursive: true, force: true });
+});
+function getBaselineFixture() {
+  baselineFixture ??= createBaselineFixture();
+  return baselineFixture;
+}
+
+async function createBaselineFixture() {
+  const root = await mkdtemp(join(tmpdir(), "remediation-host-git-seed-"));
+  baselineFixtureRoot = root;
+  await mkdir(join(root, "src"), { recursive: true });
+  await writeFile(join(root, "src", "a.ts"), "export const value = 1;\n");
+  await writeFile(join(root, "src", "b.ts"), "export const other = 1;\n");
+  // Never `git add`ed, so it stays untracked and out of every landed diff, the
+  // same way `.counter` itself does.
+  await writeFile(join(root, COUNTER_SCRIPT), COUNTER_SCRIPT_SOURCE);
+  git(root, ["init"]);
+  git(root, ["config", "user.email", "test@example.com"]);
+  git(root, ["config", "user.name", "Test"]);
+  git(root, ["add", "src/a.ts", "src/b.ts"]);
+  git(root, ["commit", "-m", "baseline"]);
+  return { root, sha: git(root, ["rev-parse", "HEAD"]) };
 }
 
 export async function fixture(options: {
@@ -88,19 +117,12 @@ export async function fixture(options: {
 } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), "remediation-host-git-"));
   cleanupRoots.push(root);
-  await mkdir(join(root, "src"), { recursive: true });
-  await writeFile(join(root, "src", "a.ts"), "export const value = 1;\n");
-  await writeFile(join(root, "src", "b.ts"), "export const other = 1;\n");
-  // Never `git add`ed, so it stays untracked and out of every landed diff, the
-  // same way `.counter` itself does.
-  await writeFile(join(root, COUNTER_SCRIPT), COUNTER_SCRIPT_SOURCE);
-  git(root, ["init"]);
-  git(root, ["config", "user.email", "test@example.com"]);
-  git(root, ["config", "user.name", "Test"]);
-  git(root, ["add", "src/a.ts", "src/b.ts"]);
-  git(root, ["commit", "-m", "baseline"]);
+  const baselineSource = await getBaselineFixture();
+  // This is a regular copy of the complete fixture, including .git. No
+  // case shares an index, objects, refs, working tree, or counter output.
+  await cp(baselineSource.root, root, { recursive: true });
   await options.beforePrepare?.(root);
-  const baseline = git(root, ["rev-parse", "HEAD"]);
+  const baseline = options.beforePrepare ? git(root, ["rev-parse", "HEAD"]) : baselineSource.sha;
   const allowedFiles = options.allowedFiles ?? ["src/a.ts"];
   const runId = "git-corroboration";
   const artifactsDir = join(root, ".audit-tools", "remediation");
