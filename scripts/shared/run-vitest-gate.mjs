@@ -121,6 +121,7 @@ const vitestExit = result.status;
 const ledgerName = `vitest${shardSuffix(vitestArgs)}`;
 const ledgerPath = resolve(profileDir, `${ledgerName}-latest.json`);
 
+let record;
 if (vitestExit !== 0) {
   // vitest's own nonzero exit is normally authoritative. The ONE case it is not
   // is a recognized reporter-transport fault over a ledger that this run
@@ -158,9 +159,9 @@ if (vitestExit !== 0) {
   // proved this run's own token, zero failed and zero unfinished leaves — so it
   // must mint the same stamp every other PASS does. Exiting 0 here instead left
   // the one run class the gate goes out of its way to call green as the one
-  // class carrying no evidence it was, which is the tolerance's own false
-  // signal relocated to the closeout. The checks below re-confirm the ledger
-  // this path already read; that redundancy is free and keeps ONE success exit.
+  // class carrying no evidence it was. Carry the accepted record into the
+  // common checks and stamp; reading it again could certify different bytes.
+  record = transportRecord;
 }
 
 function failClosed(message, exitCode = 1) {
@@ -176,15 +177,15 @@ function failClosed(message, exitCode = 1) {
   process.exit(exitCode);
 }
 
-if (!existsSync(ledgerPath)) {
-  failClosed(`no ledger found at ${ledgerPath}.`);
-}
-
-let record;
-try {
-  record = JSON.parse(readFileSync(ledgerPath, "utf8"));
-} catch (error) {
-  failClosed(`ledger at ${ledgerPath} is unreadable/invalid JSON: ${/** @type {any} */ (error)?.message ?? error}`);
+if (record === undefined) {
+  if (!existsSync(ledgerPath)) {
+    failClosed(`no ledger found at ${ledgerPath}.`);
+  }
+  try {
+    record = JSON.parse(readFileSync(ledgerPath, "utf8"));
+  } catch (error) {
+    failClosed(`ledger at ${ledgerPath} is unreadable/invalid JSON: ${/** @type {any} */ (error)?.message ?? error}`);
+  }
 }
 
 if (record.runToken !== token) {

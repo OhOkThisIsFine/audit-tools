@@ -140,6 +140,7 @@ interface GateCase {
   sentinel?: boolean;
   mutateTree?: boolean;
   reportFromChild?: boolean;
+  traceLedgerReads?: boolean;
 }
 
 test("the gate consumes the reporter's shard-specific ledger in both CLI spellings", () => {
@@ -187,6 +188,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const original = cp.spawnSync;
 const scenario = JSON.parse(fs.readFileSync(path.join(__dirname, "scenario.json"), "utf8"));
+if (scenario.traceLedgerReads) {
+  const read = fs.readFileSync;
+  const profile = path.join(__dirname, ".audit-tools-profile");
+  fs.readFileSync = (file, ...options) => {
+    if (file === path.join(profile, "vitest-latest.json")) {
+      fs.appendFileSync(path.join(profile, "ledger-reads.txt"), ".");
+    }
+    return read(file, ...options);
+  };
+}
 cp.spawnSync = (command, args, options) => {
   if (command === process.execPath) {
     fs.appendFileSync(path.join(__dirname, "child-calls.jsonl"), JSON.stringify(args) + "\\n");
@@ -233,7 +244,9 @@ require("node:module").syncBuiltinESMExports();
     assert.equal(result.signal, null);
     assert(existsSync(resolve(root, "child-calls.jsonl")), `fixture did not observe gate child launch (exit=${result.status}):\nstderr: ${result.stderr}\nstdout: ${result.stdout}`);
     const calls = readFileSync(resolve(root, "child-calls.jsonl"), "utf8").trim().split("\n");
+    const readTrace = resolve(root, ".audit-tools-profile/ledger-reads.txt");
     return { status: result.status, stderr: result.stderr, calls,
+      ledgerReads: existsSync(readTrace) ? readFileSync(readTrace, "utf8").length : 0,
       stamp: existsSync(stamp) ? readFileSync(stamp, "utf8") : null,
       loadRecord: existsSync(resolve(root, ".audit-tools-profile/load-flake-record.json")),
       investigation: existsSync(resolve(root, ".audit-tools-profile/load-flake-investigations")) };
@@ -274,7 +287,7 @@ for (const [name, scenario, diagnostic] of abnormalCases) {
 
 const numericCases: [string, GateCase, number, boolean][] = [
   ["ordinary numeric failure", { status: 7 }, 7, false],
-  ["supported reporter forgiveness", { status: 1, stderr: RPC_TIMEOUT_STDERR }, 0, true],
+  ["supported reporter forgiveness without rereading the ledger", { status: 1, stderr: RPC_TIMEOUT_STDERR, traceLedgerReads: true }, 0, true],
   ["ordinary success", { status: 0 }, 0, true],
   ["during-run edit does not mint a stamp", { status: 0, mutateTree: true }, 0, false],
   ["zero-exit unfinished run does not mint a stamp", { status: 0, unfinished: 1 }, 0, false],
@@ -298,6 +311,12 @@ for (const [name, scenario, status, stamped] of numericCases) {
       assert.equal(stamp.run_evidence.tree_after, stamp.tree);
       assert.equal(stamp.run_evidence.reporter.runToken, stamp.run_evidence.run_token);
       assert.deepEqual(stamp.run_evidence.vitest_args, []);
+      if (scenario.traceLedgerReads) {
+        assert.equal(result.ledgerReads, 1);
+        assert.deepEqual(stamp.run_evidence.reporter.outcome, {
+          passed: 2, failed: 0, skipped: 0, unfinished: 0, total: 2, failedFiles: [],
+        });
+      }
     }
     assert.equal(result.calls.length, 1);
   });
