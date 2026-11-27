@@ -1,9 +1,11 @@
 // sites-pinned: tests/shared/analyzer-candidates.test.ts, tests/shared/analyzer-pipx-contract.test.ts
 import { parseGitleaksVersion, parseOsvScannerVersion, parseHadolintVersion, parseActionlintVersion } from "./binaryVersions.js";
-import { join } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { normalizeRepoRelPath } from "../paths.js";
 import { tmpdir } from "node:os";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
+import { hashContent } from "../hash.js";
+import { isFileMissingError } from "../io/json.js";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
 import { readGitPathList } from "../git.js";
@@ -1040,37 +1042,89 @@ const ACTIONLINT_BINARY: BinarySpec = {
 /**
  * Parse actionlint's `-format '{{json .}}'` stdout — a JSON array grounded
  * against actionlint's template output: `[{ message, filepath, line, column,
- * kind }]`. Degrades to `[]` on empty/malformed/non-array input.
+ * kind }]`. Rejects missing/malformed output and counts unusable rows.
  */
 function parseActionlint(stdout: string): ExternalAnalyzerParseReport {
   let findings: unknown;
   try {
-    findings = JSON.parse(stdout || "[]");
+    findings = JSON.parse(stdout);
   } catch {
     return parseFailure("actionlint", "output is not valid JSON");
   }
   if (!Array.isArray(findings)) {
     return parseFailure("actionlint", "output is not a JSON array of diagnostics");
   }
-  return items(findings
-    .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === "object")
-    .map((f) => {
-      const path = typeof f.filepath === "string" ? f.filepath : "";
-      const line = typeof f.line === "number" ? f.line : undefined;
-      const kind = typeof f.kind === "string" && f.kind.length > 0 ? f.kind : "actionlint";
-      const message =
-        typeof f.message === "string" && f.message.trim().length > 0 ? f.message : kind;
-      return {
-        id: `actionlint:${kind}:${path}:${line ?? 0}`,
-        category: "config_deployment",
-        severity: "medium",
-        path,
-        line_start: line,
-        summary: message,
-        rule: kind,
-      };
-    })
-    .filter((item) => item.path.length > 0));
+  const parsed: ExternalAnalyzerParsedItem[] = [];
+  for (const f of findings) {
+    if (!isRecord(f) || typeof f.filepath !== "string" || !f.filepath.trim() ||
+        typeof f.message !== "string" || !f.message.trim() ||
+        typeof f.kind !== "string" || !f.kind || typeof f.line !== "number" ||
+        !Number.isInteger(f.line) || f.line < 1) continue;
+    parsed.push({
+      id: `actionlint:${f.kind}:${f.filepath}:${f.line}`,
+      category: "config_deployment", severity: "medium", path: f.filepath, line_start: f.line,
+      summary: f.message, rule: f.kind,
+    });
+  }
+  const dropped = findings.length - parsed.length;
+  return { items: parsed, ...(dropped ? { dropped_rows: dropped } : {}) };
+}
+
+const ACTIONLINT_WORKFLOW = /^\.github\/workflows\/.+\.ya?ml$/;
+
+async function discoverActionlintWorkflows(root: string): Promise<AnalyzerInputDiscovery> {
+  const listed = await readGitPathList(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ".github/workflows"]);
+  if (!listed.ok) return listed;
+  const paths = [...new Set(listed.paths)]
+    .filter(path => ACTIONLINT_WORKFLOW.test(path) && existsSync(join(root, path)))
+    .sort(compareCodeUnits);
+  return paths.length ? { ok: true, paths } : { ok: false, reason: "no repository workflow files to lint" };
+}
+
+/** Certify only when the default Go PATH lookup cannot run either optional helper.
+ * Presence, ambiguous lookup, or unreadability withholds proof but preserves the
+ * ordinary invocation and all of its positive diagnostics. On Windows include
+ * cwd and every extension conservatively, rather than guessing PATHEXT behavior. */
+function actionlintHasNoHelpers(root: string): boolean {
+  if (process.env.PATH === undefined) return false;
+  const win = process.platform === "win32";
+  if (win && /[\\/:]/.test(process.env.PATHEXT ?? "")) return false;
+  const parts = process.env.PATH.split(delimiter).map(dir => win ? dir.replace(/^"(.*)"$/, "$1") : dir);
+  // Drive-relative and root-relative entries have process-specific Windows
+  // semantics. They are not reliably resolved against the scan cwd by Node.
+  if (win && parts.some(dir => /^(?:[A-Z]:(?![/\\])|[/\\](?![/\\]))/i.test(dir))) return false;
+  const directories = new Set([root, ...parts.map(dir => resolve(root, dir))]);
+  for (const directory of directories) {
+    if (win) {
+      if (directory.startsWith("\\")) return false; // don't inspect a network search path
+      try {
+        if (readdirSync(directory).some(name => /^(shellcheck|pyflakes)(\.|$)/i.test(name))) return false;
+      } catch (error) {
+        if (!isFileMissingError(error)) return false;
+      }
+    } else {
+      for (const helper of ["shellcheck", "pyflakes"]) {
+        try { lstatSync(join(directory, helper)); return false; }
+        catch (error) { if (!isFileMissingError(error)) return false; }
+      }
+    }
+  }
+  return true;
+}
+
+function actionlintConfigFingerprint(root: string): string {
+  // actionlint project.go/config.go: root requires .git and .github/workflows;
+  // auto config chooses .yaml first, then .yml. Absence uses built-in defaults.
+  for (const path of [".github/actionlint.yaml", ".github/actionlint.yml"]) {
+    const full = join(root, path);
+    try {
+      if (!lstatSync(full).isFile()) throw new Error("Actionlint config is not a regular file");
+      return hashContent(JSON.stringify([path, hashContent(readFileSync(full))]));
+    } catch (error) {
+      if (!isFileMissingError(error)) throw error;
+    }
+  }
+  return "built-in";
 }
 
 const actionlintCandidate: ExternalAnalyzerCandidate = {
@@ -1087,9 +1141,23 @@ const actionlintCandidate: ExternalAnalyzerCandidate = {
   // Fast, safe, pinned GitHub Actions workflow linter — member of the default set.
   defaultRun: true,
   detect: (root) => detectGithubActionsEcosystem(root),
-  // Read-only by nature. `-format '{{json .}}'` → JSON array on stdout; run with
-  // cwd=root so actionlint discovers `.github/workflows/` itself.
-  buildArgv: (prefix) => [...prefix, "-format", "{{json .}}"],
+  discoverInputs: discoverActionlintWorkflows,
+  buildArgv: (prefix, _root, context) => [...prefix, "-format", "{{json .}}", ...(context?.inputs ?? [])],
+  comparisonScope: (root, context, [binary, ...args] = []) => {
+    const paths = context.inputs;
+    if (!binary || !isAbsolute(binary) || !paths?.length || !actionlintHasNoHelpers(root) ||
+        !paths.every(path => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(path) && lstatSync(join(root, path)).isFile()) ||
+        ![".github", ".github/workflows"].every(path => lstatSync(join(root, path)).isDirectory()) ||
+        !existsSync(join(root, ".git"))) return undefined;
+    return {
+      paths,
+      completedFindingsExit: 1,
+      configurationFingerprint: hashContent(JSON.stringify([
+        "actionlint-explicit-workflows-v1", hashContent(readFileSync(binary)), actionlintConfigFingerprint(root),
+        "shellcheck-and-pyflakes-absent", args, process.platform,
+      ])),
+    };
+  },
   parse: parseActionlint,
 };
 

@@ -187,9 +187,11 @@ export interface ExternalAnalyzerCandidate {
    * Omit when any of those inputs cannot be established; a command or version
    * match alone is not authority to say a lead is gone.
    */
-  comparisonScope?(root: string, context: AnalyzerInvocationContext): {
+  comparisonScope?(root: string, context: AnalyzerInvocationContext, argv?: readonly string[]): {
     paths: readonly string[];
     configurationFingerprint: string;
+    /** Nonzero code documented to mean a completed scan with findings. */
+    completedFindingsExit?: number;
   } | undefined;
   /** Private, engine-owned file report. Raw output/error snippets are withheld. */
   managedReport?: boolean;
@@ -775,11 +777,12 @@ export async function runExternalAnalyzer(
       const command = argv.join(" ");
       const captureComparison = () => {
         try {
-          const observed = candidate.comparisonScope?.(root, context);
+          const observed = candidate.comparisonScope?.(root, context, argv);
           if (!observed?.configurationFingerprint || !observed.paths.length) return undefined;
           const paths = [...new Set(observed.paths)].sort();
           return {
             paths: new Set(paths),
+            completedFindingsExit: observed.completedFindingsExit,
             fingerprint: hashContent(JSON.stringify([
               candidate.id, candidate.runner, candidate.spec, observed.configurationFingerprint, paths,
             ])),
@@ -893,7 +896,13 @@ export async function runExternalAnalyzer(
           normalizerDroppedItems = diagnostics.dropped_items;
         },
       });
-      const comparison = observedComparison && observedComparison.fingerprint === captureComparison()?.fingerprint
+      const droppedRows = (parsed.dropped_rows ?? 0) + normalizerDroppedItems;
+      const consistentExit = result.status === 0 || (typeof result.status === "number" && normalized.results.length > 0 &&
+        result.status === observedComparison?.completedFindingsExit);
+      const comparison = observedComparison && consistentExit && !parsed.parse_failed && !parsed.measurement_failed &&
+        droppedRows === 0 && !stderrText.trim() &&
+        normalized.results.every(item => observedComparison.paths.has(item.path)) &&
+        observedComparison.fingerprint === captureComparison()?.fingerprint
         ? observedComparison
         : undefined;
       if (comparison) {
@@ -913,12 +922,12 @@ export async function runExternalAnalyzer(
       // or summary) are the same question to a consumer — "how much did this run fail to
       // report?" — so they land on one field. Counting only the parser's half left a run
       // whose every item was dropped at normalization reading as a clean scan.
-      const droppedRows = (parsed.dropped_rows ?? 0) + normalizerDroppedItems;
       const degradationFields = {
         exit_code: result.status,
         ...(droppedRows > 0 ? { dropped_rows: droppedRows } : {}),
         ...(parsed.reported_coverage ? { reported_coverage: parsed.reported_coverage } : {}),
         ...(comparison ? { comparison_fingerprint: comparison.fingerprint } : {}),
+        ...(comparison && result.status !== 0 ? { findings_exit_is_complete: true as const } : {}),
         ...(sourceReadFailures > 0 ? { source_read_failures: sourceReadFailures } : {}),
         ...stderrSnippet,
         duration_ms: result.duration_ms,

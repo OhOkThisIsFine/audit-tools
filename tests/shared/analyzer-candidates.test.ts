@@ -1,5 +1,5 @@
 import { readRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js";
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -633,8 +633,9 @@ test("actionlint: binary runner, archived asset, detects .github/workflows, JSON
   expect(actionlintCandidate.runner).toBe("binary");
   expect(actionlintCandidate.binary!.archived).toBe(true);
   expect(actionlintCandidate.detect("/repo")).toBe(false);
-  const argv = actionlintCandidate.buildArgv(["/cache/actionlint"], "/repo");
-  expect(argv).toEqual(["/cache/actionlint", "-format", "{{json .}}"]);
+  const inputs = [".github/workflows/ci.yml", ".github/workflows/release.yaml"];
+  const argv = actionlintCandidate.buildArgv(["/cache/actionlint"], "/repo", { inputs });
+  expect(argv).toEqual(["/cache/actionlint", "-format", "{{json .}}", ...inputs]);
 });
 
 test("actionlint binary spec maps platform/arch to real release assets (archive ext)", () => {
@@ -659,12 +660,75 @@ test("parseActionlint maps the array shape; degrades to empty", () => {
   expect(items[0].line_start).toBe(21);
   expect(items[0].rule).toBe("shellcheck");
   expect(items[0].category).toBe("config_deployment");
-  for (const bad of ["not json", "{}"]) {
+  for (const bad of ["", "not json", "{}"]) {
     const report = reportOf(parseActionlint(bad));
     expect(report.items).toEqual([]);
     expect(report.parse_failed, `parseActionlint(${JSON.stringify(bad)}) must report the failure`).toBe(true);
   }
-  expect(reportOf(parseActionlint("")), "no workflow findings is a clean run, not a failure").toEqual({ items: [] });
+  expect(reportOf(parseActionlint("[]")), "explicit empty JSON is a clean parse, not coverage").toEqual({ items: [] });
+});
+
+test("actionlint proves only complete explicit scans, while preserving positive diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "actionlint-receipt-"));
+  const workflows = [".github/workflows/a.yml", ".github/workflows/b.yml"];
+  const runner = join(root, "qualified-binary");
+  const reply = (paths: string[]) => JSON.stringify(paths.map(filepath => ({
+    message: "unknown runner label", filepath, line: 1, kind: "runner-label",
+  })));
+  try {
+    await mkdir(join(root, ".github", "workflows"), { recursive: true });
+    await mkdir(join(root, ".git"));
+    await mkdir(join(root, "test-bin"));
+    await writeFile(runner, "initial tool bytes");
+    for (const file of workflows) await writeFile(join(root, file), "name: synthetic workflow\n");
+    vi.stubEnv("PATH", "test-bin");
+    let paths = workflows;
+    const candidate = { ...actionlintCandidate, discoverInputs: async () => ({ ok: true as const, paths }) };
+    const run = async (status: number, stdout: string, stderr = "") => runExternalAnalyzer(candidate, root, {
+      resolvedBinaries: { actionlint: runner },
+      run: async argv => {
+        expect(argv).toEqual([runner, "-format", "{{json .}}", ...paths]);
+        return { argv, status, stdout, stderr, duration_ms: 0 };
+      },
+    });
+    const original = await run(1, reply(workflows));
+    const fingerprint = original.status.comparison_fingerprint;
+    expect(fingerprint).toBeTruthy();
+    expect(original.results.results[0]?.provenance?.comparison_fingerprint).toBe(fingerprint);
+    const repaired = await run(1, reply(workflows.slice(1)));
+    expect(repaired.results.results.map(r => r.path)).toEqual(workflows.slice(1));
+    expect(repaired.status).toMatchObject({ exit_code: 1, comparison_fingerprint: fingerprint, findings_exit_is_complete: true });
+    expect(isDegradedExternalAnalyzerStatus(repaired.status)).toBe(false);
+    expect((await run(0, "[]")).status.comparison_fingerprint).toBe(fingerprint);
+
+    for (const incomplete of [
+      await run(0, ""), await run(1, "[]"), await run(3, reply(workflows)), await run(1, reply(workflows), "partial read"),
+      await run(1, reply([".github/workflows/unlisted.yml"])), await run(1, '[null, {"kind":"runner-label"}]'),
+    ]) {
+      expect(incomplete.status.comparison_fingerprint).toBeUndefined();
+      expect(isDegradedExternalAnalyzerStatus(incomplete.status)).toBe(true);
+    }
+    paths = workflows.slice(1);
+    const omitted = await run(1, reply(paths));
+    expect(omitted.status.comparison_fingerprint).toBeTruthy();
+    expect(omitted.status.comparison_fingerprint).not.toBe(fingerprint);
+    paths = workflows;
+    await writeFile(join(root, ".github", "actionlint.yml"), "{}");
+    const changedConfig = await run(1, reply(paths));
+    expect(changedConfig.status.comparison_fingerprint).toBeTruthy();
+    expect(changedConfig.status.comparison_fingerprint).not.toBe(fingerprint);
+    await writeFile(join(root, ".github", "actionlint.yaml"), "{}");
+    const precedence = (await run(1, reply(paths))).status.comparison_fingerprint;
+    await writeFile(join(root, ".github", "actionlint.yml"), "# not selected");
+    expect((await run(1, reply(paths))).status.comparison_fingerprint).toBe(precedence);
+    await writeFile(join(root, "test-bin", process.platform === "win32" ? "SHELLCHECK.EXE" : "shellcheck"), "not executed");
+    const helper = await run(1, reply(paths));
+    expect(helper.results.results).toHaveLength(2);
+    expect(helper.status.comparison_fingerprint).toBeUndefined();
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 function parseActionlintSample() {

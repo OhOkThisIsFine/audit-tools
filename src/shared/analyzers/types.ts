@@ -173,12 +173,13 @@ export const EXTERNAL_ANALYZER_STATUS_CLASSIFICATION: Record<
  * the compile gate; this is the consumer-facing answer.
  */
 export function isDegradedExternalAnalyzerStatus(
-  record: Pick<ExternalAnalyzerToolStatus, "status" | "exit_code" | "dropped_rows">,
+  record: Pick<ExternalAnalyzerToolStatus, "status" | "exit_code" | "dropped_rows" | "findings_exit_is_complete">,
 ): boolean {
   const classification = EXTERNAL_ANALYZER_STATUS_CLASSIFICATION[record.status];
   if (isNonCleanAnalyzerCoverage(classification)) return true;
   if (record.exit_code === null) return true;
-  if (typeof record.exit_code === "number" && record.exit_code !== 0) return true;
+  if (typeof record.exit_code === "number" && record.exit_code !== 0 &&
+      !(record.status === "findings" && record.findings_exit_is_complete === true)) return true;
   if ((record.dropped_rows ?? 0) > 0) return true;
   return false;
 }
@@ -195,6 +196,8 @@ export const ExternalAnalyzerToolStatusSchema = z
     resolved: z.boolean(),
     status: z.enum(EXTERNAL_ANALYZER_TOOL_STATUSES),
     exit_code: z.number().nullable().optional(),
+    /** Candidate attests that this nonzero exit represents complete, validated findings. */
+    findings_exit_is_complete: z.literal(true).optional(),
     error: z.string().optional(),
     output_snippet: z.string().optional(),
     /**
