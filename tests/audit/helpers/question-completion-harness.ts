@@ -51,11 +51,15 @@ export async function readQuestionFindings(path: string) {
   return QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(path, "utf8")));
 }
 
-export async function presentQuestionReport(root: string, onStep?: (step: Step) => Promise<void>) {
+export async function presentQuestionReport(
+  root: string,
+  onStep?: (step: Step) => Promise<void>,
+  nextStep?: () => Promise<Step>,
+) {
   const dir = join(root, ".audit-tools/audit");
   const trail: string[] = [];
   for (let i = 0; i < 10; i += 1) {
-    const step = await callNextStep(root, dir);
+    const step = await (nextStep ? nextStep() : callNextStep(root, dir));
     trail.push(`${step.step_kind}:${step.status}`);
     await onStep?.(step);
     if (step.step_kind === "synthesis_narrative") {
