@@ -26,7 +26,7 @@ import {
 } from "../../src/remediate/steps/finalGate.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
-import { worktreeContentId } from "../../src/remediate/steps/gateCommands.js";
+import { attributeGateRed, worktreeContentId } from "../../src/remediate/steps/gateCommands.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { execSyncHidden } from "../helpers/spawn.mjs";
@@ -179,100 +179,6 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   await harness.cleanupTestRepo();
-});
-
-describe("a red tool-owned gate pauses the run without mutating it", () => {
-  it("emits final_gate_red and leaves every item status and the phase untouched", async () => {
-    await establishBoundaryRun();
-
-    const step = await decideNextStep({
-      root: REPO_DIR,
-      finalGateRunner: failingRunner,
-    });
-
-    expect(step.step_kind).toBe("final_gate_red");
-    expect(step.status).toBe("blocked");
-    expect(step.run_id).toBe("PLAN-GATE");
-
-    // THE property: the 21-resolution wipe was item mutation on an
-    // unattributable red. Nothing moved.
-    const persisted = await new StateStore(ARTIFACTS_DIR).loadState();
-    expect(persisted?.status).toBe("implementing");
-    expect(persisted?.items?.["F-000"]?.status).toBe("resolved");
-    expect(persisted?.items?.["F-001"]?.status).toBe("pending");
-    // The re-attempt path also stamped this; its absence is a second witness
-    // that no coarse backstop ran.
-    expect(persisted?.items?.["F-000"]?.failure_context).toBeUndefined();
-  });
-
-  it("names the failing command in the prompt and points at the record, not the log", async () => {
-    await establishBoundaryRun();
-
-    const step = await decideNextStep({
-      root: REPO_DIR,
-      finalGateRunner: failingRunner,
-    });
-    const prompt = await readFile(step.prompt_path, "utf8");
-
-    // The FIRST gate command is the one that fails (the gate short-circuits).
-    const firstCommand = toolOwnedFinalGateCommands(REPO_DIR)[0]!.argv.join(" ");
-    expect(prompt).toContain(firstCommand);
-    expect(prompt).toContain("final-gate.json");
-    // The tail lives in the artifact, NOT inline: a whole suite log must never
-    // ride into a prompt.
-    expect(prompt).not.toContain(FAILING_STDOUT);
-    expect(step.artifact_paths.final_gate_record).toBeTruthy();
-  });
-
-  it("persists the failing command, its exit code and a bounded output tail", async () => {
-    await establishBoundaryRun();
-
-    await decideNextStep({ root: REPO_DIR, finalGateRunner: failingRunner });
-
-    const recordPath = join(ARTIFACTS_DIR, "final-gate.json");
-    expect(existsSync(recordPath)).toBe(true);
-    const record = JSON.parse(await readFile(recordPath, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    expect(record.failing_command).toBe(
-      toolOwnedFinalGateCommands(REPO_DIR)[0]!.argv.join(" "),
-    );
-    expect(record.exit_code).toBe(1);
-    expect(record.stdout_tail).toBe(FAILING_STDOUT);
-    expect(record.stderr_tail).toBe(FAILING_STDERR);
-    expect(record.scope).toContain("phase 1");
-    // The retired counter/termination fields must not come back: `terminated`
-    // short-circuited the gate, so a run that once hit the old bound skipped the
-    // suite check forever after.
-    expect(record.coarse_reblock_count).toBeUndefined();
-    expect(record.terminated).toBeUndefined();
-  });
-
-  it("re-runs the gate on the next call and proceeds once it is green", async () => {
-    await establishBoundaryRun();
-
-    const red = await decideNextStep({
-      root: REPO_DIR,
-      finalGateRunner: failingRunner,
-    });
-    expect(red.step_kind).toBe("final_gate_red");
-
-    // The host fixes the red — which is what re-running AFTER a fix means, and
-    // what moves the TREE the gate's verdict is cached against. Without this
-    // the next call would (correctly) serve the red it just recorded; see the
-    // cache describe below, where that behaviour is pinned in its own right.
-    await writeFile(join(REPO_DIR, "src", "b.ts"), "export const b = 1;\n", "utf8");
-
-    // Resumable BY CONSTRUCTION: nothing was consumed by the pause, so a green
-    // gate on the very next call opens the phase. A stored "already gave up"
-    // flag is exactly what would have made this unreachable.
-    const green = await decideNextStep({
-      root: REPO_DIR,
-      finalGateRunner: () => ({ status: 0 }),
-    });
-    expect(green.step_kind).not.toBe("final_gate_red");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -486,97 +392,28 @@ describe("a red is attributed to the run or to the environment", () => {
     ).not.toContain("do NOT rework remediation items");
   });
 
-  /** The attribution verdict a red with `stdout` reached. */
-  async function verdictFor(stdout: string): Promise<Record<string, any>> {
-    await establishBoundaryRun();
-    await mkdir(join(REPO_DIR, "docs"), { recursive: true });
-    await writeFile(join(REPO_DIR, "docs", "readme.md"), "# docs\n", "utf8");
+  it("attributes only real file paths in failure output", async () => {
     await mkdir(join(REPO_DIR, "src", "nested"), { recursive: true });
-    await writeFile(join(REPO_DIR, "src", "nested", "deep.ts"), "export {};\n", "utf8");
-    // A committed, CLEAN file the run never declared — the real-file control the
-    // anti-vacuity case names, and the shape a genuine foreign red has.
-    await writeFile(join(REPO_DIR, "src", "other.ts"), "export const x = 1;\n", "utf8");
+    await mkdir(join(REPO_DIR, "docs"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "other.ts"), "export {};");
     commitFixture();
-    await writeFile(join(REPO_DIR, "src", "b.ts"), "export const b = 2;\n", "utf8");
+    await writeFile(join(REPO_DIR, "src", "b.ts"), "export const b = 2;");
+    const attribute = (output: string) =>
+      attributeGateRed({ root: REPO_DIR, state: makeBoundaryState(), output });
 
-    await decideNextStep({
-      root: REPO_DIR,
-      finalGateRunner: () => ({ status: 1, stdout, stderr: "" }),
+    for (const output of [
+      "error in docs/",
+      "error in src/nested",
+      "error in src/other.ts/",
+      "Tests 2 failed (2)\nDuration 12.34s\nC:/nonexistent/ghost.ts:12:3\ndocs/missing.md\n1.5/2.0 ratio",
+    ]) {
+      expect(await attribute(output), output).toMatchObject({
+        verdict: "unattributable", failing_paths_count: 0, foreign_paths: [],
+      });
+    }
+    expect(await attribute("error in src/nested and src/other.ts")).toMatchObject({
+      verdict: "environment", failing_paths_count: 1, foreign_paths: ["src/other.ts"],
     });
-    return JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "final-gate.json"), "utf8"),
-    ) as Record<string, any>;
-  }
-
-  it("a directory, and a file printed with a stray trailing slash, are both rejected", async () => {
-    // `npm test` and `tsc` print DIRECTORY names in ordinary output (`docs/`,
-    // `src/nested`). A directory is not a failing path, and admitting one
-    // manufactures a foreign entry no run-touched set can match — the
-    // phantom-foreign route to the same false-environment answer.
-    //
-    // What this pins is the OBSERVABLE property, not which guard realizes it.
-    // Two guards realize it — the trailing-separator rejection and the
-    // `statSync(...).isFile()` admission — and on both platforms `isFile()`
-    // already rejects every shape below (a slash-suffixed path resolves to a
-    // directory entry, so it is never a regular file). Verified by inversion:
-    // disabling `isFile()` reds the no-separator case below; disabling the
-    // separator check alone reds nothing, which is why no assertion here claims
-    // that guard individually.
-    const directory = (await verdictFor("error in docs/")).attribution;
-    expect(directory.failing_paths_count).toBe(0);
-    expect(directory.verdict).toBe("unattributable");
-
-    const bareDirectory = (await verdictFor("error in src/nested")).attribution;
-    expect(bareDirectory.failing_paths_count).toBe(0);
-    expect(bareDirectory.verdict).toBe("unattributable");
-
-    const straySlash = (await verdictFor("error in src/other.ts/")).attribution;
-    expect(
-      straySlash.failing_paths_count,
-      "`src/other.ts/` must be rejected, not admitted as a path that matches nothing",
-    ).toBe(0);
-    expect(straySlash.foreign_paths).toEqual([]);
-  });
-
-  it("POSITIVE: a real file beside those directories is still harvested", async () => {
-    // Anti-vacuity for the two above: a harvest that rejected EVERYTHING would
-    // satisfy both and prove nothing. The same output shape, naming a real file,
-    // still produces a failing path.
-    const attribution = (
-      await verdictFor("error in src/nested and src/other.ts")
-    ).attribution;
-    expect(attribution.failing_paths_count).toBe(1);
-    expect(attribution.foreign_paths).toContain("src/other.ts");
-  });
-
-  it("does not mistake prose, numbers or phantom paths for failing files", async () => {
-    // The harvest is textual and the output is untrusted. A token that is not a
-    // real repo file must never enter the comparison: admitted, it would be
-    // found NOT in the run's set and reported as foreign — manufacturing the
-    // false-environment answer the whole feature exists to avoid.
-    await establishBoundaryRun();
-
-    await decideNextStep({
-      root: REPO_DIR,
-      finalGateRunner: () => ({
-        status: 1,
-        stdout: [
-          "Tests  2 failed (2)",
-          "Duration  12.34s",
-          "at Object.<anonymous> (C:/nonexistent/ghost.ts:12:3)",
-          "see docs/missing.md for details",
-          "1.5/2.0 ratio",
-        ].join("\n"),
-        stderr: "",
-      }),
-    });
-
-    const record = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "final-gate.json"), "utf8"),
-    ) as Record<string, any>;
-    expect(record.attribution.failing_paths_count).toBe(0);
-    expect(record.attribution.verdict).toBe("unattributable");
-    expect(record.attribution.foreign_paths).toEqual([]);
   });
 });
 
@@ -650,67 +487,59 @@ describe("the boundary gate's verdict is cached against the tree it judged", () 
     expect(String(outcome.reason)).toContain("has not changed");
   });
 
-  it("RED: a cached red re-emits the pause with its failing command intact, without re-spawning", async () => {
-    // The red half is cached for the same reason the green half is, and the
-    // pause is rebuilt from the cached results rather than re-derived — so a
-    // host that re-runs without fixing anything gets the same pause, free.
+  it("records a red without changing state, reuses it on the same tree, and resumes after a fix", async () => {
     await establishBoundaryRun();
+    const readProgress = async () => {
+      const state = await new StateStore(ARTIFACTS_DIR).loadState();
+      return { status: state?.status, items: state?.items };
+    };
+    const stateBefore = await readProgress();
+    expect(stateBefore).toMatchObject({
+      status: "implementing",
+      items: { "F-000": { status: "resolved" }, "F-001": { status: "pending" } },
+    });
+    const command = toolOwnedFinalGateCommands(REPO_DIR)[0]!.argv.join(" ");
+
     const first = await stepWithCount(failingRunner);
-    expect(first.step.step_kind).toBe("final_gate_red");
+    expect(first.calls).toBe(1);
+    expect(first.step).toMatchObject({
+      step_kind: "final_gate_red", status: "blocked", run_id: "PLAN-GATE",
+    });
+    expect(first.step.artifact_paths.final_gate_record).toBeTruthy();
+    expect(await readProgress()).toEqual(stateBefore);
+    const prompt = await readFile(first.step.prompt_path, "utf8");
+    expect(prompt).toContain(command);
+    expect(prompt).toContain("final-gate.json");
+    expect(prompt).not.toContain(FAILING_STDOUT);
 
-    const second = await stepWithCount(() => ({
-      status: 0,
-      // A runner that WOULD answer green is the sharpest form of the
-      // assertion: the cached red must win, because the tree it describes has
-      // not moved. A served-from-scratch gate would open the phase here.
-      stdout: "",
-      stderr: "",
-    }));
-    expect(second.calls, "a cached red is a read, not a re-run").toBe(0);
-    expect(second.step.step_kind).toBe("final_gate_red");
+    const recordPath = join(ARTIFACTS_DIR, "final-gate.json");
+    const record = JSON.parse(await readFile(recordPath, "utf8"));
+    expect(record).toMatchObject({
+      failing_command: command, exit_code: 1, stdout_tail: FAILING_STDOUT,
+      stderr_tail: FAILING_STDERR, scope: expect.stringContaining("phase 1"),
+    });
+    expect(record).not.toHaveProperty("coarse_reblock_count");
+    expect(record).not.toHaveProperty("terminated");
 
-    const record = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "final-gate.json"), "utf8"),
-    ) as Record<string, unknown>;
-    expect(record.failing_command).toBe(
-      toolOwnedFinalGateCommands(REPO_DIR)[0]!.argv.join(" "),
-    );
-    expect(record.exit_code).toBe(1);
-    // The tail too: the cached results carry it, so the record a host opens is
-    // the record the real run wrote, not a hollow restatement of the verdict.
-    expect(record.stdout_tail).toBe(FAILING_STDOUT);
-    expect(record.stderr_tail).toBe(FAILING_STDERR);
+    const cached = await stepWithCount(() => ({ status: 0 }));
+    expect(cached.calls).toBe(0);
+    expect(cached.step.step_kind).toBe("final_gate_red");
+    expect(JSON.parse(await readFile(recordPath, "utf8"))).toMatchObject({
+      failing_command: command, stdout_tail: FAILING_STDOUT, stderr_tail: FAILING_STDERR,
+    });
+    expect(await readProgress()).toEqual(stateBefore);
+    const outcomePath = join(ARTIFACTS_DIR, "final-gate-outcome.json");
+    expect(JSON.parse(await readFile(outcomePath, "utf8"))).toMatchObject({
+      outcome: "history", passed: false,
+    });
 
-    // And the outcome record states it was a cached verdict, not a fresh floor.
-    const outcome = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "final-gate-outcome.json"), "utf8"),
-    ) as Record<string, unknown>;
-    expect(outcome.outcome).toBe("history");
-    expect(outcome.passed).toBe(false);
-  });
-
-  it("a verdict is NEVER served for a tree that MOVED — the fix re-runs the floor", async () => {
-    // THE counterweight. Without it the cache is a mechanism that certifies
-    // trees nobody checked, which is strictly worse than the waste it removes.
-    await establishBoundaryRun();
-    const commands = gateCommandCount();
-    const first = await stepWithCount(failingRunner);
-    expect(first.step.step_kind).toBe("final_gate_red");
-
-    // The host fixes something — the exact tree the verdict was about is gone.
     await writeFile(join(REPO_DIR, "src", "b.ts"), "export const b = 3;\n", "utf8");
-
-    const after = await stepWithCount(() => ({ status: 0 }));
-    expect(
-      after.calls,
-      "a changed tree must be judged, not remembered",
-    ).toBe(commands);
-    const outcome = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "final-gate-outcome.json"), "utf8"),
-    ) as Record<string, unknown>;
-    expect(outcome.outcome).toBe("executed");
-    expect(outcome.passed).toBe(true);
-    expect(after.step.step_kind).not.toBe("final_gate_red");
+    const green = await stepWithCount(() => ({ status: 0 }));
+    expect(green.calls).toBe(gateCommandCount());
+    expect(green.step.step_kind).not.toBe("final_gate_red");
+    expect(JSON.parse(await readFile(outcomePath, "utf8"))).toMatchObject({
+      outcome: "executed", passed: true,
+    });
   });
 
   it("an UNCOMMITTED edit is part of the tree — the cache keys on content, not on HEAD", async () => {
@@ -777,20 +606,7 @@ describe("the boundary gate's verdict is cached against the tree it judged", () 
     );
   });
 
-  it("NEGATIVE: with no cache record at all the floor always runs", async () => {
-    // Anti-vacuity for the whole describe: if `readFinalGateVerdict` were
-    // hard-wired to return a record, every test above would pass while the gate
-    // never ran. The first call of every test here proves that half — no record
-    // exists, so the floor cannot be skipped.
-    await establishBoundaryRun();
-    expect(existsSync(join(ARTIFACTS_DIR, "final-gate-verdict.json"))).toBe(false);
 
-    const first = await stepWithCount(() => ({ status: 0 }));
-    expect(first.calls, "an uncached boundary runs the whole floor").toBe(
-      gateCommandCount(),
-    );
-    expect(existsSync(join(ARTIFACTS_DIR, "final-gate-verdict.json"))).toBe(true);
-  });
 });
 
 // ---------------------------------------------------------------------------
