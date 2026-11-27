@@ -29,13 +29,7 @@
   **Property:** a test's child deadline comes from a measurement under full-suite load, and a test
   removes the temp directories it creates.
 
-- **A partial withdrawal reports a complete item as rejected (2026-10-06, low).** The accepted pair can hold several entries for one work item. When `evictInvalidatedEntries` (`src/audit/cli/dispatch/hostHandoff.ts`) withdraws one entry and another still validates, the item stays complete, yet its withdrawal issue makes `recordHostResultOutcomes` record `rejected` as its last state. **Property:** an item's recorded state matches whether an accepted entry for it remains.
-
-- **Conceptual perspective lanes read only the head of the call-site map (2026-10-05, low).** In the dogfood run each perspective lane read the first part of the bound read-only call-site map and nothing made it read further. **Property:** a lane's use of the call-site map does not depend on the lane choosing to read past the head.
-
 - **The lock heartbeat only logs a stolen lock (2026-10-06, low).** `startLockHeartbeat` (`src/shared/io/fileLock.ts`) logs `lock_heartbeat_stolen` and returns, every tick; the interval keeps running and `fn()` is neither aborted nor told. P3 of the [canonical implementation plan](../reviews/audit-tools-canonical-implementation-plan-2026-10-07.md) replaces this protocol. **Property:** a holder that loses its lock stops its writes and learns of the loss.
-
-- **The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).** `.claude/hooks/tool-input-guard.mjs` refused a sub-agent that ran in a lap worktree and was not an audit lane. **Property:** the guard identifies an audit node from run state, not from the session's shape.
 
 - **Test-command discovery lacks some ecosystem declarations (2026-10-06, low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`); repositories using unsupported build systems such as Gradle or Make still reach the final gate's "Verification command required" pause. **Property:** discovery reads a declared command for any ecosystem with one, without a per-ecosystem fork in planning.
 

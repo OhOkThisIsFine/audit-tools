@@ -30,20 +30,6 @@
   eligibility is either measured and shown not to collapse, or aligned with the findings draw's — it
   is not left disjunctive on the grounds that nobody looked.
 
-- **Selective-deepening convergence — live validation env-bound.** The pending-task partition and
-  prompt-bound audit ingestion now single-source the identity of every deepening task
-  (`src/audit/orchestrator/pendingTasks.ts`,
-  `src/audit/cli/dispatch/hostHandoff.ts#ingestAuditHostResults`). Missing or mismatched host results
-  remain pending rather than being rebound heuristically. **Still open:** confirmation on a real run
-  that every `deepening:*` task converges in bounded rounds and the audit reaches synthesis without
-  `force-synthesis`.
-
-- **Confirmed scope leaks beyond planning (2026-11-15, medium).** Late runtime validation produced 63 follow-ups, 52 touching explicitly excluded paths; the scoped runtime fix is staged, not landed. **Property:** one confirmed scope governs planning, analyzer coverage, reviewer submissions, deepening, synthesis and final output. Reject out-of-scope evidence and keep withdrawn findings withdrawn across re-ingestion, requeue, resume and synthesis.
-
-- **Analyzer evidence lacks a comparable coverage record (2026-11-15, medium).** **Property:** calibrate each analyzer against the checkout, scope and tool configuration; preflight prerequisites; reuse coverage-compatible imported reports without rerunning the scan or reissuing prompts, and dispatch each normalized lead once. Distinguish failed, partial, skipped and verified-clean coverage. Remediation rechecks use comparable inputs and disclose changed coverage rather than claiming a clean result.
+- **Qualify opt-in stock-analyzer coverage receipts and reuse (2026-11-27, medium).** Remediation no longer treats a missing lead as clean without comparable scope/config and verified coverage; equivalent positive refires still block. **Remaining:** qualify individual stock adapters (original and recheck receipts with version, effective rules/config, admitted scope, scanned/skipped inputs and failure limits), and prove compatible imported receipts are reused without rerunning the scan or emitting duplicate lead questions. Adapters lacking verified comparability may supply leads but cannot certify absence. No live stock-adapter coverage claimed.
 
 - **Audit and remediation paths have multiple sources (2026-11-15, medium).** Mixed relative and absolute result paths misplaced 57 submissions. **Property:** one shared canonical path source in `audit-tools/shared` constructs every audit and remediation path, including roots, artifacts, prompts, bindings, result grants, writes, intake and resume. Test both workflows across different CWDs and worktrees.
-
-- **Incidental inputs restart the systemic challenge (2026-11-15, medium).** Scoped result intake repeatedly staled active challenge prompts. **Property:** bind challenges to stable material revision inputs, not unrelated result arrivals or representation churn; restart only when the challenge's own reviewed evidence or scope materially changes.
-
-- **Isolated dependency installs repoint regular host launchers (2026-11-15, medium).** A worktree install redirected existing host registrations to its temporary checkout. **Property:** dependency installation and build never mutate regular host registrations; changing those launcher targets requires a separate explicit registration operation. Regression checks compare existing launcher configuration before and after an isolated install.

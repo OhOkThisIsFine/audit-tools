@@ -53,3 +53,5 @@
   incident, never by an estimate of one. Extend the gate to a second artifact only when one of those
   exists for it; if the choice is ever genuinely undecidable, the cheap move is edge attribution +
   cost on the existing staleness record, not a second classifier.
+
+- **Decide whether to retire or revive dormant per-question selective deepening.** The legacy ingestion path can mint `deepening:*` tasks, but the live question-first path does not invoke it after accepting answers. Do not schedule a live validation for an unreachable behavior. Retire the old path if unused; if the live workflow needs automatic question follow-up, define evidence-bound triggers and limits, then prove that actual reviewer submissions converge or stop honestly through normal synthesis. The separate deep Husky run already qualified the upstream systemic-improvement loop (six rounds, seven retained leads, ceiling reached, then synthesis), not post-question selective deepening.
