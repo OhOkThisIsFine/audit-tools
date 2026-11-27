@@ -10,11 +10,11 @@
 // The hook is spawned by its REAL path with a real PreToolUse payload, and the
 // stamp is written through the REAL writer, so the test cannot drift from the
 // gate the way a hand-rolled stamp file would.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { writeSuiteGreenStamp } from "../../scripts/shared/suiteGreenStamp.mjs";
@@ -24,17 +24,16 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const HOOK = resolve(REPO_ROOT, ".claude", "hooks", "push-gate.mjs");
 
 const dirs: string[] = [];
+const templates = new Map<string, string>();
+
+afterAll(() => {
+  for (const root of templates.values()) rmSync(root, { recursive: true, force: true });
+});
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-/**
- * A repo on `branch`, optionally carrying a suite-green stamp bound to its own
- * CURRENT tree (or to a deliberately DIFFERENT tree, for the stale case).
- */
-function makeRepo({ branch = "main", stamp = "none" }: { branch?: string; stamp?: "none" | "bound" | "stale" } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "push-gate-"));
-  dirs.push(root);
+function buildTemplate(root: string, branch: string) {
   const git = (...args: string[]) => {
     const r = spawnSyncHidden("git", args, { cwd: root, encoding: "utf8" });
     if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
@@ -49,6 +48,23 @@ function makeRepo({ branch = "main", stamp = "none" }: { branch?: string; stamp?
   writeFileSync(join(root, ".gitignore"), ".claude/\n");
   git("add", "-A");
   git("commit", "-qm", "base");
+}
+
+/**
+ * A repo on `branch`, optionally carrying a suite-green stamp bound to its own
+ * CURRENT tree (or to a deliberately DIFFERENT tree, for the stale case).
+ */
+function makeRepo({ branch = "main", stamp = "none" }: { branch?: string; stamp?: "none" | "bound" | "stale" } = {}) {
+  let template = templates.get(branch);
+  if (!template) {
+    template = mkdtempSync(join(tmpdir(), "push-gate-template-"));
+    templates.set(branch, template);
+    buildTemplate(template, branch);
+  }
+  // The committed fixture is immutable; tests get independent index, refs and config.
+  const root = mkdtempSync(join(tmpdir(), "push-gate-"));
+  dirs.push(root);
+  cpSync(template, root, { recursive: true });
   if (stamp === "bound") writeSuiteGreenStamp(root, worktreeTree(root));
   if (stamp === "stale") writeSuiteGreenStamp(root, "0".repeat(40));
   return root;

@@ -8,11 +8,11 @@
 // scripts/shared/derived-file-preflight.mjs — the gate and both attest scripts
 // import the same module, because a hand-kept second copy of the trigger list
 // is a worse trap than the one this fixes.
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import {
   buildPreCommitLegs,
@@ -30,23 +30,16 @@ const REPO_ROOT = join(__dirname, "..", "..");
 const ATTEST_LOOP_CORE = join(REPO_ROOT, ".claude", "hooks", "attest-loop-core-review.mjs");
 
 const dirs: string[] = [];
+const templates = new Map<string | undefined, string>();
+
+afterAll(() => {
+  for (const root of templates.values()) rmSync(root, { recursive: true, force: true });
+});
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-/**
- * A real git repo with one loop-core file and a backlog doc staged on top of a
- * base commit.
- *
- * `divergence` is applied AFTER the final `git add -A`, so the worktree tree and
- * the staged tree stop being the same object — which is the whole subject of the
- * attributability cases below.
- */
-function makeFixture(
-  opts: { backlogIndexScript?: string; divergence?: "unstaged-edit" | "untracked" } = {},
-) {
-  const root = mkdtempSync(join(tmpdir(), "attest-preflight-"));
-  dirs.push(root);
+function buildTemplate(root: string, backlogIndexScript?: string) {
   const git = (...args: string[]) => {
     const r = spawnSyncHidden("git", args, { cwd: root, encoding: "utf8" });
     if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
@@ -55,7 +48,7 @@ function makeFixture(
   git("config", "user.email", "t@example.com");
   git("config", "user.name", "t");
   const scripts: Record<string, string> = {};
-  if (opts.backlogIndexScript) scripts["check:backlog-index"] = opts.backlogIndexScript;
+  if (backlogIndexScript) scripts["check:backlog-index"] = backlogIndexScript;
   writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture", private: true, scripts }, null, 2));
   // Mirrors the real .gitignore's `.claude/` line. Without it the attestation
   // this script writes under .claude/loop-core-review/ is picked up by the
@@ -74,6 +67,29 @@ function makeFixture(
   mkdirSync(join(root, "docs", "backlog"), { recursive: true });
   writeFileSync(join(root, "docs", "backlog", "open-bugs.md"), "- a stale-index-shaped edit\n");
   git("add", "-A");
+}
+
+/**
+ * A real git repo with one loop-core file and a backlog doc staged on top of a
+ * base commit.
+ *
+ * `divergence` is applied AFTER the final `git add -A`, so the worktree tree and
+ * the staged tree stop being the same object — which is the whole subject of the
+ * attributability cases below.
+ */
+function makeFixture(
+  opts: { backlogIndexScript?: string; divergence?: "unstaged-edit" | "untracked" } = {},
+) {
+  let template = templates.get(opts.backlogIndexScript);
+  if (!template) {
+    template = mkdtempSync(join(tmpdir(), "attest-preflight-template-"));
+    templates.set(opts.backlogIndexScript, template);
+    buildTemplate(template, opts.backlogIndexScript);
+  }
+  // Copy the prepared index so divergence and attestations remain case-local.
+  const root = mkdtempSync(join(tmpdir(), "attest-preflight-"));
+  dirs.push(root);
+  cpSync(template, root, { recursive: true });
   if (opts.divergence === "unstaged-edit") {
     writeFileSync(join(root, "docs", "backlog", "open-bugs.md"), "- a stale-index-shaped edit\n- unstaged\n");
   } else if (opts.divergence === "untracked") {

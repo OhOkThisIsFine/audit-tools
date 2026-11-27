@@ -34,6 +34,7 @@ import {
   BEGIN_MARKER,
   END_MARKER,
 } from '../../scripts/check-doc-manifest.mjs';
+import { buildPreCommitLegs } from '../../scripts/shared/derived-file-preflight.mjs';
 import { DOC_MANIFEST } from '../../scripts/doc-manifest-data.mjs';
 import {
   CONSTITUTIONAL_DOC_PATHS,
@@ -650,36 +651,13 @@ describe('pre-commit gate — the doc-manifest trigger covers every manifest inp
     return { code: r.status, stderr: r.stderr ?? '' };
   };
 
-  it('runs the doc-manifest check for markdown OUTSIDE docs/', () => {
-    // The trigger was `^docs/.*\.md$` — narrower than the check it fires, which
-    // is how an unregistered `examples/…md` could be staged with nothing to
-    // notice. A trigger narrower than its check plants violations for CI.
-    writeFile('examples/some-setup.md', '# setup\n');
-    git(['add', '-A']);
-    const { code, stderr } = runGate();
-    expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/check:doc-manifest FAILED/);
-    git(['reset', '--hard', 'HEAD']);
-    git(['clean', '-fd']);
-  });
-
-  it('runs the doc-manifest check when its canonical data source is staged', () => {
-    writeFile('scripts/doc-manifest-data.mjs', 'export const DOC_MANIFEST = [];\n');
-    git(['add', '-A']);
-    const { code, stderr } = runGate();
-    expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/check:doc-manifest FAILED/);
-    git(['reset', '--hard', 'HEAD']);
-    git(['clean', '-fd']);
-  });
-
-  it('still ignores a commit that carries no markdown at all', () => {
-    writeFile('src/thing.ts', 'export const x = 1;\n');
-    git(['add', '-A']);
-    const { code, stderr } = runGate();
-    expect(code, stderr).toBe(0);
-    git(['reset', '--hard', 'HEAD']);
-    git(['clean', '-fd']);
+  it.each([
+    ['examples/some-setup.md', true],
+    ['scripts/doc-manifest-data.mjs', true],
+    ['src/thing.ts', false],
+  ] as const)('checks whether the staged path %s triggers reconciliation', (path, expected) => {
+    const manifestLeg = buildPreCommitLegs().find((leg) => leg.id === 'check:doc-manifest');
+    expect(manifestLeg?.triggered({ staged: [path] })).toBe(expected);
   });
 
   it('runs the doc-manifest check for a staged DELETION of a manifest-listed doc', () => {
