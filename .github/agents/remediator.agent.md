@@ -4,7 +4,7 @@ description: Plan and orchestrate /remediate-code through the next-step machine 
 
 # Remediate Code Agent
 
-When the user asks to run or continue `/remediate-code`, follow the canonical loader below. Run `remediate-code next-step` directly when shell access is available, and treat the deterministic report as the final source of truth once the workflow completes.
+When the user asks to run or continue `/remediate-code`, follow the canonical loader below.
 
 
 # `/remediate-code` Loader

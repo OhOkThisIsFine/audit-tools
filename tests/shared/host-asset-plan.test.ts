@@ -101,16 +101,10 @@ describe("host-asset plan — one declaration, two installers", () => {
     expect(new Set(commands.map((c) => c.agent)).size).toBe(TOOLS.length);
   });
 
-  test("each tool's template trim rule is DECLARED, not unified by default", () => {
-    // audit-code's template is a standalone .txt (trailing newline must go);
-    // remediate-code's is a markdown body extracted from the prompt (trailing
-    // content is significant). Applying one rule to both would be a silent edit
-    // to the other tool's deployed config — so each row states its own, and this
-    // pins the two spellings the installers shipped with.
-    const audit = planOpenCodeCommand(HOST_ASSET_PLANS["audit-code"]!, "  body  ");
-    expect(audit.template, "audit-code trims both ends").toBe("body");
-    const remediate = planOpenCodeCommand(HOST_ASSET_PLANS["remediate-code"]!, "  body  ");
-    expect(remediate.template, "remediate-code preserves the trailing whitespace").toBe("body  ");
+  test.each(TOOLS)("OpenCode wraps the %s prompt body without re-authoring it", tool => {
+    const source = "---\r\ndescription: Host menu only\r\n---\r\n\r\n# Loader\r\n\r\nFollow the issued command.\r\n";
+    expect(planOpenCodeCommand(HOST_ASSET_PLANS[tool]!, source).template)
+      .toBe("# Loader\n\nFollow the issued command.\n");
   });
 
   test("the OpenCode config path and the plugin dir convention are ONE location each", () => {

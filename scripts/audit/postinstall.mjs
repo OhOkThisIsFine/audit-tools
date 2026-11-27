@@ -179,10 +179,8 @@ function renderOpenCodePermissionConfig() {
   };
 }
 
-const opencodeCommandTemplateFile = join(PKG_ROOT, 'skills', 'audit-code', 'opencode-command-template.txt');
-const OPENCODE_COMMAND_TEMPLATE = readFileSync(opencodeCommandTemplateFile, 'utf8').replace(/\r\n/g, '\n').trim();
 
-function mergeOpenCodeGlobalConfig(existing) {
+function mergeOpenCodeGlobalConfig(existing, promptSource) {
   const parsed = existing ? JSON.parse(existing) : {};
   const auditPermission = renderOpenCodePermissionConfig();
   const existingAuditor = objectValue(objectValue(parsed.agent).auditor);
@@ -192,9 +190,7 @@ function mergeOpenCodeGlobalConfig(existing) {
       ...(parsed.command && typeof parsed.command === 'object' && !Array.isArray(parsed.command)
         ? parsed.command
         : {}),
-      // The command ENTRY comes from the plan; only the template is this tool's
-      // (a standalone next-step instruction rather than the prompt body).
-      [TOOL]: planOpenCodeCommand(PLAN, OPENCODE_COMMAND_TEMPLATE),
+      [TOOL]: planOpenCodeCommand(PLAN, promptSource),
     },
     mcp: mergeOpenCodeMcpServer(parsed.mcp, TOOL, mcpServerLaunch(PKG_ROOT, TOOL)),
     permission: mergeOpenCodeGlobalPermissionConfig(parsed.permission, auditPermission),
@@ -247,7 +243,7 @@ installOpenCodeGlobalConfig(
     toolName: TOOL,
     path: opencodeGlobalConfig,
     sharedOpenCodePermissions,
-    buildMerged: (existing) => mergeOpenCodeGlobalConfig(existing),
+    buildMerged: (existing) => mergeOpenCodeGlobalConfig(existing, promptSource.toString("utf8")),
     label: 'OpenCode config',
     manualInstructions: [
       `  To install manually, add the mcp.servers["audit-code"] and command["audit-code"] entries to:`,

@@ -67,7 +67,7 @@ function renderVSCodeAgent(opts: RenderHostAssetOptions): string {
     opts.description ??
     `Plan and orchestrate /${opts.toolName} through the next-step machine before making code changes.`;
   const frontmatter = renderFrontmatter([["description", description]]);
-  return `${frontmatter}# ${titleCase(opts.toolName)} Agent\n\nWhen the user asks to run or continue \`/${opts.toolName}\`, follow the canonical loader below. Run \`${opts.toolName} next-step\` directly when shell access is available, and treat the deterministic report as the final source of truth once the workflow completes.\n\n${canonicalBody(opts.promptBody)}\n`;
+  return `${frontmatter}# ${titleCase(opts.toolName)} Agent\n\nWhen the user asks to run or continue \`/${opts.toolName}\`, follow the canonical loader below.\n\n${canonicalBody(opts.promptBody)}\n`;
 }
 
 /**
@@ -84,7 +84,7 @@ function renderCodexRecipe(opts: RenderHostAssetOptions): string {
  * the planning-mode conversation drives the same next-step protocol.
  */
 function renderAntigravityGuide(opts: RenderHostAssetOptions): string {
-  return `# ${titleCase(opts.toolName)} planning-mode guide\n\nOpen Antigravity in Planning mode, then follow the canonical loader below. Ask Antigravity to use \`${opts.toolName} next-step\` directly, and review Antigravity artifacts before accepting major code changes or imported evidence.\n\n${canonicalBody(opts.promptBody)}\n`;
+  return `# ${titleCase(opts.toolName)} planning-mode guide\n\nOpen Antigravity in Planning mode, then follow the canonical loader below.\n\n${canonicalBody(opts.promptBody)}\n`;
 }
 
 /**

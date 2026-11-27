@@ -149,6 +149,9 @@ test("postinstall registers both submit servers with every documented host, idem
     expect(codexServers.other).toEqual({ command: "other" });
 
     for (const tool of TOOLS) {
+      const source = await readFile(join(repoRoot, "skills", tool, tool + ".prompt.md"), "utf8");
+      const body = source.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\n/u, "").trimStart();
+      expect(opencode.command[tool].template, "OpenCode " + tool + " uses the canonical workflow").toBe(body);
       const launch = expectedLaunch(tool);
       expect(opencode.mcp.servers[tool], `OpenCode ${tool}`).toEqual({
         type: "local",

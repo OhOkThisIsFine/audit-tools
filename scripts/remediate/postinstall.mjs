@@ -164,7 +164,7 @@ function renderOpenCodeGlobalPermissionConfig(existing) {
   return merged;
 }
 
-function mergeOpenCodeGlobalConfig(existing, promptBody) {
+function mergeOpenCodeGlobalConfig(existing, promptSource) {
   const parsed = existing ? JSON.parse(existing) : {};
   const agent = objectValue(parsed.agent);
   const existingRemediator = objectValue(agent.remediator);
@@ -172,7 +172,7 @@ function mergeOpenCodeGlobalConfig(existing, promptBody) {
     ...parsed,
     command: {
       ...objectValue(parsed.command),
-      [TOOL]: planOpenCodeCommand(PLAN, promptBody),
+      [TOOL]: planOpenCodeCommand(PLAN, promptSource),
     },
     mcp: mergeOpenCodeMcpServer(parsed.mcp, TOOL, mcpServerLaunch(PKG_ROOT, TOOL)),
     permission: renderOpenCodeGlobalPermissionConfig(parsed.permission),
@@ -227,7 +227,7 @@ installOpenCodeGlobalConfig(
     toolName: TOOL,
     path: opencodeGlobalConfig,
     sharedOpenCodePermissions,
-    buildMerged: (existing) => mergeOpenCodeGlobalConfig(existing, promptBody),
+    buildMerged: (existing) => mergeOpenCodeGlobalConfig(existing, promptSource.toString("utf8")),
     label: "OpenCode command",
   },
   counts,

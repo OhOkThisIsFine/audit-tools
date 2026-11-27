@@ -4,7 +4,7 @@ description: Plan and orchestrate /audit-code through the next-step machine befo
 
 # Audit Code Agent
 
-When the user asks to run or continue `/audit-code`, follow the canonical loader below. Run `audit-code next-step` directly when shell access is available, and treat the deterministic report as the final source of truth once the workflow completes.
+When the user asks to run or continue `/audit-code`, follow the canonical loader below.
 
 
 # `/audit-code` Loader

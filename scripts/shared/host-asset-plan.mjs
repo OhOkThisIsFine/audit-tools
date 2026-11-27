@@ -22,6 +22,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { splitFrontmatter } from "./install-host-assets.mjs";
 
 /** The package root, from this file's location (`scripts/shared/`). */
 export const PKG_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
@@ -40,11 +41,6 @@ export const PKG_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url)))
  *   'packageVersion' where it tracks the package
  * @property {boolean} stripFrontmatter whether the Claude command carries the
  *   prompt's body only (remediate-code) or the file verbatim (audit-code)
- * @property {'trim'|'trimStart'} templateTrim how the OpenCode command template
- *   is trimmed. The two tools genuinely differ here — audit-code's template is a
- *   standalone `.txt` whose trailing newline must go, remediate-code's is an
- *   extracted markdown body where trailing content is significant — so the
- *   difference is a declared row rather than a behaviour invented per installer
  */
 
 /** @type {Record<string, HostAssetPlan>} */
@@ -59,7 +55,6 @@ export const HOST_ASSET_PLANS = {
     agentDescription: "Read-heavy audit orchestration agent for the /audit-code workflow.",
     pluginVersion: "1.0.0",
     stripFrontmatter: false,
-    templateTrim: "trim",
   },
   "remediate-code": {
     tool: "remediate-code",
@@ -71,7 +66,6 @@ export const HOST_ASSET_PLANS = {
     agentDescription: "Bounded remediation orchestration agent for the /remediate-code workflow.",
     pluginVersion: "packageVersion",
     stripFrontmatter: true,
-    templateTrim: "trimStart",
   },
 };
 
@@ -140,17 +134,14 @@ export function planOpenCodeConfigPath({ homeDir = homedir() } = {}) {
 /**
  * The OpenCode command entry a plan contributes to the merged global config.
  *
- * The trim rule is the plan's, not this function's: audit-code's template is a
- * standalone `.txt` (trailing newline must go), remediate-code's is a markdown
- * body extracted from the prompt (trailing content is significant). Unifying
- * them here would be a silent edit to one tool's deployed config.
+ * Only the host registration format differs; its workflow text is the canonical prompt body.
  *
  * @param {HostAssetPlan} plan
- * @param {string} commandTemplate the rendered command content
+ * @param {string} promptSource the canonical prompt file
  */
-export function planOpenCodeCommand(plan, commandTemplate) {
+export function planOpenCodeCommand(plan, promptSource) {
   return {
-    template: plan.templateTrim === "trimStart" ? commandTemplate.trimStart() : commandTemplate.trim(),
+    template: splitFrontmatter(promptSource).body.trimStart(),
     description: plan.description,
     agent: plan.agentName,
     subtask: false,
