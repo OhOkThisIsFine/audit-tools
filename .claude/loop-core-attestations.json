@@ -650,6 +650,22 @@
         "src/audit/orchestrator/questionPlanning.ts": "afe3f0fe02b3b347767042f5f3b330e6ee959a26"
       }
     },
+    "a6fdf00f198edd21": {
+      "reviewed_by": "independent Audit Tools lifecycle reviewer",
+      "attester_class": "agent",
+      "checked": "Traced actual phase ownership callback through explicit change, plan-only activation and both automatic pauses. Deterministic fixture checks correct state and unchanged bytes after ownership refusal. Callback checked immediately before write, not an atomic fence. Other scope is factual backlog notes and qualified opt-in diagnostics using the unchanged shared literal path primitive.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "7602e3750ae2a9a1ff4438bb8756ab9c4cc811b0",
+        "ran_at": "2026-11-27T21:13:57.096Z"
+      },
+      "attested_at": "2026-11-27T21:13:57.327Z",
+      "vouches": {
+        "src/remediate/steps/nextStep.ts": "a9a4190cac55b4a5236d4ce76e905e7ea5ed897a"
+      }
+    },
     "aca87556da5ba611": {
       "reviewed_by": "independent Audit Tools integration and schema reviewers",
       "attester_class": "agent",
@@ -1380,7 +1396,7 @@
       "review": "3e7d0736a83209a4"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "eadba2ff8958aa32"
+      "review": "a6fdf00f198edd21"
     },
     "src/remediate/steps/planningGraph.ts": {
       "review": "d9632808536dd1ea"

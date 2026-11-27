@@ -7,7 +7,9 @@ import { executionPlanReferenceIssues } from "../../shared/types/executionPlan.j
 import { ITEM_STATUSES, isTerminalStatus } from "./itemStatus.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+// sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 import {
+  type AssertLockOwnership,
   type LockedJsonStore,
   createLockedJsonStore,
   SchemaVersionMismatchError,
@@ -418,8 +420,10 @@ export class StateStore {
     });
   }
 
+  // sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
   /** Caller MUST hold phase.lock, including automatic plan-only boundaries. */
   async setOperatorLifecycleUnderPhaseLock(
+    assertPhaseOwnership: AssertLockOwnership,
     action: OperatorLifecycleAction,
     hostReport?: OperatorLifecycle["host_report"],
     reason: "operator" | "plan-only" = "operator",
@@ -452,7 +456,9 @@ export class StateStore {
     }
     if (current && JSON.stringify(next) === JSON.stringify(current)) return current;
     next.updated_at = new Date().toISOString();
-    await writeJsonFile(join(this.artifactsDir, OPERATOR_LIFECYCLE_FILENAME), OperatorLifecycleSchema.parse(next));
+    const validated = OperatorLifecycleSchema.parse(next);
+    await assertPhaseOwnership();
+    await writeJsonFile(join(this.artifactsDir, OPERATOR_LIFECYCLE_FILENAME), validated);
     return next;
   }
 

@@ -79,9 +79,11 @@ import {
 } from "../phases/close.js";
 import { hasBoundRemediationSubmission, ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
 import { RETIRED_DISPATCH_SHAPE_MESSAGE, type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
+// sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 import {
   FileLockTimeoutError,
   withFileLock,
+  type AssertLockOwnership,
 } from "../../shared/io/fileLock.js";
 import {
   AUDIT_FINDINGS_FILENAME,
@@ -2518,6 +2520,7 @@ async function buildOperatorControlStep(
 }
 
 /** Operator commands serialize with every advancing or recovery writer. */
+// sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 export async function changeOperatorLifecycle(options: {
   root?: string; artifactsDir?: string; action: Exclude<OperatorLifecycleAction, "plan-only">;
   hostReport?: OperatorLifecycle["host_report"];
@@ -2526,8 +2529,8 @@ export async function changeOperatorLifecycle(options: {
   const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
   const store = new StateStore(artifactsDir);
-  return withFileLock(join(artifactsDir, PHASE_LOCK_FILENAME), async () => {
-    const control = await store.setOperatorLifecycleUnderPhaseLock(options.action, options.hostReport);
+  return withFileLock(join(artifactsDir, PHASE_LOCK_FILENAME), async (assertPhaseOwnership) => {
+    const control = await store.setOperatorLifecycleUnderPhaseLock(assertPhaseOwnership, options.action, options.hostReport);
     return buildOperatorControlStep(root, artifactsDir, await store.loadState(), control);
   });
 }
@@ -2849,12 +2852,14 @@ Once the file is written, run:
 }
 
 /** Execution dependencies threaded to every remediate obligation executor. */
+// sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 export interface RemediateCtx {
   root: string;
   artifactsDir: string;
   options: NextStepOptions;
   runLogger: RunLogger;
   store: StateStore;
+  assertPhaseOwnership: AssertLockOwnership;
   inputResolution: InputResolution;
   /** Increment step_count once per host call (guarded; no-ops on re-entry). */
   countStep: (state: RemediationState | null) => Promise<void>;
@@ -3239,8 +3244,9 @@ Then run:
  * which lives in the pre-intake engine — emits the report directly rather than
  * transitioning (a main transition could never select it).
  */
+// sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false): RemediateObligation[] {
-  const { root, artifactsDir, options, runLogger, store } = ctx;
+  const { root, artifactsDir, options, runLogger, store, assertPhaseOwnership } = ctx;
   const clarificationResolutionPath = join(
     artifactsDir,
     CLARIFICATION_RESOLUTION_FILENAME,
@@ -3252,7 +3258,7 @@ export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false):
       id: "operator_plan_only",
       derive: (state) => options.planOnly === true && isPlanOnlyBoundary(state) ? "missing" : "satisfied",
       execute: async (state) => {
-        const control = await store.setOperatorLifecycleUnderPhaseLock("pause", undefined, "plan-only");
+        const control = await store.setOperatorLifecycleUnderPhaseLock(assertPhaseOwnership, "pause", undefined, "plan-only");
         return { kind: "emit", step: await buildOperatorControlStep(root, artifactsDir, state, control) };
       },
     },
@@ -3502,6 +3508,7 @@ export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false):
  * `phase_busy` step; the advance re-loads under the lock, so a peer that
  * persisted between the two is never clobbered.
  */
+// sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 async function decideNextStepLoop(
   root: string,
   artifactsDir: string,
@@ -3519,7 +3526,7 @@ async function decideNextStepLoop(
   try {
     return await withFileLock(
       join(artifactsDir, PHASE_LOCK_FILENAME),
-      () => advanceUnderPhaseLock({ root, artifactsDir, store, options, runLogger }),
+      (assertPhaseOwnership) => advanceUnderPhaseLock({ root, artifactsDir, store, options, runLogger, assertPhaseOwnership }),
       PHASE_LOCK_TIMEOUT_MS,
     );
   } catch (error) {
@@ -3566,14 +3573,16 @@ async function emitUnresolvedClosingStep(
  * obligation fold. Runs with `<artifactsDir>/phase.lock` HELD for its whole
  * duration; never call it without that lock.
  */
+// sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 async function advanceUnderPhaseLock(deps: {
   root: string;
   artifactsDir: string;
   store: StateStore;
   options: NextStepOptions;
   runLogger: RunLogger;
+  assertPhaseOwnership: AssertLockOwnership;
 }): Promise<RemediationStep> {
-  const { root, artifactsDir, store, options, runLogger } = deps;
+  const { root, artifactsDir, store, options, runLogger, assertPhaseOwnership } = deps;
   // Loaded FRESH under the mutex: a peer may have advanced and persisted state
   // between the entry read and this process winning the lock.
   let state = await store.loadState();
@@ -3604,7 +3613,7 @@ async function advanceUnderPhaseLock(deps: {
   const pendingPlanSubmission = existsSync(executionPlanPaths(artifactsDir).submission);
   const revisionMismatch = Boolean(currentCanonical && currentCanonical.revision_sha256 !== state?.plan?.review_revision_sha256);
   const unchangedPlan = !pendingPlanSubmission && !revisionMismatch;
-  // sites-pinned: tests/remediate/phase-close.test.ts
+  // sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
   if (state && reportOnlyRequest && unchangedPlan) {
     await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
     return handleComplete(root, artifactsDir, state);
@@ -3615,11 +3624,11 @@ async function advanceUnderPhaseLock(deps: {
   if (control && control.mode !== "active") {
     return buildOperatorControlStep(root, artifactsDir, state, control);
   }
-  if (options.planOnly === true) control = await store.setOperatorLifecycleUnderPhaseLock("plan-only");
+  if (options.planOnly === true) control = await store.setOperatorLifecycleUnderPhaseLock(assertPhaseOwnership, "plan-only");
   // Covers a crash after planning saved its phase but before its pause was
   // persisted. No override, guidance, ingestion or dispatch may slip through.
   if (control?.plan_only && isPlanOnlyBoundary(state) && !options.forceReplan) {
-    control = await store.setOperatorLifecycleUnderPhaseLock("pause", undefined, "plan-only");
+    control = await store.setOperatorLifecycleUnderPhaseLock(assertPhaseOwnership, "pause", undefined, "plan-only");
     return buildOperatorControlStep(root, artifactsDir, state, control);
   }
   if (state?.status === "closing" && bareRequest && unchangedPlan) {
@@ -3744,6 +3753,7 @@ async function advanceUnderPhaseLock(deps: {
     options: { ...options, planOnly: control?.plan_only === true },
     runLogger,
     store,
+    assertPhaseOwnership,
     inputResolution,
     countStep,
   };
