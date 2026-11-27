@@ -781,23 +781,29 @@ export async function publishAuditEvidenceGraph(
   sourceRoot: string,
   sourceFiles: readonly { path: string; fingerprint: string }[],
   graph: ArtifactBundle["graph_bundle"],
+  indexSourceOnly = false,
 ) {
   const files = sourceFiles.map(({ path, fingerprint }) => ({ path, fingerprint }))
     .sort((a, b) => compareCodeUnits(a.path, b.path));
   let indexed;
   let graphIndexError: string | undefined;
-  if (graph) {
+  if (graph || indexSourceOnly) {
     try { indexed = await prepareReviewerCbm(artifactsDir, sourceRoot, files); }
     catch (error) {
       graphIndexError = errorMessage(error);
       console.warn("[audit-code] Codebase Memory index unavailable: " + graphIndexError);
     }
   }
-  const graphText = graph ? buildReviewerGraph(graph, files.map(({ path }) => path), indexed) : undefined;
+  // An empty native graph is an index transport only after source indexing
+  // actually succeeded. Failed or unconfigured indexing must not publish it.
+  const indexedOnly = graph === undefined && indexed !== undefined;
+  const graphText = graph || indexedOnly
+    ? buildReviewerGraph(graph ?? { graphs: {} }, files.map(({ path }) => path), indexed)
+    : undefined;
   const graphSha256 = graphText === undefined ? undefined : hashContent(graphText);
   const graphIndex = graphSha256 === undefined ? undefined : reviewerGraphIndex(artifactsDir, graphSha256);
   if (graphIndex !== undefined && graphText !== undefined) await saveImmutableReviewText(graphIndex, graphText);
-  return { graphIndex, graphSha256, indexed, graphIndexFailed: graphIndexError !== undefined, graphIndexError };
+  return { graphIndex, graphSha256, indexed, indexedOnly, graphIndexFailed: graphIndexError !== undefined, graphIndexError };
 }
 
 export async function publishAuditQuestionWorkload(params: QuestionBoundary & {

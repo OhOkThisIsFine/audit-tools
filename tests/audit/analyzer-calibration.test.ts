@@ -33,3 +33,29 @@ test("a zero-exit scan that reports an admitted file skipped cannot be accepted 
   expect(next.tools[0]).toMatchObject({ incomplete: false, admittedSkipped: [] });
   expect(currentAnalyzerCalibration(answer("limited"), next)).toBeUndefined();
 });
+
+test("calibration records skipped selected tools as limited, never approved for retry", () => {
+  const bundle: ArtifactBundle = {
+    external_analyzer_acquisition: { enabled: true, tool_statuses: [
+      { tool: "semgrep", status: "skipped", resolved: false, error: "Consent declined" },
+      { tool: "eslint", status: "skipped", resolved: false, error: "Omitted by policy" },
+    ] },
+  };
+  const request = analyzerCalibrationRequest(bundle, {
+    input_sha256: "a".repeat(64),
+    decisions: [
+      { tool: "semgrep", action: "run", reason: "Selected for review" },
+      { tool: "eslint", action: "omit", reason: "Not relevant for this review" },
+    ],
+    additional_checks: [], gaps: [],
+  });
+  expect(request.tools).toMatchObject([{ tool: "semgrep", incomplete: true, status: "skipped" }]);
+  const answer = (action: string) => ({
+    input_sha256: request.input_sha256, decisions: [{
+      tool: "semgrep", action, reason: "Operator declined", coverage: "No Semgrep coverage",
+    }], unresolved: [],
+  });
+  expect(currentAnalyzerCalibration(answer("limited"), request)).toBeDefined();
+  expect(currentAnalyzerCalibration(answer("retry"), request)).toBeUndefined();
+  expect(currentAnalyzerCalibration(answer("accept"), request)).toBeUndefined();
+});

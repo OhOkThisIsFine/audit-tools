@@ -20,11 +20,16 @@ export const AnalyzerCalibrationSchema = z.strictObject({
 
 export function analyzerCalibrationRequest(bundle: ArtifactBundle, selection: unknown) {
   const incomplete = new Set(incompleteAnalyzerStatuses(bundle).map(row => row.tool));
-  const statuses = bundle.external_analyzer_acquisition?.tool_statuses.filter(row => row.status !== "skipped") ?? [];
+  const parsedSelection = AnalyzerSelectionSchema.safeParse(selection);
+  const selectedTools = parsedSelection.success
+    ? new Set(parsedSelection.data.decisions.filter(row => row.action === "run").map(row => row.tool))
+    : new Set<string>();
+  const statuses = bundle.external_analyzer_acquisition?.tool_statuses.filter(row =>
+    row.status !== "skipped" || selectedTools.has(row.tool)) ?? [];
   const admitted = new Set(bundle.file_disposition?.files.filter(file => file.status === "included").map(file => file.path));
   const tools = statuses.map(row => {
     const admittedSkipped = row.reported_coverage?.skipped.filter(path => admitted.has(path)) ?? [];
-    return { ...row, admittedSkipped, incomplete: incomplete.has(row.tool) || admittedSkipped.length > 0,
+    return { ...row, admittedSkipped, incomplete: row.status === "skipped" || incomplete.has(row.tool) || admittedSkipped.length > 0,
       findings: bundle.external_analyzer_results?.find(entry => entry.tool === row.tool)?.results.length ?? 0 };
   });
   const input_sha256 = hashContent(stableStringify({
@@ -42,7 +47,8 @@ export function currentAnalyzerCalibration(value: unknown, request: AnalyzerCali
   const byId = new Map(answer.data.decisions.map(row => [row.tool, row]));
   if (byId.size !== answer.data.decisions.length || byId.size !== request.tools.length) return;
   if (!request.tools.every(tool => byId.has(tool.tool) &&
-      (!tool.incomplete || byId.get(tool.tool)?.action !== "accept"))) return;
+      (!tool.incomplete || byId.get(tool.tool)?.action !== "accept") &&
+      (tool.status !== "skipped" || byId.get(tool.tool)?.action === "limited"))) return;
   return answer.data;
 }
 

@@ -101,6 +101,13 @@ test("only exact scoped requests are sent, pages do not leak graph rows, and the
     .toMatchObject({ status: "unavailable" });
   expect(await queryReviewerGraph(f.index, hashContent(nativeOnly), { path: "a.ts" }))
     .toEqual({ path: "a.ts", total: 0, edges: [] });
+  // Keep the graph beside the original run-local Codebase Memory ready cache,
+  // as a previously issued review workload would have done.
+  const legacyIndexed = buildReviewerGraph({ graphs: {} }, ["a.ts"], meta);
+  await writeFile(f.index, legacyIndexed);
+  expect(await queryReviewerGraph(f.index, hashContent(legacyIndexed), {
+    path: "a.ts", detail: "symbols",
+  })).toMatchObject({ entries: [{ name: "run", symbol: "work.run", path: "a.ts" }] });
 });
 
 test("refuses incompatible graph output before advertising indexed lookup, and can retry after repair", async () => {
@@ -146,4 +153,40 @@ test("publishes a queryable evidence graph before any reviewer work and keeps it
   const reviewerFiles = f.files.map(file => ({ ...file, line_count: 1 }));
   expect(await publishAuditEvidenceGraph(f.run, f.frozen, reviewerFiles, graph)).toEqual(first);
   expect(runner.mock.calls.filter(([argv]) => argv.includes("index_repository"))).toHaveLength(1);
+});
+test("calibration qualifies a source index before native structure and reuses it when native evidence arrives", async () => {
+  const f = await setup();
+  runner.mockImplementation(async (argv, options) => {
+    if (argv.includes("index_repository")) return success({ status: "indexed" });
+    if (String(argsOf(options).query).includes("__audit_tools_empty_probe__")) return success(emptyPage);
+    return success({ columns: ["a.name", "a.qualified_name", "a.file_path", "a.start_line", "a.end_line"],
+      rows: [["a", "fixture.a", "a.ts", "1", "1"]], has_more: false, truncated: false });
+  });
+  const unrequested = await publishAuditEvidenceGraph(f.run, f.frozen, f.files, undefined);
+  expect(unrequested).toMatchObject({ indexedOnly: false, graphIndex: undefined });
+  expect(runner).not.toHaveBeenCalled();
+
+  const early = await publishAuditEvidenceGraph(f.run, f.frozen, f.files, undefined, true);
+  expect(early).toMatchObject({ indexedOnly: true, graphIndexFailed: false, indexed: { engine: "codebase-memory-mcp" } });
+  expect(await queryReviewerGraph(early.graphIndex!, early.graphSha256!, { path: "a.ts", detail: "symbols" }))
+    .toMatchObject({ entries: [{ name: "a", symbol: "fixture.a", path: "a.ts" }] });
+
+  const ready = await publishAuditEvidenceGraph(f.run, f.frozen, f.files, { graphs: {} });
+  expect(ready).toMatchObject({ indexedOnly: false, indexed: early.indexed });
+  expect(runner.mock.calls.filter(([argv]) => argv.includes("index_repository"))).toHaveLength(1);
+});
+
+test("failed early qualification reports the actual error and never advertises an empty native graph", async () => {
+  const f = await setup();
+  runner.mockImplementation(async argv => argv.includes("index_repository") ? success({ status: "indexed" }) :
+    success({ mismatched: true }));
+  const early = await publishAuditEvidenceGraph(f.run, f.frozen, f.files, undefined, true);
+  expect(early).toMatchObject({ indexedOnly: false, graphIndexFailed: true, indexed: undefined,
+    graphIndex: undefined, graphIndexError: expect.stringMatching(/incompatible page schema/) });
+  expect(runner.mock.calls.filter(([argv]) => argv.includes("index_repository"))).toHaveLength(1);
+
+  runner.mockImplementation(async argv => argv.includes("index_repository") ? success({ status: "indexed" }) :
+    success(emptyPage));
+  const repaired = await publishAuditEvidenceGraph(f.run, f.frozen, f.files, undefined, true);
+  expect(repaired).toMatchObject({ indexedOnly: true, graphIndexFailed: false, graphIndex: expect.any(String) });
 });
