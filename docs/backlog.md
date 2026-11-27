@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 105 entr(y/ies) indexed.
+> and at commit). 104 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -35,13 +35,12 @@
 - `open-bugs.md:18` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
 - `open-bugs.md:26` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
 - `open-bugs.md:33` — Qualify opt-in stock-analyzer coverage receipts and reuse (2026-11-27, medium).
-- `open-bugs.md:35` — Audit and remediation paths have multiple sources (2026-11-15, medium).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
 - `minor-bugs.md:14` — A stopped `npm test` leaves its vitest tree alive on Windows (2026-11-16, low).
 - `minor-bugs.md:21` — Two git-spawning tests time out under full-suite load on this machine (2026-11-16, low).
-- `minor-bugs.md:32` — The lock heartbeat only logs a stolen lock (2026-10-06, low).
+- `minor-bugs.md:32` — File-lock checks are cooperative, not an atomic write fence (2026-10-06, low).
 - `minor-bugs.md:34` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
 - `minor-bugs.md:36` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 

@@ -31,5 +31,3 @@
   is not left disjunctive on the grounds that nobody looked.
 
 - **Qualify opt-in stock-analyzer coverage receipts and reuse (2026-11-27, medium).** Remediation no longer treats a missing lead as clean without comparable scope/config and verified coverage; equivalent positive refires still block. **Remaining:** qualify individual stock adapters (original and recheck receipts with version, effective rules/config, admitted scope, scanned/skipped inputs and failure limits), and prove compatible imported receipts are reused without rerunning the scan or emitting duplicate lead questions. Adapters lacking verified comparability may supply leads but cannot certify absence. No live stock-adapter coverage claimed.
-
-- **Audit and remediation paths have multiple sources (2026-11-15, medium).** Mixed relative and absolute result paths misplaced 57 submissions. **Property:** one shared canonical path source in `audit-tools/shared` constructs every audit and remediation path, including roots, artifacts, prompts, bindings, result grants, writes, intake and resume. Test both workflows across different CWDs and worktrees.

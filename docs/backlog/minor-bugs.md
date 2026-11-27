@@ -29,7 +29,7 @@
   **Property:** a test's child deadline comes from a measurement under full-suite load, and a test
   removes the temp directories it creates.
 
-- **The lock heartbeat only logs a stolen lock (2026-10-06, low).** `startLockHeartbeat` (`src/shared/io/fileLock.ts`) logs `lock_heartbeat_stolen` and returns, every tick; the interval keeps running and `fn()` is neither aborted nor told. P3 of the [canonical implementation plan](../reviews/audit-tools-canonical-implementation-plan-2026-10-07.md) replaces this protocol. **Property:** a holder that loses its lock stops its writes and learns of the loss.
+- **File-lock checks are cooperative, not an atomic write fence (2026-10-06, low).** Heartbeat loss now latches, and the shared locked JSON stores recheck ownership before writing. Other state-changing lock users may still lack a check, and a check plus rename is not one atomic operation. P3 of the canonical implementation plan is a separate protocol decision. **Property:** evaluate a remaining caller only when an actual stale-write path warrants work; do not treat the heartbeat or a pre-write check as an atomic guarantee.
 
 - **Test-command discovery lacks some ecosystem declarations (2026-10-06, low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`); repositories using unsupported build systems such as Gradle or Make still reach the final gate's "Verification command required" pause. **Property:** discovery reads a declared command for any ecosystem with one, without a per-ecosystem fork in planning.
 
