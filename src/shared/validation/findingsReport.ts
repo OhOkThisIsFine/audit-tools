@@ -352,18 +352,23 @@ function buildProjection(
     }
   }
 
-  report.findings.forEach((finding, index) => {
-    const projectedTheme = themeByFinding.get(finding.id);
-    if (finding.theme_id !== projectedTheme) {
-      pushValidationIssue(
-        issues,
-        childPath(path, `findings.${index}.theme_id`),
-        projectedTheme === undefined
-          ? `Finding references unknown or unclaimed theme "${finding.theme_id}".`
-          : `Finding theme_id must match its authoritative theme membership ("${projectedTheme}").`,
-      );
-    }
-  });
+  // Question reports keep themes solely in the narrative overlay. Their rows
+  // have already been checked against the exact accepted-claim projection
+  // (which forbids theme_id); only the legacy contract mirrors membership.
+  if (report.contract_version !== QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION) {
+    report.findings.forEach((finding, index) => {
+      const projectedTheme = themeByFinding.get(finding.id);
+      if (finding.theme_id !== projectedTheme) {
+        pushValidationIssue(
+          issues,
+          childPath(path, `findings.${index}.theme_id`),
+          projectedTheme === undefined
+            ? `Finding references unknown or unclaimed theme "${finding.theme_id}".`
+            : `Finding theme_id must match its authoritative theme membership ("${projectedTheme}").`,
+        );
+      }
+    });
+  }
 
   pushCountMismatch(
     issues,
