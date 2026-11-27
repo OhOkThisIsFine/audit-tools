@@ -26,7 +26,6 @@
     "tests/audit/artifacts-dir-rollover.test.ts": 7686,
     "tests/audit/audit-cli-correctness.test.ts": 4743,
     "tests/audit/audit-cli-invariants.test.ts": 881,
-    "tests/audit/audit-code-completion-ingest-dir.test.ts": 5896,
     "tests/audit/audit-code-completion-present.test.ts": 6050,
     "tests/audit/audit-code-completion-promote.test.ts": 5825,
     "tests/audit/audit-code-wrapper-cli-surface.test.ts": 2415,
