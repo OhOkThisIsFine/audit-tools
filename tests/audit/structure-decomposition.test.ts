@@ -267,7 +267,6 @@ describe("buildStructureDecomposition + executor — end to end", () => {
 
   it("produces a scaffold + findings artifact (no root → intent from dir only)", async () => {
     const decomposition = await buildStructureDecomposition({
-      repoManifest: bundle.repo_manifest,
       disposition: bundle.file_disposition,
       graphBundle: bundle.graph_bundle,
     });
@@ -296,7 +295,6 @@ describe("buildStructureDecomposition + executor — end to end", () => {
     };
     const decomposition = await buildStructureDecomposition({
       root: "/repo",
-      repoManifest: bundle.repo_manifest,
       disposition: {
         files: [
           ...bundle.file_disposition.files,

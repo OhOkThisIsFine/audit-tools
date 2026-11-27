@@ -359,7 +359,7 @@ export async function mineGitHistory(
 
   for (const record of records) {
     // Dedup files within a commit so a rename/edit pair cannot double-count.
-    const files = [...new Set(record.files)].sort();
+    const files = [...new Set(record.files)];
     for (const file of files) {
       churn.set(file, (churn.get(file) ?? 0) + 1);
       let authorSet = authors.get(file);
@@ -378,6 +378,7 @@ export async function mineGitHistory(
       skippedCoChangeCommits += 1;
       continue;
     }
+    files.sort();
     for (let i = 0; i < files.length; i += 1) {
       for (let j = i + 1; j < files.length; j += 1) {
         // a < b guaranteed by the sort above, so the pair key is canonical.

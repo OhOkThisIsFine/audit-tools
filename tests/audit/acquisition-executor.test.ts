@@ -328,11 +328,23 @@ test("fresh release is resolved once, failed scan stays visible, and resume reus
       .toMatchObject({ version: "1.999.0", stage: "scan", status: "failed" });
     expect(first.progress_summary).toContain("rerun only that analyzer");
     const healthy = { tool: "gitleaks", status: "success", resolved: true } as const;
-    first.updated.external_analyzer_acquisition!.tool_statuses =
-      marker.tool_statuses.map(row => row.tool === healthy.tool ? healthy : row);
+    const previous = [healthy, ...marker.tool_statuses.filter(row => row.tool !== healthy.tool).reverse()];
+    first.updated.external_analyzer_acquisition!.tool_statuses = previous;
     const retry = await runExternalAnalyzerAcquisitionExecutor(first.updated, root, options, ["semgrep"]);
-    expect(retry.updated.external_analyzer_acquisition!.tool_statuses.find(row => row.tool === healthy.tool)).toEqual(healthy);
-    expect(retry.updated.external_analyzer_acquisition!.tool_statuses.find(row => row.tool === "semgrep")?.status).toBe("failed");
+    const retryStatuses = retry.updated.external_analyzer_acquisition!.tool_statuses;
+    expect(retryStatuses.map(row => row.tool)).toEqual(previous.map(row => row.tool));
+    for (const [index, status] of previous.entries()) {
+      if (status.tool !== "semgrep") expect(retryStatuses[index]).toBe(status);
+    }
+    expect(retryStatuses.find(row => row.tool === "semgrep")).toMatchObject({
+      status: "failed", version: "1.999.0", stage: "scan",
+    });
+    const skipped = await runExternalAnalyzerAcquisitionExecutor(first.updated, root,
+      { ...options, analyzers: { ...analyzerFlags, semgrep: "skip" } }, ["semgrep"]);
+    expect(skipped.updated.external_analyzer_acquisition!.tool_statuses).toEqual(previous);
+    const neverAttempted = previous.find(row => row.status === "skipped")!;
+    await expect(runExternalAnalyzerAcquisitionExecutor(first.updated, root, options, [neverAttempted.tool]))
+      .rejects.toThrow("previously attempted");
     await expect(runExternalAnalyzerAcquisitionExecutor(first.updated, root, options, ["unregistered-tool"]))
       .rejects.toThrow("previously attempted");
     expect(lookups).toEqual(["https://pypi.org/pypi/semgrep/json"]);

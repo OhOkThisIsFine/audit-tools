@@ -267,7 +267,6 @@ export async function runStructureDecompositionExecutor(
 
   const decomposition = await buildStructureDecomposition({
     root,
-    repoManifest: bundle.repo_manifest,
     disposition: bundle.file_disposition,
     graphBundle: bundle.graph_bundle,
   });

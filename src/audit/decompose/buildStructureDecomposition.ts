@@ -10,7 +10,6 @@ import type {
   Partition,
 } from "audit-tools/shared";
 import { clustersFromPartitions, decompose, toPosixPath, compareCodeUnits, uniqueSorted } from "audit-tools/shared";
-import type { RepoManifest } from "../types.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import {
   deriveCommentDecomposition,
@@ -45,7 +44,6 @@ const INTENT_BOUNDARY_FRACTION = 0.5;
 export interface BuildStructureDecompositionParams {
   /** Repo root (absolute); when absent, comment/doc extraction is skipped. */
   root?: string;
-  repoManifest: RepoManifest;
   disposition: FileDisposition;
   graphBundle: GraphBundle;
   /** Injectable file reader (tests supply a map-backed reader). */

@@ -229,12 +229,7 @@ export function buildAuditCodeHandoff(params: {
     ...(params.activeReviewRun ? { active_review_run: params.activeReviewRun } : {}),
   };
   if (blocked && params.activeReviewRun) {
-    handoff.quick_start = renderPromptCommand([
-      "audit-code",
-      "next-step",
-      "--artifacts-dir",
-      params.artifactsDir,
-    ]);
+    handoff.quick_start = reviewCommand;
     handoff.file_map = {
       current_review_run: artifactPaths.current_review_run!,
       current_prompt: artifactPaths.current_prompt!,

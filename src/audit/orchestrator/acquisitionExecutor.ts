@@ -145,9 +145,11 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   const previous = bundle.external_analyzer_acquisition?.tool_statuses ?? [];
   const retrySet = retryTools && new Set(retryTools);
   const candidates = prepared.candidates.filter(candidate => !retrySet || retrySet.has(candidate.id));
-  if (retrySet && (candidates.length !== retrySet.size ||
-      candidates.some(candidate => !previous.some(row => row.tool === candidate.id && row.status !== "skipped")))) {
-    throw new Error("Retry must name only previously attempted analyzers.");
+  if (retrySet) {
+    const attempted = new Set(previous.filter(row => row.status !== "skipped").map(row => row.tool));
+    if (candidates.length !== retrySet.size || candidates.some(candidate => !attempted.has(candidate.id))) {
+      throw new Error("Retry must name only previously attempted analyzers.");
+    }
   }
   const engineOptions = prepared.options;
   const versions = new Map<string, string>();
@@ -234,6 +236,17 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     }
   }
 
+  let toolStatuses = orderedStatuses;
+  if (retrySet) {
+    // The producer checks above guarantee one status per tool. A skipped retry
+    // does not supersede prior evidence; keep every prior row in its old slot.
+    const updatesById = new Map<string, ExternalAnalyzerToolStatus>();
+    for (const status of orderedStatuses) {
+      if (status.status !== "skipped") updatesById.set(status.tool, status);
+    }
+    toolStatuses = previous.map(status => updatesById.get(status.tool) ?? status);
+  }
+
   const marker: ExternalAnalyzerAcquisitionMarker = {
     generated_at,
     enabled: true,
@@ -242,9 +255,7 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     // resolveBinaryCandidates records a status for every binary that didn't
     // resolve; the engine records one per candidate it ran. Union = exactly one
     // status per candidate (report-skipped-never-silently).
-    tool_statuses: retrySet
-      ? previous.map(status => orderedStatuses.find(next => next.tool === status.tool && next.status !== "skipped") ?? status)
-      : orderedStatuses,
+    tool_statuses: toolStatuses,
   };
 
   const artifactsWritten = ["external_analyzer_acquisition.json"];
