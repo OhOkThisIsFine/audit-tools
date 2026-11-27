@@ -11,12 +11,4 @@
 
 - **The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).** `spec/audit/dependency-map.md` holds `BEGIN/END GENERATED spec-mirror` tables that `scripts/shared/generate-spec-mirrors.mjs` owns and `check:spec-mirrors` reconciles; a dependency-map change regenerates a row, and the commit gate then demands an owner-decision override for prose nobody wrote. **Property:** the gate judges only the hand-written part of a constitutional doc; a generated region is judged by its generator's check.
 
-- **A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing
-  (2026-08-31, medium, friction: tool_should_decide).** Since 2026-10-04 `check:comment-code-citations`
-  resolves every backticked path and symbol in a source comment; its guard-reach row lists what it
-  cannot reach. A shape or an enumeration names no single identifier, and a name the same file's code
-  spells is not looked up (the 2026-08-31 `continuityScore` header). **Property:** a comment that
-  states a workflow shape or an enumeration the code owns is reconciled against it mechanically, or it
-  does not state one.
-
-- **Qualify additional analyzer coverage receipts and reuse (2026-11-27, medium).** Actionlint now records and verifies comparable coverage for its qualified native workflow scope. Config changes, omitted files, and ambiguous auxiliary linting still withhold proof. **Remaining:** verify a concrete additional adapter or compatible import/reuse case before extending the mechanism. A tool without comparable coverage can supply positive leads, not certify absence.
+- **Qualify additional analyzer coverage receipts and reuse (2026-11-27, medium).** Actionlint now records and verifies comparable coverage for its qualified native workflow scope. Config changes, omitted files, and ambiguous auxiliary linting still withhold proof. **Remaining:** verify a concrete additional adapter or authenticated portable report reuse across runs before extending the mechanism. In-run reimport preserves prior leads without minting proof; stale or unstamped acquisition evidence cannot verify an absence. A tool without comparable coverage can supply positive leads, not certify absence.
