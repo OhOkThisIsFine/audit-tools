@@ -212,19 +212,20 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   let mergedResults = bundle.external_analyzer_results;
   for (const toolResults of results) {
     const prior = retrySet ? mergedResults?.find(entry => entry.tool === toolResults.tool) : undefined;
-    const status = orderedStatuses.find(row => row.tool === toolResults.tool);
-    const scanned = status?.reported_coverage ? new Set(status.reported_coverage.scanned) : undefined;
-    const stillRelevant = (path: string) => !status || isDegradedExternalAnalyzerStatus(status) ||
-      (scanned !== undefined && !scanned.has(path));
-    // A retry may cover only a slice even with a successful exit. Preserve
-    // previous leads outside proven coverage while admitting new ones.
-    const retained = prior?.results.filter(row => stillRelevant(row.path)) ?? [];
-    const edges = prior?.graph_edges?.filter(edge => stillRelevant(edge.from) || stillRelevant(edge.to)) ?? [];
-    if (retained.length || edges.length) {
+    // A calibration rerun can change the rules as well as the files scanned.
+    // Current adapters can report some paths, but cannot prove that the prior
+    // finding's rule or graph query ran. Absence in a rerun is not retraction.
+    // Retain prior leads; a matching newly observed item replaces its old copy.
+    const retained = prior?.results ?? [];
+    const edges = prior?.graph_edges ?? [];
+    const ownership = prior?.ownership_roots ?? [];
+    if (retained.length || edges.length || ownership.length) {
       const items = new Map([...retained, ...toolResults.results].map(row => [JSON.stringify([row.path, row.id]), row]));
       const graph = new Map([...edges, ...(toolResults.graph_edges ?? [])].map(edge => [JSON.stringify(edge), edge]));
+      const roots = new Map([...ownership, ...(toolResults.ownership_roots ?? [])].map(row => [JSON.stringify(row), row]));
       mergedResults = upsertExternalToolResults(mergedResults, {
         ...toolResults, results: [...items.values()], ...(graph.size && { graph_edges: [...graph.values()] }),
+        ...(roots.size && { ownership_roots: [...roots.values()] }),
       });
     } else {
       mergedResults = upsertExternalToolResults(mergedResults, toolResults);

@@ -408,6 +408,54 @@ test("recovery keeps partial findings from an unsuccessful process visible", () 
   expect(incompleteAnalyzerStatuses(bundle)).toEqual([status, killed]);
 });
 
+test.each([false, true])("calibration preserves prior leads without rule-coverage proof (reported paths: %s)", async (reportsPaths) => {
+  const root = mkdtempSync(join(tmpdir(), "analyzer-retention-"));
+  try {
+    writeFileSync(join(root, "package.json"), "{}");
+    writeFileSync(join(root, "specimen.ts"), "export const fixture = 1;\n");
+    const oldOnly = { id: "old-rule:specimen.ts:1", rule: "old-rule", path: "specimen.ts",
+      category: "maintainability", severity: "medium", summary: "Earlier unverified rule" };
+    const repeated = { ...oldOnly, id: "common-rule:specimen.ts:1", rule: "common-rule", summary: "Earlier copy" };
+    const graph = [{ from: "specimen.ts", to: "peer.ts", kind: "reference" }];
+    const ownership = [{ root: "src", paths: ["src/other.ts"] }];
+    const untouched = { tool: "gitleaks", results: [oldOnly] };
+    const bundle: ArtifactBundle = {
+      ...bundleAfterIntake(),
+      external_analyzer_acquisition: { enabled: true, tool_statuses: [
+        { tool: "semgrep", status: "failed", resolved: true },
+        { tool: "gitleaks", status: "findings", resolved: true },
+      ] },
+      external_analyzer_results: [{ tool: "semgrep", results: [oldOnly, repeated],
+        graph_edges: graph, ownership_roots: ownership }, untouched],
+    };
+    const run: BinaryCommandRunner = async (argv) => ({
+      argv, status: 0, stderr: "", duration_ms: 1,
+      stdout: argv[0] === "pipx" && argv[1] === "--version" ? "1.7.0" : JSON.stringify({
+        ...(reportsPaths ? { paths: { scanned: ["specimen.ts"], skipped: [] } } : {}),
+        results: [{
+          check_id: "common-rule", path: "specimen.ts",
+          start: { line: 1 }, end: { line: 1 },
+          extra: { message: "New observation", severity: "WARNING" },
+        }],
+      }),
+    });
+    const output = await runExternalAnalyzerAcquisitionExecutor(bundle, root, {
+      enabled: true, run, consentToken: { value: "fixture-grant", tools: ["semgrep"] },
+    }, ["semgrep"]);
+    const results = output.updated.external_analyzer_results!;
+    expect(results.find(row => row.tool === "gitleaks")).toBe(untouched);
+    expect(results.find(row => row.tool === "semgrep")).toMatchObject({
+      results: [oldOnly, expect.objectContaining({ id: repeated.id, summary: "New observation" })],
+      graph_edges: graph, ownership_roots: ownership,
+    });
+    const status = output.updated.external_analyzer_acquisition!.tool_statuses.find(row => row.tool === "semgrep")!;
+    expect(status.status).toBe("findings");
+    expect(status.reported_coverage?.scanned).toEqual(reportsPaths ? ["specimen.ts"] : undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("selection context counts admitted languages and points to real build/CI clues", () => {
   const bundle = bundleAfterIntake();
   bundle.repo_manifest!.files.push(
