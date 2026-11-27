@@ -6,7 +6,8 @@ import { advanceToDispatchReady } from "./helpers/completion-harness.js";
 import { readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
 import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { runDeterministicForNextStep } from "../../src/audit/cli/nextStepCommand.js";
-import { hashContent } from "audit-tools/shared";
+import { EXTERNAL_ANALYZER_CANDIDATES, hashContent } from "audit-tools/shared";
+import { persistAnalyzerSettings } from "../../src/shared/analyzerPolicy.js";
 import { MAX_DRAIN_STEPS } from "../../src/audit/orchestrator/advance.js";
 import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
 
@@ -58,6 +59,16 @@ function resume(root: string) {
     analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" } });
 }
 
+/** Qualification of optional analyzer acquisition belongs to the full-path
+ * witness. The other cases still publish real bindings through the CLI. */
+async function prepareIntegrityDispatch(root: string) {
+  await persistAnalyzerSettings(root, Object.fromEntries([
+    "typescript", "python", "css", "html", "sql",
+    ...EXTERNAL_ANALYZER_CANDIDATES.map(candidate => candidate.id),
+  ].map(tool => [tool, "skip" as const])));
+  return advanceToDispatchReady(root);
+}
+
 test("same-line-count issued source edit refreshes returned and persisted authority", async () => {
   await withTempRepo(async (root) => {
     const step = await advanceToDispatchReady(root);
@@ -92,7 +103,7 @@ test.each(["line-count edit", "deleted file", "post-intake failure"])("%s commit
   await withTempRepo(async (root) => {
     // Deletion keeps a second auditable source, so intake remains valid.
     await writeFile(join(root, "src", "api", "other.ts"), "export const other = 1;\n");
-    expect((await advanceToDispatchReady(root)).step_kind).toBe("dispatch_review");
+    expect((await prepareIntegrityDispatch(root)).step_kind).toBe("dispatch_review");
     const artifactsDir = join(root, ".audit-tools", "audit");
     const before = await loadArtifactBundle(artifactsDir);
     expect(before.review_plan?.questions.some(q => q.source_dependencies.some(dep => dep.key === "src/api/auth.ts"))).toBe(true);
@@ -114,7 +125,7 @@ test.each(["line-count edit", "deleted file", "post-intake failure"])("%s commit
 
 test.each([false, true])("bound question answer acceptance with changed frozen source = %s", async (changed) => {
   await withTempRepo(async (root) => {
-    const issued = await readQuestionWorkload(await advanceToDispatchReady(root));
+    const issued = await readQuestionWorkload(await prepareIntegrityDispatch(root));
     const old = issued.work_items.find(({ binding }) => binding.assignment.suggested_sources
       .some(({ path }) => path === "src/api/auth.ts"));
     expect(old).toBeDefined();
@@ -137,7 +148,7 @@ test.each([false, true])("bound question answer acceptance with changed frozen s
       return;
     }
     expect((await readSavedQuestionAnswerLedgerForFixture()).answers).toEqual([]);
-    const current = await readQuestionWorkload(await advanceToDispatchReady(root));
+    const current = await readQuestionWorkload(await prepareIntegrityDispatch(root));
     expect((await readSavedQuestionAnswerLedgerForFixture()).answers).toEqual([]);
     expect(current.work_items.some(({ binding }) => binding.assignment.assignment_id === old!.binding.assignment.assignment_id)).toBe(false);
     expect(current.work_items.some(({ binding }) => binding.question.source_dependencies.some(dep =>
@@ -149,7 +160,7 @@ test.each([false, true])("bound question answer acceptance with changed frozen s
 
 test("failed integrity intake commits its named failure without accepting queued work", async () => {
   await withTempRepo(async (root) => {
-    const issued = await readQuestionWorkload(await advanceToDispatchReady(root));
+    const issued = await readQuestionWorkload(await prepareIntegrityDispatch(root));
     await submitQuestions(root, [issued.work_items[0]!]);
     await unlink(join(await runSourceRoot(root), "src", "api", "auth.ts"));
     await unlink(join(await runSourceRoot(root), "package.json"));
