@@ -2807,15 +2807,6 @@ function omittableObligation(
   };
 }
 
-/**
- * Build the audit obligation definitions in `PRIORITY` order. Each `execute`
- * relocates the corresponding arm of the hand-rolled `for` loop:
- * deterministic executors `transition` (fold), host-delegation / dispatch /
- * terminal points `emit` the host-actionable step. Selection stays single-sourced
- * (`deriveObligationState` reads `deriveAuditState`, and `decideNextStep` resolves
- * the executor for the selected id), so the obligation list cannot drift from the
- * priority scan it mirrors.
- */
 async function readOptionalJson(artifactsDir: string, file: string): Promise<unknown> {
   try { return await readJsonFile(join(artifactsDir, file)); }
   catch (error) { if (!isFileMissingError(error)) throw error; }
@@ -2825,7 +2816,90 @@ function emitCalibration(bundle: ArtifactBundle, request: AnalyzerCalibrationReq
   return { kind: "emit", step: { kind: "analyzer_calibration", state: deriveAuditState(bundle, { emitStaleness: false }), bundle, request }, state: bundle };
 }
 
+// Host-selection is a next-step feature. The low-level deterministic plan
+// does not acquire host selection/calibration responses.
+const HOST_CALIBRATION_OBLIGATION = "analyzer_calibration_current";
+const HOST_SELECTION_OBLIGATION_ORDER = PRIORITY.flatMap(id =>
+  id === "external_analyzers_current" ? [id, HOST_CALIBRATION_OBLIGATION] : [id]);
+
+type CalibrationInputs = { selection: unknown; receipt: unknown };
+
+function calibrationObligation(inputs: CalibrationInputs): AuditObligationDef {
+  const requests = new WeakMap<ArtifactBundle, { selection: unknown; request: AnalyzerCalibrationRequest }>();
+  const requestFor = (bundle: ArtifactBundle) => {
+    const cached = requests.get(bundle);
+    if (cached && cached.selection === inputs.selection) return cached.request;
+    const request = analyzerCalibrationRequest(bundle, inputs.selection);
+    requests.set(bundle, { selection: inputs.selection, request });
+    return request;
+  };
+  return {
+    id: HOST_CALIBRATION_OBLIGATION,
+    derive(bundle) {
+      if (!bundle.external_analyzer_acquisition?.enabled ||
+          bundle.review_tooling_qualification || bundle.audit_state?.status === "complete") return "satisfied";
+      const receipt = currentAnalyzerCalibration(inputs.receipt, requestFor(bundle));
+      return receipt && !receipt.decisions.some(row => row.action === "retry") ? "satisfied" : "missing";
+    },
+    async execute(bundle, ctx) {
+      const { artifactsDir, externalAcquisition } = ctx.params;
+      const request = requestFor(bundle);
+      const file = "analyzer-calibration.json";
+      const lane = GATE_LANES.analyzer_calibration;
+      const incoming = await consumeObjectSubmission(artifactsDir, lane, ctx.tx);
+      if (incoming.status === "ok") {
+        const answer = currentAnalyzerCalibration(incoming.value, request);
+        if (answer) {
+          const affected = answer.decisions.filter(row => row.action === "retry").map(row => row.tool);
+          if (affected.length > 0) {
+            if (!externalAcquisition) throw new Error("Analyzer calibration requires acquisition options.");
+            const next = await runExternalAnalyzerAcquisitionExecutor(
+              bundle, requireSourceRoot(ctx.params), externalAcquisition, affected,
+            );
+            const marker = next.updated.external_analyzer_acquisition!;
+            marker.calibration_retries = [...(marker.calibration_retries ?? []), {
+              input_sha256: request.input_sha256, at: marker.generated_at ?? new Date().toISOString(),
+              tools: answer.decisions.filter(row => affected.includes(row.tool)).map(({ tool, coverage, reason }) => {
+                const measured = marker.tool_statuses.find(row => row.tool === tool);
+                return { tool, coverage, reason, status: measured?.status, version: measured?.version };
+              }),
+            }];
+            next.updated.artifact_metadata = computeArtifactMetadata(
+              next.updated, bundle.artifact_metadata ?? computeArtifactMetadata(bundle), next.artifacts_written,
+            );
+            markSubmissionApplied(ctx.tx, incoming.path);
+            return emitCalibration(next.updated, requestFor(next.updated));
+          }
+          await writeJsonFile(join(artifactsDir, file), answer);
+          inputs.receipt = answer;
+          markSubmissionApplied(ctx.tx, incoming.path);
+          return { kind: "transition", state: bundle };
+        } else {
+          const quarantine = await quarantineSubmissionFile(artifactsDir, incoming.path, lane);
+          await recordLaneOutcome(artifactsDir, lane, {
+            kind: "rejected", issueCode: "submission_contract_invalid",
+            message: "Calibrate each attempted tool exactly once against the current evidence. Degraded results cannot be accepted as complete." + quarantineSurvivalNote(quarantine),
+          });
+          return emitCalibration(bundle, request);
+        }
+      } else {
+        return emitCalibration(bundle, request);
+      }
+    },
+  };
+}
+
+/**
+ * Build the audit obligation definitions in shared priority order, with the host-only calibration gate when enabled. Each `execute`
+ * relocates the corresponding arm of the hand-rolled `for` loop:
+ * deterministic executors `transition` (fold), host-delegation / dispatch /
+ * terminal points `emit` the host-actionable step. Deterministic selection stays single-sourced
+ * (`deriveObligationState` reads `deriveAuditState`, and `decideNextStep` resolves
+ * the executor for the selected id), so the obligation list cannot drift from the
+ * priority scan it mirrors.
+ */
 export function buildAuditObligations(
+  calibration?: CalibrationInputs,
 ): AuditObligationDef[] {
   // One memo per registry construction, shared by every def in it. Scoped to
   // the call so it dies with the fold it was built for, and keyed on bundle
@@ -2873,6 +2947,7 @@ export function buildAuditObligations(
           }
           if (!selection) return { kind: "emit", step: { kind: "analyzer_selection", state, bundle, request }, state: bundle };
         }
+        if (calibration) calibration.selection = selection;
         const skipped = Object.fromEntries(selection.decisions.filter(row => row.action === "omit").map(row => [row.tool, "skip" as const]));
         ctx.analyzersRef.value = { ...ctx.params.analyzers, ...skipped };
         ctx.params.externalAcquisition.analyzers = { ...ctx.params.externalAcquisition.analyzers, ...skipped };
@@ -2917,53 +2992,12 @@ export function buildAuditObligations(
       }
       return runDeterministicExecutor(bundle, ctx);
     },
-    // Confirm-intent host step: the host writes intent_checkpoint.json (read by
-    // deriveAuditState on re-invocation), so there is no submission to
-    // consume — emit the step directly.
-    intent_checkpoint_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const { artifactsDir, externalAcquisition } = ctx.params;
-      if (externalAcquisition?.hostSelection && bundle.external_analyzer_acquisition?.enabled) {
-        const selection = await readOptionalJson(artifactsDir, "analyzer-selection.json");
-        const request = analyzerCalibrationRequest(bundle, selection);
-        const file = "analyzer-calibration.json";
-        const previous = currentAnalyzerCalibration(await readOptionalJson(artifactsDir, file), request);
-        if (!previous || previous.decisions.some(row => row.action === "retry")) {
-          const lane = GATE_LANES.analyzer_calibration;
-          const incoming = await consumeObjectSubmission(artifactsDir, lane, ctx.tx);
-          if (incoming.status === "ok") {
-            const answer = currentAnalyzerCalibration(incoming.value, request);
-            if (answer) {
-              const affected = answer.decisions.filter(row => row.action === "retry").map(row => row.tool);
-              if (affected.length > 0) {
-                const next = await runExternalAnalyzerAcquisitionExecutor(bundle, requireSourceRoot(ctx.params), externalAcquisition, affected);
-                const marker = next.updated.external_analyzer_acquisition!;
-                marker.calibration_retries = [...(marker.calibration_retries ?? []), {
-                  input_sha256: request.input_sha256, at: marker.generated_at ?? new Date().toISOString(),
-                  tools: answer.decisions.filter(row => affected.includes(row.tool)).map(({ tool, coverage, reason }) => {
-                    const measured = marker.tool_statuses.find(row => row.tool === tool);
-                    return { tool, coverage, reason, status: measured?.status, version: measured?.version };
-                  }),
-                }];
-                markSubmissionApplied(ctx.tx, incoming.path);
-                return emitCalibration(next.updated, analyzerCalibrationRequest(next.updated, selection));
-              }
-              await writeJsonFile(join(artifactsDir, file), answer);
-              markSubmissionApplied(ctx.tx, incoming.path);
-            } else {
-              const quarantine = await quarantineSubmissionFile(artifactsDir, incoming.path, lane);
-              await recordLaneOutcome(artifactsDir, lane, {
-                kind: "rejected", issueCode: "submission_contract_invalid",
-                message: "Calibrate each attempted tool exactly once against the current evidence. Degraded results cannot be accepted as complete." + quarantineSurvivalNote(quarantine),
-              });
-              return emitCalibration(bundle, request);
-            }
-          } else {
-            return emitCalibration(bundle, request);
-          }
-        }
-      }
-      return { kind: "emit", step: { kind: "confirm_intent", state: deriveAuditState(bundle, { emitStaleness: false }), bundle }, state: bundle };
-    },
+    // Confirmation consumes prepared evidence without requiring a separate mode.
+    intent_checkpoint_current: async (bundle): Promise<AuditOutcome> => ({
+      kind: "emit",
+      step: { kind: "confirm_intent", state: deriveAuditState(bundle, { emitStaleness: false }), bundle },
+      state: bundle,
+    }),
     // DD-9 intent-equivalence gate: consume a judge verdict (validated +
     // quarantined-loudly), resolve the deterministic arms in-fold, or emit the
     // bounded prose-equivalence judge step.
@@ -3007,14 +3041,15 @@ export function buildAuditObligations(
       );
     }
   }
-  return PRIORITY.map((id) => ({
-    id,
-    derive: deriveObligationState(id, cache),
-    execute:
-      bespoke[id] ??
-      ((bundle: ArtifactBundle, ctx: AuditNextStepCtx) =>
-        runDeterministicExecutor(bundle, ctx)),
-  }));
+  const order = calibration ? HOST_SELECTION_OBLIGATION_ORDER : PRIORITY;
+  return order.map((id) => {
+    if (calibration && id === HOST_CALIBRATION_OBLIGATION) return calibrationObligation(calibration);
+    return {
+      id,
+      derive: deriveObligationState(id, cache),
+      execute: bespoke[id] ?? runDeterministicExecutor,
+    };
+  });
 }
 
 /** Shared design-review-pass executor (both pass obligations route here). */
@@ -3277,10 +3312,17 @@ async function runDeterministicFold(
             }
           }
         }
+        const calibration = params.externalAcquisition?.hostSelection &&
+            !startBundle.review_tooling_qualification && startBundle.audit_state?.status !== "complete"
+          ? {
+              selection: await readOptionalJson(params.artifactsDir, "analyzer-selection.json"),
+              receipt: await readOptionalJson(params.artifactsDir, "analyzer-calibration.json"),
+            }
+          : undefined;
         const engineOutcome = await advance(
           {
-            priority: PRIORITY,
-            obligations: trackFoldBundle(buildAuditObligations()),
+            priority: calibration ? HOST_SELECTION_OBLIGATION_ORDER : PRIORITY,
+            obligations: trackFoldBundle(buildAuditObligations(calibration)),
           },
           startBundle,
           ctx,

@@ -367,8 +367,7 @@ test("absent dependency with recordedRevision > 0 marks artifact stale", async (
 });
 
 test("external analyzer results do not falsely mark unrelated upstream artifacts stale", () => {
-  // graph_bundle and unit_manifest are NOT downstream of external_analyzer_results
-  // in the dependency map — they should not be marked stale when it is added.
+  // The graph consumes analyzer evidence, while source unit membership does not.
   const initialBundle = withQuestionPlan();
   const bundle = {
     ...initialBundle,
@@ -377,8 +376,7 @@ test("external analyzer results do not falsely mark unrelated upstream artifacts
   };
   const stale = computeStaleArtifacts(bundle);
 
-  // Upstream artifacts must NOT be marked stale.
-  expect(!stale.has("graph_bundle.json"), "graph_bundle.json should not be stale").toBeTruthy();
+  expect(stale.has("graph_bundle.json"), "graph_bundle.json should be stale").toBeTruthy();
   expect(!stale.has("unit_manifest.json"), "unit_manifest.json should not be stale").toBeTruthy();
 
   // Downstream artifacts must still be stale (positive path).

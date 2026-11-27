@@ -49,7 +49,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   // advanceAudit call, and computeArtifactMetadata is dependency-first, so the
   // marker records the post-enrichment graph_bundle revision (mirrors
   // audit-findings → narrative).
-  "graph_bundle.json": ["repo_manifest.json", "file_disposition.json"],
+  "graph_bundle.json": ["repo_manifest.json", "file_disposition.json", "external_analyzer_results.json"],
   "analyzer_capability.json": ["graph_bundle.json"],
   "unit_manifest.json": ["repo_manifest.json", "file_disposition.json"],
   "surface_manifest.json": ["repo_manifest.json", "file_disposition.json"],

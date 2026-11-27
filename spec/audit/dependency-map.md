@@ -44,7 +44,7 @@ different analyzer version can classify files differently).
 <!-- BEGIN GENERATED spec-mirror dependency-map#phase-2 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
-| `graph_bundle.json` | `repo_manifest.json`, `file_disposition.json` |
+| `graph_bundle.json` | `repo_manifest.json`, `file_disposition.json`, `external_analyzer_results.json` |
 | `analyzer_capability.json` | `graph_bundle.json` |
 | `unit_manifest.json` | `repo_manifest.json`, `file_disposition.json` |
 | `surface_manifest.json` | `repo_manifest.json`, `file_disposition.json` |
@@ -127,7 +127,7 @@ would re-stale a confirmed checkpoint on every doc edit.
 `src/shared/analyzers/candidates.ts` — `defaultRun: true` members run without the
 per-run consent token; every other candidate requires it) — a run-record + staleness anchor
 with no downstream of its own; the findings it produces land in
-`external_analyzer_results.json` (a leaf input to Phase 3, absent from THIS
+`external_analyzer_results.json` (a leaf input to structure and Phase 3, absent from THIS
 dependency table because nothing declares an upstream dependency for it — it does
 appear in the producer table below, where the acquisition executor is one of its
 three writers).

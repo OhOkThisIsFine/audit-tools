@@ -324,7 +324,9 @@ test("one shared checkpoint offers using evidence without accepting audit intent
       externalAcquisition: { enabled: true, hostSelection: true, run: async argv => {
         executions.push([...argv]);
         return { argv, status: 0, stderr: "", duration_ms: 1,
-          stdout: JSON.stringify({ results: [], paths: { scanned: [MANUAL, STORE], skipped: [{ path: SCHEDULED }] } }) };
+          stdout: JSON.stringify({ results: [
+            { check_id: "new-manual", path: MANUAL, start: { line: 1 }, extra: { message: "new fixture lead", severity: "WARNING" } },
+          ], paths: { scanned: [MANUAL, STORE], skipped: [{ path: SCHEDULED }] } }) };
       } },
     });
     expect(retry.kind).toBe("analyzer_calibration");
@@ -336,14 +338,30 @@ test("one shared checkpoint offers using evidence without accepting audit intent
     expect(retry.request.tools.find(tool => tool.tool === "semgrep")?.admittedSkipped).toEqual([SCHEDULED]);
     expect(retry.request.tools.find(tool => tool.tool === "gitleaks")).toMatchObject({ status: "success", exit_code: 0 });
     expect(retry.bundle.external_analyzer_results?.find(row => row.tool === "semgrep")?.results)
-      .toEqual([expect.objectContaining({ id: "historical-scheduled" })]);
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: "historical-scheduled" }),
+        expect.objectContaining({ rule: "new-manual" })]));
+    const staleAfterRetry = computeStaleArtifacts(retry.bundle, { emit: false });
+    expect(staleAfterRetry).toContain("graph_bundle.json");
+    expect(staleAfterRetry).not.toContain("external_analyzer_acquisition.json");
     await writeFile(preparation.artifact_paths.analyzer_calibration, JSON.stringify({
       input_sha256: retry.request.input_sha256,
       decisions: [healthy, { tool: "semgrep", action: "limited", reason: "Retry fixed store coverage only", coverage: "Scheduled file remains skipped" }],
       unresolved: [SCHEDULED + " still omitted by Semgrep"],
     }));
     await cmdNextStep(argv);
-    const first = await current();
+    let first = await current();
+    if (first.step_kind === "critical_flow_fallback") {
+      // The tiny fixture may have no classified entrypoint after regeneration.
+      await writeFile(first.artifact_paths.critical_flow_fallback_results, JSON.stringify({ flows: [] }));
+      await cmdNextStep(argv);
+      first = await current();
+    }
+    if (first.step_kind === "analyzer_install") {
+      // Inline graph enrichment is optional, separate from the scoped retry.
+      await writeFile(first.artifact_paths.analyzer_decisions, JSON.stringify({ typescript: "skip" }));
+      await cmdNextStep(argv);
+      first = await current();
+    }
     expect(first.step_kind).toBe("confirm_intent");
     expect(first.stop_condition).toMatch(/stop with the prepared evidence/);
     const checkpointPrompt = await readFile(first.prompt_path, "utf8");
@@ -390,5 +408,53 @@ test("one shared checkpoint offers using evidence without accepting audit intent
     expect(continued.kind).not.toBe("analyzer_calibration");
     expect(executions).toHaveLength(2);
     expect(await readFile(join(artifactsDir, "run-snapshot.json"), "utf8")).toBe(snapshot);
+  });
+});
+
+test("resuming with confirmed intent still requires calibration of current analyzer evidence", async () => {
+  await withTempRepo(async root => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const bundle = await sourceFixture(root);
+    await writeCoreArtifacts(artifactsDir, {
+      ...bundle, auto_fixes_applied: {}, syntax_resolution_status: {},
+      external_analyzer_acquisition: { enabled: true, tool_statuses: [
+        { tool: "gitleaks", status: "success", resolved: true, exit_code: 0 },
+      ] },
+      analyzer_capability: { coverage: "not_applicable", analyzers: [] },
+      design_assessment: { generated_at: "2026-01-01T00:00:00Z", findings: [], contract_reviewed: true, conceptual_reviewed: true },
+      docs_digest: { generated_at: "2026-01-01T00:00:00Z", docs: [] },
+      structure_decomposition: {
+        generated_at: "2026-01-01T00:00:00Z", target: "structure", node_universe_size: 1,
+        source_ids: [], consensus: [], contested: [], findings: [],
+      },
+    });
+    const step = await runDeterministicForNextStep({
+      root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 15000,
+      externalAcquisition: { enabled: true, hostSelection: true, run: async () => {
+        throw new Error("No analyzer should be spawned before the calibration decision");
+      } },
+    });
+    expect(step.bundle.intent_checkpoint).toBeDefined();
+    expect(step.kind).toBe("analyzer_calibration");
+  });
+});
+
+test("changing analyzer findings invalidates a previously built graph but not analyzer acquisition", async () => {
+  await withTempRepo(async root => {
+    const bundle = await sourceFixture(root);
+    bundle.external_analyzer_acquisition = { enabled: true, tool_statuses: [] };
+    bundle.external_analyzer_results = [{ tool: "synthetic", results: [] }];
+    bundle.artifact_metadata = computeArtifactMetadata(bundle);
+    const refreshed: ArtifactBundle = {
+      ...bundle,
+      external_analyzer_results: [{ tool: "synthetic", results: [],
+        graph_edges: [{ from: MANUAL, to: SCHEDULED }] }],
+    };
+    refreshed.artifact_metadata = computeArtifactMetadata(
+      refreshed, bundle.artifact_metadata, ["external_analyzer_results.json"],
+    );
+    const changed = computeStaleArtifacts(refreshed, { emit: false });
+    expect(changed).toContain("graph_bundle.json");
+    expect(changed).not.toContain("external_analyzer_acquisition.json");
   });
 });

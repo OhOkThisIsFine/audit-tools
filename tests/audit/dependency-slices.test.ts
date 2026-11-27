@@ -789,6 +789,7 @@ test("recovery: a cascade over COMPLETED work names what invalidated it", () => 
   const bundle = {
     repo_manifest: { files: [{ path: "src/a.ts" }] },
     structure_decomposition: { subsystems: [] },
+    external_analyzer_results: [],
   } as unknown as ArtifactBundle;
   const stale = new Set(["repo_manifest.json", "structure_decomposition.json"]);
 
