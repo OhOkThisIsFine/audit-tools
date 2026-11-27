@@ -18,7 +18,7 @@ import { z } from "zod";
 import { ActiveReviewRunSchema } from "../../contracts/wrapperResponse.js";
 import { sourceTreeInstruction } from "../../io/runSnapshot.js";
 import { CURRENT_TASK_FILENAME } from "../../supervisor/operatorHandoff.js";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lensDefinition } from "../../types.js";
@@ -694,6 +694,21 @@ async function readQuestionLedger(paths: ResolvedBoundaryPaths) {
 const reviewerGraphIndex = (artifactsDir: string, digest: string) =>
   join(artifactsDir, "review-graph-index", digest + ".json");
 
+/** Existing issued workloads did not encode which graph layout issued them. */
+async function resolveIssuedReviewerGraphIndex(paths: ResolvedBoundaryPaths, digest: string): Promise<string> {
+  const shared = reviewerGraphIndex(paths.artifactsDir, digest);
+  const legacy = reviewerGraphIndex(paths.runDir, digest);
+  for (const path of [shared, legacy]) {
+    const entry = await stat(path).catch((error: unknown) => {
+      if (isFileMissingError(error)) return undefined;
+      throw error;
+    });
+    if (!entry) continue;
+    if (!entry.isFile()) throw new Error("Issued review graph index is not a file: " + path);
+    return path;
+  }
+  throw new Error("Issued review graph index is missing; refresh next-step before dispatching.");
+}
 const reviewerSourceIndex = (paths: ResolvedBoundaryPaths, digest: string) =>
   join(paths.runDir, "review-source-index", digest + ".json");
 
@@ -728,7 +743,7 @@ export async function prepareAuditQuestionReview(params: QuestionBoundary & { as
     await saveImmutableReviewText(indexPath, stableStringify(sourceIndex) + "\n");
     const { evidence } = hydrateQuestionBinding(workload, item.binding);
     const reviewGraph = workload.graph_sha256 ? {
-      graph_index: toPosixPath(reviewerGraphIndex(paths.artifactsDir, workload.graph_sha256)),
+      graph_index: toPosixPath(await resolveIssuedReviewerGraphIndex(paths, workload.graph_sha256)),
       graph_sha256: workload.graph_sha256,
     } : {};
     const readPaths = {

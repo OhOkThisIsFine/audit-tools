@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS, withTempRepo } from "./helpers/next-step-harness.js";
@@ -123,6 +123,22 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     expect(JSON.parse(await readFile(selected.packet.source_index, "utf8")))
       .toEqual({ source_root: selected.packet.source_root, source_files: sourceFiles });
     expect(JSON.parse((await prepare(first.binding.assignment.assignment_id)).stdout)).toEqual(selected.handle);
+    // An already-issued workload from the previous layout still binds the
+    // same digest, with the graph and optional index cache rooted in its run.
+    const legacyGraph = join(step.artifacts_dir, "runs", step.run_id, "review-graph-index", selected.packet.graph_sha256 + ".json");
+    await mkdir(dirname(legacyGraph), { recursive: true });
+    await rename(selected.packet.graph_index, legacyGraph);
+    try {
+      const legacy = JSON.parse((await runCommand([...routing.prepare_review_argv_prefix,
+        "--work-item", first.binding.assignment.assignment_id], { cwd: root })).stdout).read_paths;
+      expect(resolve(legacy.graph_index)).toBe(resolve(legacyGraph));
+      expect(legacy.graph_sha256).toBe(selected.packet.graph_sha256);
+      const queried = await runCommand(["review-graph", "--graph-index", legacy.graph_index,
+        "--graph-sha256", legacy.graph_sha256, "--path", neighbor], { cwd: root });
+      expect(JSON.parse(queried.stdout)).toEqual(JSON.parse(graph.stdout));
+    } finally {
+      await rename(legacyGraph, selected.packet.graph_index);
+    }
     const prepareArgs = [...routing.prepare_review_argv_prefix, "--work-item", first.binding.assignment.assignment_id];
     for (const invalid of ["{ malformed", JSON.stringify(["audit-code", "--expect-version=old"])]) {
       const fallback = await runWrapper(prepareArgs, { cwd: root, env: { AUDIT_CODE_INVOCATION: invalid } });
