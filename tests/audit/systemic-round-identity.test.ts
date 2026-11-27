@@ -1,3 +1,4 @@
+import { REVIEW_QUESTION_CONTRACT_VERSION } from "../../src/shared/types/reviewQuestion.js";
 import { systemicPremiseToken } from "../../src/audit/orchestrator/systemicChallengeExecutor.js";
 import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
@@ -174,7 +175,7 @@ describe("systemic challenge round identity", () => {
     expect(current.systemic_challenge).toEqual(before);
   });
 
-  test.each(["contract_findings", "conceptual_findings", "timestamp"] as const)("systemic acceptance binds the carried prior findings without re-emission (%s)", async (change) => {
+  test.each(["contract_findings", "conceptual_findings", "timestamp", "scoped_result"] as const)("systemic acceptance distinguishes changed findings from incidental inputs without re-emission (%s)", async (change) => {
     const { root, artifactsDir } = await makeRoot();
     const issued = systemicBundle(openRegister([{ round: 1, new_finding_ids: ["SYS-1"], dry: false }]));
     const finding = {
@@ -196,23 +197,43 @@ describe("systemic challenge round identity", () => {
     await writeBoundReviewFixture(artifactsDir, systemicChallengeLane(issued.systemic_challenge!.rounds), { findings: [] });
 
     const current = structuredClone(issued);
-    if (change === "timestamp") current.design_assessment!.generated_at = "2026-02-01T00:00:00Z";
+    const incidental = change === "timestamp" || change === "scoped_result";
+    if (change === "scoped_result") {
+      current.question_cycle = {
+        pending: [], evidence: [], adjudications: [], dependenciesByQuestion: new Map(), consolidations: [],
+        answers: [{
+          schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
+          accepted_at: "2026-02-01T00:00:00Z",
+          dependency_bindings: [],
+          submission: {
+            schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
+            question_id: "scoped-question", revision_id: "scoped-revision", snapshot_id: "scoped-snapshot",
+            submission_id: "scoped-submission", assignment_id: "scoped-assignment",
+            inspected_sources: [], evidence_ids: [], limitations: [],
+            answer: { outcome: "clean", observations: [], parts: [], findings: [] },
+          },
+        }],
+      };
+    } else if (change === "timestamp") current.design_assessment!.generated_at = "2026-02-01T00:00:00Z";
     else current.design_assessment![change] = [{ ...finding, id: "DESIGN-B", title: "New carried assessment B" }];
-    // Premise/round identity and the on-disk evidence stay A. Only the live
-    // assessment consumed by the prompt changes; no emitter refresh can save us.
+    // Premise/round identity and on-disk evidence stay A. Material cases
+    // change the carried prompt; incidental cases change unreviewed data.
+    // Both use the original binding, with no intervening re-emission.
     expect(systemicPremiseToken(current)).toBe(premise);
     expect(current.systemic_challenge).toEqual(issued.systemic_challenge);
     expect(JSON.parse(await readFile(assessmentPath, "utf8"))).toEqual(issued.design_assessment);
     const tx = createFoldTransaction();
     const outcome = await handleSystemicChallengeBranch({ root, sourceRoot: root, artifactsDir }, current, emptyState, tx);
-    expect(outcome.action).toBe(change === "timestamp" ? "continue" : "return");
-    if (change !== "timestamp") {
+    expect(outcome.action).toBe(incidental ? "continue" : "return");
+    if (!incidental) {
       if (outcome.action !== "return") throw new Error("stale prior findings were accepted");
       expect(outcome.result.bundle.systemic_challenge).toEqual(issued.systemic_challenge);
       expect(tx.staged.some(submission => submission.applied)).toBe(false);
     } else {
-      if (outcome.action !== "continue") throw new Error("cosmetic timestamp change was refused");
-      expect(outcome.bundle.systemic_challenge?.rounds).toHaveLength(2);
+      if (outcome.action !== "continue") throw new Error("incidental input change was refused");
+      expect(outcome.bundle.systemic_challenge?.rounds.map(round => round.dry)).toEqual([false, true]);
+      expect(outcome.bundle.systemic_challenge?.round_token).toBe(premise);
+      expect(tx.staged.some(submission => submission.applied)).toBe(true);
     }
   });
 
