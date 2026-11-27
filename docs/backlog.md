@@ -24,13 +24,12 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 96 entr(y/ies) indexed.
+> and at commit). 95 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
 - `open-bugs.md:9` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
-- `open-bugs.md:12` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
-- `open-bugs.md:14` — Qualify additional analyzer coverage receipts and reuse (2026-11-27, medium).
+- `open-bugs.md:12` — Qualify additional analyzer coverage receipts and reuse (2026-11-27, medium).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
