@@ -71,6 +71,21 @@ test("prepared release requires exact successful default pushes from both canoni
   assert.throws(() => evaluate({ ...run, conclusion: "skipped" }, suite), /did not pass/);
   assert.throws(() => evaluate(run, { ...suite, conclusion: "failure" }), /red CI/);
   assert.throws(() => evaluatePreparedRuns({ total_count: 3, workflow_runs: [run, suite] }, identity), /incomplete/);
+
+  const tag = "v0.57.20";
+  const downstream = { ...run, id: 20, name: "publish-package", event: "release", head_branch: tag,
+    path: ".github/workflows/publish-package.yml", conclusion: "failure" };
+  const recover = (...rows) => evaluatePreparedRuns({ total_count: rows.length, workflow_runs: rows },
+    { ...identity, pushedTag: tag });
+  assert.equal(recover(run, suite, downstream), run);
+  assert.equal(recover(run, suite, { ...downstream, status: "in_progress", conclusion: null }), run);
+  assert.equal(recover(suite, { ...downstream, conclusion: "success" }), null);
+  assert.throws(() => evaluate(run, suite, downstream), /red CI/);
+  assert.equal(evaluate(run, suite, { ...downstream, status: "in_progress", conclusion: null }), null);
+  for (const other of [
+    { event: "workflow_dispatch" }, { path: ".github/workflows/lookalike.yml" },
+    { head_branch: "v0.57.21", display_title: tag }, { head_repository: { id: 43 } },
+  ]) assert.throws(() => recover(run, suite, { ...downstream, ...other }), /red CI/);
 });
 
 test("prepared release checks attest the exact job and actual verify step, not a green workflow shell", () => {

@@ -436,13 +436,21 @@ const preparedWorkflows = [".github/workflows/ci.yml", ".github/workflows/audit-
  * Both required workflows must have one unambiguous push run from this
  * repository's default branch. Their display names are not identity.
  * @param {any} response
- * @param {{headSha: string, branch: string, repoId: number}} identity
+ * @param {{headSha: string, branch: string, repoId: number, pushedTag?: string}} identity
  */
-export function evaluatePreparedRuns(response, { headSha, branch, repoId }) {
-  const runs = response?.workflow_runs;
-  if (!Array.isArray(runs) || response.total_count !== runs.length) {
+export function evaluatePreparedRuns(response, { headSha, branch, repoId, pushedTag }) {
+  const listed = response?.workflow_runs;
+  if (!Array.isArray(listed) || response.total_count !== listed.length) {
     throw new Error("Prepared release CI evidence is incomplete.");
   }
+  // A recovered exact tag may already have its own downstream publish run.
+  // Neither its success nor its failure describes the protected branch push.
+  const publishPath = ".github/workflows/publish-package.yml";
+  const runs = pushedTag ? listed.filter((row) => !(
+    row?.event === "release" && row.head_sha === headSha && row.head_branch === pushedTag &&
+    (row.path === publishPath || row.path === `${publishPath}@refs/tags/${pushedTag}`) &&
+    row.repository?.id === repoId && row.head_repository?.id === repoId
+  )) : listed;
   const red = evaluateCiGreenForSha(runs, { headSha }).redWorkflows;
   if (red.length) throw new Error(`Prepared release has red CI on ${headSha}: ${red.join(", ")}.`);
   const required = preparedWorkflows.map((path) => {
@@ -533,9 +541,9 @@ function inspectPreparedRemoteTag(remote, tag, headSha) {
   return assessPreparedRemoteTag(refs, { tag, headSha, localTagSha: tryGitSha(ref) });
 }
 
-/** @param {string} repoSlug @param {string} headSha @param {boolean} [alreadyPushed] */
-async function qualifyPreparedHead(repoSlug, headSha, alreadyPushed = false) {
-  const identity = { ...requireProtectedDefaultTip(repoSlug, headSha, alreadyPushed), headSha };
+/** @param {string} repoSlug @param {string} headSha @param {string} [pushedTag] */
+async function qualifyPreparedHead(repoSlug, headSha, pushedTag) {
+  const identity = { ...requireProtectedDefaultTip(repoSlug, headSha, Boolean(pushedTag)), headSha, pushedTag };
   const deadline = Date.now() + ciInFlightWaitMs;
   console.log(`[release] waiting for the protected default-branch push checks and tests on ${headSha}`);
   for (;;) {
@@ -548,7 +556,7 @@ async function qualifyPreparedHead(repoSlug, headSha, alreadyPushed = false) {
       if (current.id !== ci.id || current.run_attempt !== ci.run_attempt || current.status !== "completed" || current.conclusion !== "success") {
         throw new Error("Prepared release checks changed during qualification; wait for the new attempt and retry.");
       }
-      const tip = requireProtectedDefaultTip(repoSlug, headSha, alreadyPushed);
+      const tip = requireProtectedDefaultTip(repoSlug, headSha, Boolean(pushedTag));
       if (tip.branch !== identity.branch || tip.repoId !== identity.repoId) {
         throw new Error("Prepared release default-branch identity changed during CI qualification.");
       }
@@ -1614,7 +1622,8 @@ async function runRelease() {
       if (preparedTagAlreadyPushed && journal?.preparedTagSha !== tryGitSha(`refs/tags/${resume.tag}`)) {
         throw new Error("Cannot finish a pushed prepared release without its checkpointed tag object.");
       }
-      await runPhase("pre-tag-gate(prepared-ci)", () => qualifyPreparedHead(repoSlug, headAtStart, preparedTagAlreadyPushed));
+      await runPhase("pre-tag-gate(prepared-ci)", () =>
+        qualifyPreparedHead(repoSlug, headAtStart, preparedTagAlreadyPushed ? resume.tag : undefined));
       ensureCleanWorktree();
       if (tryGitSha("HEAD") !== headAtStart) throw new Error("Prepared release HEAD changed; refusing to tag or push.");
       ensurePreparedLocalTag(resume.tag, headAtStart);
