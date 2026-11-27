@@ -187,9 +187,11 @@ function parsePackJson(stdout) {
  * rebuilds dist/, so the tarball always matches current source even when the caller is
  * a standalone smoke run with no build step ahead of it.
  */
-function packWithNpm({ repoRoot, cacheDir }) {
+function packWithNpm({ repoRoot, cacheDir, requireScripts = false }) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const resolved = resolveSpawn(npm, ["pack", "--json", "--pack-destination", cacheDir]);
+  const args = ["pack", "--json", "--pack-destination", cacheDir];
+  if (requireScripts) args.push("--ignore-scripts=false");
+  const resolved = resolveSpawn(npm, args);
   const result = spawnSync(resolved.command, resolved.args, /** @type {any} */ ({
     cwd: repoRoot,
     encoding: "utf8",
@@ -287,7 +289,12 @@ function prepareReleasePack(cacheDir) {
   if (existsSync(join(cacheDir, CACHE_MANIFEST))) {
     throw new Error("A release pack has already been prepared; use a fresh release pack directory.");
   }
-  const result = packOrReuse({ repoRoot: REPO_ROOT, cacheDir, pack: packWithNpm, version: pkg.version });
+  const result = packOrReuse({
+    repoRoot: REPO_ROOT,
+    cacheDir,
+    pack: (ctx) => packWithNpm({ ...ctx, requireScripts: true }),
+    version: pkg.version,
+  });
   readReleasePack(cacheDir, pkg);
   return result;
 }

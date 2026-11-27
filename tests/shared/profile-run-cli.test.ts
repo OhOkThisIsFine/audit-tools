@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 /** Invoke the real CLI; replace only its OS child boundary in the fresh process. */
-async function run(args: string[], failAt = -1) {
+async function run(args: string[], failAt = -1, freshReleasePack = false) {
   const dir = await mkdtemp(join(tmpdir(), "profile-run-cli-"));
   cleanups.push(dir);
   const callsPath = join(dir, "calls.jsonl");
@@ -37,7 +37,10 @@ syncBuiltinESMExports();
   try {
     execFileSync(process.execPath, ["--import", pathToFileURL(hook).href, join(root, "scripts/shared/profile-run.mjs"), profile, ...args], {
       cwd: dir, encoding: "utf8", timeout: 10_000,
-      env: { ...process.env, GITHUB_STEP_SUMMARY: "" }, stdio: "pipe",
+      env: {
+        ...process.env, GITHUB_STEP_SUMMARY: "",
+        AUDIT_TOOLS_RELEASE_PACK_DIR: freshReleasePack ? join(dir, "release-pack") : undefined,
+      }, stdio: "pipe",
     });
   } catch (error) {
     status = (error as { status: number }).status;
@@ -74,4 +77,23 @@ it("retains explicit script order and stops on the first failed child", async ()
   expect(outcome.calls).toHaveLength(2);
   expect(outcome.ledger.steps.map(step => step.label)).toEqual(["check:first", "check:second"]);
   expect(outcome.calls.map(call => call.args.join(" ")).join("\n")).not.toContain("check:never");
+});
+
+it("executes a single fresh release pack in the build slot, before checks that require dist", async () => {
+  const ordinary = catalogCommands("checks").map(({ label }) => label);
+  const expected = ordinary.filter(label => label !== "pack:smoke")
+    .map(label => label === "build" ? "pack:smoke" : label);
+  const outcome = await run(["--catalog=checks"], -1, true);
+  const packIndex = expected.indexOf("pack:smoke");
+  expect(outcome.status).toBe(0);
+  expect(outcome.ledger.steps.map(({ label }) => label)).toEqual(expected);
+  expect(outcome.calls).toHaveLength(expected.length);
+  expect(outcome.calls[packIndex]!.args.join(" ")).toContain("run --silent pack:smoke");
+  expect(packIndex).toBeLessThan(expected.indexOf("check:scripts"));
+  expect(packIndex).toBeLessThan(expected.indexOf("smoke:packaged-audit-code"));
+  expect(packIndex).toBeLessThan(expected.indexOf("smoke:packaged-remediate-code"));
+  const failedPack = await run(["--catalog=checks"], packIndex, true);
+  expect(failedPack.status).toBe(1);
+  expect(failedPack.ledger.steps.map(({ label }) => label)).toEqual(expected.slice(0, packIndex + 1));
+  expect(failedPack.calls).toHaveLength(packIndex + 1);
 });

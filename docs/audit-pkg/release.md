@@ -114,8 +114,11 @@ to `next`.
 
 Publishing a GitHub Release triggers the same workflow.
 
-The non-test gate packs once and both packaged smokes install that tarball. The
-publish job downloads the gate's artifact and checks its SHA-256 and packed
+The non-test gate packs once and both packaged smokes install that tarball.
+The fresh release pack runs the normal `prepack` build before the checks that
+require `dist/`; the gate does not run a second build first. Local and PR
+checks keep their standalone build and pack behavior.
+The publish job downloads the gate's artifact and checks its SHA-256 and packed
 package name and version against the verified checkout. Both live publish and
 dry-run use those same tarball bytes without rebuilding or repacking. A live
 run reports success only once npm returns the qualified tarball integrity and

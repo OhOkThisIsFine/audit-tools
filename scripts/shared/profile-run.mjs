@@ -20,13 +20,14 @@ if (!profileName || scripts.length === 0) {
 
 const npm = npmCommand();
 const mode = scripts[0]?.match(/^--catalog=(checks|release)$/)?.[1];
-const commands = mode ? catalogCommands(mode, undefined, npm) : scripts.map((script) => ({
-  label: script,
-  command: npm,
-  args: ["run", "--silent", script],
-}));
-
 try {
+  const commands = mode ? catalogCommands(mode, undefined, npm, {
+    freshReleasePack: Boolean(process.env.AUDIT_TOOLS_RELEASE_PACK_DIR),
+  }) : scripts.map((script) => ({
+    label: script,
+    command: npm,
+    args: ["run", "--silent", script],
+  }));
   await runProfiledCommands(profileName, commands);
 } catch (error) {
   console.error(`[profile:${profileName}] ${/** @type {any} */ (error).message}`);
