@@ -1,10 +1,13 @@
 import { expect, test } from "vitest";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 import { advanceToDispatchReady, callNextStep } from "./helpers/completion-harness.js";
 import { persistAnalyzerSettings } from "../../src/shared/analyzerPolicy.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
+import { type ToolingManifest } from "../../src/audit/types/toolingManifest.js";
+import { hasStaleReopenedWorkingReport, qualifyQuestionReviewTooling } from "../../src/audit/cli/questionReviewSession.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION as version, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
 test("compacted answers can be consolidated again after an answer is reopened", async () => {
@@ -70,10 +73,42 @@ test("compacted answers can be consolidated again after an answer is reopened", 
     const decisions = [decision];
     const target = accepted[0]!;
     const reopenFile = join(root, ".audit-tools", "reopen-one.json");
+    // The same reopen fixture also covers the historical-tooling authorization
+    // and report-currency boundaries without starting a second full audit.
+    const toolingPath = join(artifactsDir, "tooling_manifest.json");
+    const metadataPath = join(artifactsDir, "artifact_metadata.json");
+    const current = JSON.parse(await readFile(toolingPath, "utf8")) as ToolingManifest;
+    const prior = { ...current, implementation_hash: "f".repeat(64) };
+    const recordedToolingHash = hashArtifactValue("tooling_manifest.json", prior);
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    metadata.artifacts["tooling_manifest.json"].content_hash = recordedToolingHash;
+    await writeFile(toolingPath, JSON.stringify(prior));
+    await writeFile(metadataPath, JSON.stringify(metadata));
+    const tooling_transition = {
+      prior_implementation_hash: prior.implementation_hash, current_implementation_hash: current.implementation_hash,
+      reason: "Only the review tool changed; preserve the frozen inputs.",
+    };
+    const qualify = () => qualifyQuestionReviewTooling({
+      artifactsDir, snapshotId: target.snapshot_id, prior, current, recordedToolingHash,
+      allowQualifiedReview: true,
+    });
+    await expect(qualifyQuestionReviewTooling({
+      artifactsDir, snapshotId: target.snapshot_id, prior, current, recordedToolingHash,
+      requested: { ...tooling_transition, current_implementation_hash: "e".repeat(64) }, allowQualifiedReview: true,
+    })).rejects.toThrow(/exact historical and current implementation/u);
     await writeFile(reopenFile, JSON.stringify({ reopen_id: "bad-answer", reason: "Review used the wrong subject.",
       questions: [{ question_id: target.question_id, revision_id: target.revision_id, snapshot_id: target.snapshot_id,
-        expected_submission_ids: [target.submission_id] }] }));
+        expected_submission_ids: [target.submission_id] }], tooling_transition }));
     await run(["reopen-questions", "--from", reopenFile]);
+    const guidance = join(artifactsDir, "intake", "conversation-start.md");
+    await mkdir(dirname(guidance), { recursive: true });
+    await writeFile(guidance, "Unapproved change to intent.\n", { flag: "wx" });
+    try {
+      await expect(qualify()).rejects.toThrow(/qualified review tooling inputs changed/i);
+    } finally {
+      await unlink(guidance);
+    }
+    expect(await hasStaleReopenedWorkingReport(artifactsDir)).toBe(true);
     const reissued = await next();
     const active = JSON.parse(await readFile(reissued.artifact_paths.host_workload, "utf8")) as { work_items: typeof work_items };
     const replacement = active.work_items.find(item => item.binding.question.question_id === target.question_id)!;
@@ -93,5 +128,6 @@ test("compacted answers can be consolidated again after an answer is reopened", 
     expect(report.question_review.consolidations).toEqual(decisions);
     expect(report.findings).toHaveLength(1);
     expect(report.findings[0].question_review_sources).toHaveLength(2);
+    expect(await hasStaleReopenedWorkingReport(artifactsDir)).toBe(false);
   });
 });

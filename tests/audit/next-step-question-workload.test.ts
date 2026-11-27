@@ -55,6 +55,8 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
     expect(step.allowed_commands[0]).toMatch(/next-step/u);
     expect(step.artifact_paths.dispatch_plan).toBeUndefined();
     expect(step.artifact_paths.dispatch_quota).toBeUndefined();
+    await expect(runCommand(["next-step", ...artifactArgs, "--guidance", "Do a different audit"], { cwd: root }))
+      .rejects.toThrow(/active question review cannot change guidance/u);
     const workload: unknown = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8"));
     expect(workload).toMatchObject({
       contract_version: "audit-tools/question-review/v1",
