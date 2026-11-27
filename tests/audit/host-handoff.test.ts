@@ -1920,11 +1920,20 @@ describe(FAILURE_SIGNATURE, () => {
 
     const historicalBytes = await readFile(bindingsPath);
     const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
-    await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
-
-    const step = JSON.parse(
-      await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
-    ) as { step_kind: string; status: string; run_id: string; artifact_paths: { host_workload: string } };
+    const { walkStepsUntilTerminal } = await import("./helpers/step-driver.js");
+    const step = await walkStepsUntilTerminal({
+      transport: async () => {
+        await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
+        return JSON.parse(await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"));
+      },
+      terminalKinds: new Set(["dispatch_review"]),
+      label: "historical host task bindings",
+      observePause: (pause) => {
+        // The diagnostic fixture has a completed plan. Only new analyzer gates
+        // are answered here, not an unexpected missing design or scope stage.
+        expect(["analyzer_selection", "analyzer_calibration"]).toContain(pause.step_kind);
+      },
+    });
     expect(step.step_kind).toBe("dispatch_review");
     expect(step.status).toBe("ready");
     expect(step.run_id).not.toBe(runId);

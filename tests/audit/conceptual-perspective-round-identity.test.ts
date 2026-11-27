@@ -291,7 +291,9 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     expect(new Set(prompts).size).toBe(prompts.length);
     expect(judge).toContain("## Perspective result files");
     const lane = firstManifest.perspectives[0].lane_id;
-    expect((await readAuditReviewBinding(dir, lane))?.inputs).toContainEqual({ path: evidence, sha256: digest });
+    expect((await readAuditReviewBinding(dir, lane))?.inputs?.map(({ path, sha256 }) => ({
+      path: path.replaceAll("\\", "/"), sha256,
+    }))).toContainEqual({ path: evidence!.replaceAll("\\", "/"), sha256: digest });
     await chmod(evidence!, 0o644);
     await writeFile(evidence!, artifact + "changed evidence\n");
     expect(await readAuditReviewBinding(dir, lane)).toBeUndefined();

@@ -21,6 +21,7 @@
  * affected — never a blind full re-run. Enforced by the tool, not host memory.
  */
 import { projectDesignReviewTask } from "./designReviewTask.js";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   diffProjections,
@@ -91,7 +92,20 @@ export async function readDesignReviewSnapshot(
   try {
     value = await readJsonFile<unknown>(path);
   } catch (error) {
-    if (isFileMissingError(error)) return null;
+    if (isFileMissingError(error)) {
+      // Windows can return ENOENT for a child of a regular file where POSIX
+      // returns ENOTDIR. Treat an obstructed snapshot directory as an I/O
+      // failure, not as absent evidence that can be silently discarded.
+      const directory = snapshotDir(artifactsDir);
+      const parent = await stat(directory).catch(parentError => {
+        if (isFileMissingError(parentError)) return undefined;
+        throw parentError;
+      });
+      if (parent && !parent.isDirectory()) {
+        throw new Error(`Design-review snapshot parent is not a directory: ${directory}`, { cause: error });
+      }
+      return null;
+    }
     if (!isJsonParseError(error)) throw error;
     console.warn(`Ignoring damaged ${pass} design-review snapshot: ${error.message}`);
     return null;

@@ -141,7 +141,7 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     expect(stepPrompt).toContain("not an allowlist");
     expect(stepPrompt).toContain("honor run-specific declines");
     expect(stepPrompt).toContain("Preserve valid findings from the partial run");
-    expect(paused.access?.read_paths).toContain(join(artifactsDir, "external_analyzer_acquisition.json"));
+    expect(paused.access?.read_paths).toContain(join(artifactsDir, "external_analyzer_acquisition.json").replaceAll("\\", "/"));
 
     expect(stepPrompt.replaceAll("\\", "/")).toContain(
       resultsPath.replaceAll("\\", "/"),
