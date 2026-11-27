@@ -118,7 +118,7 @@ export async function completeWaveSimplification(params: {
       .filter(grant => grant.files.some(path => changed.includes(path))).flatMap(grant => grant.commands))].sort();
     for (const command of commands) {
       if (commandLeavesDeclaredShape(command)) return "A bound focused test is not a single eligible command.";
-      const failure = await runRequiredTest(root, command);
+      const failure = await runRequiredTest(params, command);
       if (failure) return "The simplification did not pass its required focused test: " + command;
     }
     if ((await headCommit(root)) !== result.commit || !(await waveFilesAreClean())) return "The verified tree changed during focused tests; the simplification was not accepted.";

@@ -257,6 +257,7 @@ export async function corroborateNoChangeClaim(params: {
 
 export async function corroborateHostResult(params: {
   readonly root: string;
+  readonly artifactsDir: string;
   readonly state: CurrentRemediationHostState;
   readonly workItem: RemediationHostWorkItem;
   readonly result: RemediationHostResult;
@@ -390,7 +391,7 @@ export async function corroborateHostResult(params: {
     message: review.issue.message, reviewIssue: review.issue,
   };
   const failedTests = await rerunRequiredTests(
-    root,
+    params,
     workItem.required_tests,
     verdicts,
   );

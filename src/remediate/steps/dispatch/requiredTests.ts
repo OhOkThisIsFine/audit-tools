@@ -62,7 +62,7 @@ export const REQUIRED_TEST_MESSAGE_LIMIT = 8_000;
 
 /** The marker that names an elided excerpt, so truncation is never silent. */
 const REQUIRED_TEST_TRUNCATION_MARKER =
-  "… [excerpt truncated — captured logs are in .audit-tools/remediation/required-test-logs]";
+  "… [excerpt truncated — see required_test_logs in the dispatch step]";
 
 /** Bounded diagnostic retention per stream; unlike maxBuffer, never a kill trigger. */
 const REQUIRED_TEST_LOG_TAIL_CHARS = 64 * 1_024;
@@ -118,7 +118,7 @@ export function requiredTestVerdictKey(root: string, command: string): string {
  * by waiting ten real minutes is an outcome nothing ever tests.
  */
 export async function runRequiredTest(
-  root: string,
+  paths: { readonly root: string; readonly artifactsDir: string },
   command: string,
   timeoutMs: number = REQUIRED_TEST_TIMEOUT_MS,
 ): Promise<RequiredTestFailure | null> {
@@ -133,7 +133,7 @@ export async function runRequiredTest(
   // an ingest hands a declared string to `sh`/`cmd.exe`. `resolveExecArgv`
   // inside the runner is what keeps the npm/npx shims resolvable on win32.
   const result = await runTrackedAsync(parseCommandString(command), {
-    cwd: root,
+    cwd: paths.root,
     // Captured, not discarded: without it a red ingest reports that something
     // failed and nothing about why.
     encoding: "utf8",
@@ -142,7 +142,7 @@ export async function runRequiredTest(
     windowsHide: true,
   });
   if (!result.error && result.status === 0 && result.signal == null) return null;
-  const output_log = join(remediationRequiredTestLogsDir(root), `${randomUUID()}.json`);
+  const output_log = join(remediationRequiredTestLogsDir(paths.artifactsDir), `${randomUUID()}.json`);
   // Persist everything the bounded runner captured BEFORE deriving prompt excerpts.
   await writeJsonFile(output_log, {
     command, stdout: result.stdout ?? "", stderr: result.stderr ?? "",
@@ -195,7 +195,7 @@ export async function runRequiredTest(
 }
 
 export async function rerunRequiredTests(
-  root: string,
+  paths: Parameters<typeof runRequiredTest>[0],
   commands: readonly string[],
   /** `null` on the normal lane — see {@link RemediationRequiredTestVerdicts}. */
   verdicts: RemediationRequiredTestVerdicts | null,
@@ -203,7 +203,7 @@ export async function rerunRequiredTests(
   const failures: RequiredTestFailure[] = [];
   for (const command of commands) {
     if (verdicts) {
-      const verdict = verdicts.get(requiredTestVerdictKey(root, command));
+      const verdict = verdicts.get(requiredTestVerdictKey(paths.root, command));
       if (verdict === undefined) {
         failures.push({
           command,
@@ -218,7 +218,7 @@ export async function rerunRequiredTests(
       }
       continue;
     }
-    const failure = await runRequiredTest(root, command);
+    const failure = await runRequiredTest(paths, command);
     if (failure !== null) failures.push(failure);
   }
   return failures;

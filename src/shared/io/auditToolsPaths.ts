@@ -82,8 +82,8 @@ export function remediationArtifactsDir(root: string): string {
 }
 
 /** Bounded captured output from tool-owned remediation required-test reruns. */
-export function remediationRequiredTestLogsDir(root: string): string {
-  return join(remediationArtifactsDir(root), "required-test-logs");
+export function remediationRequiredTestLogsDir(artifactsDir: string): string {
+  return join(artifactsDir, "required-test-logs");
 }
 
 /**

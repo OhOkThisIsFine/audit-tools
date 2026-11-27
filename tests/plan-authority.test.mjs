@@ -17,9 +17,10 @@ test("a plan replays without change and closes only after approval and a verifie
     assert.ok(name.startsWith("plan-contract-") && !isAbsolute(name) && !name.includes(sep));
     await rm(root, { recursive: true, force: true });
   });
-  const artifactsDir = join(root, ".audit-tools", "remediation");
+  const artifactsDir = join(root, ".audit-tools", "remediation-custom");
   const options = { root, artifactsDir };
-  const { executionPlanPaths, ingestExecutionPlan, readCanonicalPlan } = await load("remediate/contractPipeline/executionPlan.js");
+  const { executionPlanPaths, ingestExecutionPlan, readCanonicalPlan, readExecutionIntent } = await load("remediate/contractPipeline/executionPlan.js");
+  const { intakePaths } = await load("remediate/intake.js");
   const { readFinalGateReport, runClosePhase } = await load("remediate/phases/close.js");
   const paths = executionPlanPaths(artifactsDir);
   const put = (p,v) => writeFile(p,JSON.stringify(v));
@@ -33,8 +34,12 @@ test("a plan replays without change and closes only after approval and a verifie
   git("init","--template=","-q");
   git("add","package.json","title.mjs","verify.mjs");
   commit("Baseline");
+  const checkpoint = intakePaths(artifactsDir).intentCheckpoint;
+  await mkdir(resolve(checkpoint,".."),{recursive:true});
+  await put(checkpoint,{schema_version:"intent-checkpoint/v1",confirmed_by:"host",confirmed_at:new Date().toISOString(),
+    scope_summary:"Fixture only",intent_summary:"Show the title count",closing_action:"none"});
   const request = {id:"title-request",text:"Expose the item count in the title",source_paths:[]};
-  await put(paths.source,{plan_id:"title-plan",findings:[],request,audit_read:null,sources:[]});
+  await put(paths.source,{plan_id:"title-plan",findings:[],request,audit_read:null,sources:[],intent:await readExecutionIntent(artifactsDir)});
   const plan = {
     plan_id:"title-plan", objective:"Show the item count", non_goals:[],
     requirements:[{id:"title-count",description:"The title should contain its item count",source_finding_ids:[],change_kind:"behavior_change",
@@ -89,6 +94,24 @@ test("a plan replays without change and closes only after approval and a verifie
   await put(paths.history,history);
   await put(paths.approval,{revision_sha256:revision,judge_input_sha256:hash({role:"judge",revision}),
     owner_decision_sha256:hash(null),risk_decision_sha256:hash(null),history_sha256:hash(history),review_sha256:reviewHashes});
+  await t.test("dispatch and failed required tests use the selected artifacts directory", async () => {
+    const { decideNextStep } = await load("remediate/steps/nextStep.js");
+    const { StateStore } = await load("remediate/state/store.js");
+    const { runRequiredTest } = await load("remediate/steps/dispatch/requiredTests.js");
+    await put(join(artifactsDir,"confirm_resume_ack.json"),{choice:"resume"});
+    const { closing_plan, ...sharedState } = state;
+    const store = new StateStore(artifactsDir);
+    await store.saveState({ ...sharedState,status:"implementing",items:{title:{unit_id:"title",status:"pending"}} });
+    const step = await decideNextStep(options);
+    assert.equal(step.step_kind,"dispatch_implement");
+    const expectedLogs = join(artifactsDir,"required-test-logs");
+    assert.equal(resolve(step.artifact_paths.required_test_logs),expectedLogs);
+    assert.ok(step.access.read_paths.some(path => resolve(path) === expectedLogs));
+    const failure = await runRequiredTest(options,"node missing-fixture-test.mjs");
+    assert.equal(failure?.outcome,"failed");
+    assert.equal(resolve(failure.output_log,".."),expectedLogs);
+    assert.match(JSON.parse(await readFile(failure.output_log,"utf8")).stderr,/missing-fixture-test/);
+  });
   await t.test("ingest distinguishes a retired workload from a lost live binding", async () => {
     const { prepareRemediationHostHandoff, ingestRemediationHostResults } = await load("remediate/steps/dispatch/hostHandoff.js");
     const { REMEDIATION_STATE_CONTRACT_VERSION } = await load("remediate/state/store.js");

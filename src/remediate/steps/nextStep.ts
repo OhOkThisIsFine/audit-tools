@@ -923,9 +923,9 @@ async function buildImplementDispatchStep(ctx: {
       ],
       stopCondition:
         "Submit and ingest the completed batch. For a host without delegation, complete and ingest exactly one item, then stop for fresh context.",
-      artifactPaths: { host_workload: handoff.workload_path, required_test_logs: remediationRequiredTestLogsDir(root) },
+      artifactPaths: { host_workload: handoff.workload_path, required_test_logs: remediationRequiredTestLogsDir(artifactsDir) },
       access: {
-        read_paths: [root, handoff.workload_path, remediationRequiredTestLogsDir(root)],
+        read_paths: [root, handoff.workload_path, remediationRequiredTestLogsDir(artifactsDir)],
         write_paths: [...new Set(handoff.workload.work_items.flatMap((item) => [
           ...item.allowed_files.map((path) => resolve(root, path)), resolve(root, item.result_path),
         ]))],

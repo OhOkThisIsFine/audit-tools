@@ -164,7 +164,7 @@ async function reverifyBlockedItemAgainstTree(
   // exit, signal, timeout, overflow, spawn error — reads as "unsatisfied": the
   // item stays open and retries on the normal path (fail-closed).
   for (const command of commands) {
-    if (await runRequiredTest(options.root, command)) return "unsatisfied";
+    if (await runRequiredTest(options, command)) return "unsatisfied";
   }
   return "satisfied";
 }

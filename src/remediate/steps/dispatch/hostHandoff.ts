@@ -1403,7 +1403,7 @@ export async function precomputeRecoveryTestVerdicts(params: {
   for (const command of commands) {
     verdicts.set(
       requiredTestVerdictKey(paths.root, command),
-      await runRequiredTest(paths.root, command, params.requiredTestTimeoutMs),
+      await runRequiredTest(paths, command, params.requiredTestTimeoutMs),
     );
   }
   return verdicts;
@@ -2132,7 +2132,7 @@ async function executeHostVerificationReruns(
           if (!review.ok) { acc.issues.push(review.issue); continue; }
         }
         const failedTests = await rerunRequiredTests(
-          paths.root,
+          paths,
           workItem.required_tests,
           ctx.requiredTestVerdicts,
         );
@@ -2169,6 +2169,7 @@ async function executeHostVerificationReruns(
     }
     const corroborated = await corroborateHostResult({
       root: paths.root,
+      artifactsDir: paths.artifactsDir,
       state,
       workItem,
       result,
