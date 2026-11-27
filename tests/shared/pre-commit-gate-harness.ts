@@ -9,10 +9,11 @@
 // different sentinel values the tests prove the gate checks the STAGED content
 // and always restores the worktree afterward.
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { afterAll } from "vitest";
 import { writeSuiteGreenStamp } from "../../scripts/shared/suiteGreenStamp.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -128,10 +129,29 @@ export function stageLoopCoreFile(repo: string) {
   g(repo, "add", "-A");
 }
 
-// Create the throwaway fixture repo (initial commit: GOOD sentinel, marker
-// check script, gitignored .claude/). Callers own removal in afterEach.
+// The initial commit is identical in every case. Copy a module-local
+// ordinary repository, not a Git worktree or object-store alternate: hooks,
+// refs, the index and untracked journals remain fully isolated for each case.
+let gateSeed: string | undefined;
+afterAll(() => {
+  if (gateSeed) rmSync(gateSeed, { recursive: true, force: true });
+});
 export function initGateRepo(): string {
+  if (!gateSeed) {
+    gateSeed = mkdtempSync(join(tmpdir(), "gate-staged-seed-"));
+    populateGateRepo(gateSeed);
+  }
   const repo = mkdtempSync(join(tmpdir(), "gate-staged-"));
+  try {
+    cpSync(gateSeed, repo, { recursive: true });
+    return repo;
+  } catch (error) {
+    rmSync(repo, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function populateGateRepo(repo: string): void {
   g(repo, "init", "-q");
   g(repo, "config", "user.email", "t@t");
   g(repo, "config", "user.name", "t");
@@ -170,5 +190,4 @@ export function initGateRepo(): string {
   writeFileSync(join(repo, ".gitignore"), ".claude/\n");
   g(repo, "add", "-A");
   g(repo, "commit", "-qm", "init");
-  return repo;
 }
