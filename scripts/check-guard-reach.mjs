@@ -170,6 +170,7 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
   const aliases = diagnosticAliases(guards, packageScripts);
   const errors = [...aliases.errors];
   const files = onDisk.map(norm);
+  const tracked = new Set(files);
   const hookCommands = settingsHookCommands.map(norm);
   // `.githooks/<name>` → its text, for the git-hook wiring check (P53): git
   // runs these files, so a git-hook guard is wired iff one of them names it.
@@ -320,13 +321,13 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
             `never fires. impl: ${g.impl}`,
         );
       }
-      if (!files.includes(impl)) {
+      if (!tracked.has(impl)) {
         errors.push(`Hook guard "${g.id}" impl is not a tracked file: ${g.impl}`);
       }
     } else if (g.kind === 'git-hook') {
       // Wired by GIT, not by settings.json (P53): each declared `.githooks/<name>`
       // must be tracked and must name the module, or git runs nothing of ours.
-      if (!files.includes(impl)) {
+      if (!tracked.has(impl)) {
         errors.push(`Git-hook guard "${g.id}" impl is not a tracked file: ${g.impl}`);
       }
       const hooks = Array.isArray(g.hooks) ? g.hooks.map(norm) : [];
@@ -340,7 +341,7 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
       for (const hook of hooks) {
         if (!hook.startsWith('.githooks/')) {
           errors.push(`Git-hook guard "${g.id}" names a hook outside .githooks/: ${hook}`);
-        } else if (!files.includes(hook)) {
+        } else if (!tracked.has(hook)) {
           errors.push(`Git-hook guard "${g.id}" names an untracked hook file: ${hook} — git in a fresh clone runs nothing.`);
         } else if (!(hook in gitHooks)) {
           errors.push(`Git-hook guard "${g.id}": the text of ${hook} was not supplied to the reconciler.`);
@@ -352,7 +353,7 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
         }
       }
     } else if (g.kind === 'contract-test') {
-      if (!files.includes(impl)) {
+      if (!tracked.has(impl)) {
         errors.push(`Contract-test guard "${g.id}" impl is not a tracked file: ${g.impl}`);
       } else if (!impl.startsWith('tests/')) {
         errors.push(
@@ -372,7 +373,7 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
     guards.filter((g) => g.kind === 'git-hook').flatMap((g) => (Array.isArray(g.hooks) ? g.hooks.map(norm) : [])),
   );
   for (const [hook, text] of Object.entries(gitHooks)) {
-    if (!files.includes(hook)) continue;
+    if (!tracked.has(hook)) continue;
     if (/\.claude\/hooks\/[A-Za-z0-9._-]+\.mjs/.test(text) && !declaredGitHooks.has(hook)) {
       errors.push(
         `${hook} runs a .claude/hooks module but no git-hook GUARDS row names it\n  → add the row to ` +
@@ -387,7 +388,7 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
     hookCommands.flatMap((cmd) => [...cmd.matchAll(/\.claude\/hooks\/[A-Za-z0-9._-]+/g)].map((m) => m[0])),
   );
   for (const hook of referencedHooks) {
-    if (!files.includes(hook)) {
+    if (!tracked.has(hook)) {
       errors.push(`settings.json registers a hook that is not a tracked file: ${hook}`);
     }
     if (!hookImpls.has(hook)) {

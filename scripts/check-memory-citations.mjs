@@ -57,11 +57,8 @@ function main() {
     return 0;
   }
 
-  const known = new Set(
-    readdirSync(memoryDir)
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => f.slice(0, -3)),
-  );
+  const noteNames = readdirSync(memoryDir).filter((f) => f.endsWith(".md"));
+  const known = new Set(noteNames.map((f) => f.slice(0, -3)));
 
   const tracked = execFileSync("git", ["ls-files", "*.md"], {
     encoding: "utf8",
@@ -124,20 +121,6 @@ function main() {
     return text.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
   }
 
-  for (const note of readdirSync(memoryDir).filter((f) => f.endsWith(".md"))) {
-    const text = readFileSync(join(memoryDir, note), "utf8");
-    const lines = text.split(/\r?\n/);
-    for (const match of stripCodeSpans(text).matchAll(WIKILINK)) {
-      // A stray `.md` suffix is a misspelling of a real target, not a second kind
-      // of link — resolve the note first, then judge whether that note exists.
-      const name = match[1].trim().replace(/\.md$/, "");
-      if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) continue;
-      if (known.has(name)) continue;
-      const line = lines.findIndex((l) => l.includes(match[1])) + 1;
-      dangling.push({ file: join(memoryDir, note), line, name, form: "[[…]]" });
-    }
-  }
-
   // THE THIRD DIRECTION: a memory note citing a repo PATH.
   //
   // The store lives OUTSIDE the tree, so no doc gate reaches it and this script
@@ -166,14 +149,13 @@ function main() {
   }
 
   /** Top-level dirs that actually hold code — a token under anything else is prose. */
-  const repoTopDirs = new Set(
-    repoFiles().flatMap((p) => (p.includes("/") ? [p.split("/", 1)[0]] : [])),
-  );
   const trackedSet = new Set(repoFiles());
+  const repoTopDirs = new Set();
 
   const trackedDirSet = new Set();
   for (const p of trackedSet) {
     const parts = p.split("/");
+    if (parts.length > 1) repoTopDirs.add(parts[0]);
     for (let i = 1; i < parts.length; i += 1) trackedDirSet.add(parts.slice(0, i).join("/"));
   }
 
@@ -209,11 +191,21 @@ function main() {
   // Pass 1 — collect every path candidate, so the gitignore scoping runs as ONE
   // batched git call over the whole store instead of a spawn per token.
   const candidates = [];
-  for (const note of readdirSync(memoryDir).filter((f) => f.endsWith(".md"))) {
+  for (const note of noteNames) {
     const file = join(memoryDir, note);
-    const noteLines = readFileSync(file, "utf8").split(/\r?\n/);
-    noteLines.forEach((line, i) => {
-      if (MEMORY_PATH_EXEMPT.test(line) || (i > 0 && MEMORY_PATH_EXEMPT.test(noteLines[i - 1]))) return;
+    const text = readFileSync(file, "utf8");
+    const lines = text.split(/\r?\n/);
+    for (const match of stripCodeSpans(text).matchAll(WIKILINK)) {
+      // A stray `.md` suffix is a misspelling of a real target, not a second kind
+      // of link — resolve the note first, then judge whether that note exists.
+      const name = match[1].trim().replace(/\.md$/, "");
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) continue;
+      if (known.has(name)) continue;
+      const line = lines.findIndex((l) => l.includes(match[1])) + 1;
+      dangling.push({ file, line, name, form: "[[…]]" });
+    }
+    lines.forEach((line, i) => {
+      if (MEMORY_PATH_EXEMPT.test(line) || (i > 0 && MEMORY_PATH_EXEMPT.test(lines[i - 1]))) return;
       for (const match of line.matchAll(/`([^`\n]+)`/g)) {
         const path = pathCandidate(match[1]);
         if (path) candidates.push({ note, line: i + 1, path });

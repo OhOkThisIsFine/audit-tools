@@ -298,18 +298,32 @@ function parsePinLine(line) {
  * @param {number} [line] the 1-based line the site is at
  */
 export function readPinDeclaration(source, line) {
+  return indexPinDeclarations(source, line ?? Infinity)(line ?? Infinity);
+}
+
+/**
+ * Index declaration positions once, without changing the individual site's authority.
+ * @param {string} source
+ * @param {number} throughLine
+ */
+function indexPinDeclarations(source, throughLine) {
   const lines = source.split('\n');
-  // INCLUSIVE of the site's own line: a 1-based line N is index N-1, and the
-  // slice must reach it. An exclusive bound off-by-one here reads the very
-  // declaration the site sits under as absent.
-  const last = line === undefined ? lines.length : Math.min(line, lines.length);
-  /** @type {ReturnType<typeof parsePinLine>} */
-  let governing = null;
-  for (let i = 0; i < last; i++) {
-    const parsed = parsePinLine(lines[i]);
-    if (parsed) governing = parsed;
+  const declarations = [];
+  for (let i = 0; i < Math.min(throughLine, lines.length); i++) {
+    const declaration = parsePinLine(lines[i]);
+    if (declaration) declarations.push({ line: i + 1, declaration });
   }
-  return governing;
+  /** @param {number} line */
+  return (line) => {
+    let low = 0;
+    let high = declarations.length;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (declarations[mid].line <= line) low = mid + 1;
+      else high = mid;
+    }
+    return declarations[low - 1]?.declaration ?? null;
+  };
 }
 
 /**
@@ -376,6 +390,8 @@ export function pinSites({ diffText, readText, include, checkNames, isGenerated 
     // ── per-site binding, in file order ───────────────────────────────────────
     /** @type {Map<string, {lines: string[], tests: string[]}>} */
     const bound = new Map();
+    const throughLine = kept.reduce((max, site) => Math.max(max, site.head ?? 0), 0);
+    const declarationAt = indexPinDeclarations(source, throughLine);
     for (const site of kept) {
       if (site.head === null) {
         excluded.push({
@@ -384,7 +400,7 @@ export function pinSites({ diffText, readText, include, checkNames, isGenerated 
         });
         continue;
       }
-      const declared = readPinDeclaration(source, site.head);
+      const declared = declarationAt(site.head);
       if (declared?.kind === 'malformed') {
         errors.push(
           `${path}:${site.head} is governed by a \`${PIN_MARKER}:\` declaration that is malformed — ` +

@@ -110,6 +110,15 @@ export function maskReleaseVersionValues(relPath, text) {
  * @returns {{tree: string|null, bumpAgnosticTree: string|null} | null}
  */
 export function worktreeTrees(root) {
+  return captureWorktreeTrees(root, true);
+}
+
+/**
+ * @param {string} root
+ * @param {boolean} includeBumpAgnosticTree
+ * @returns {{tree: string|null, bumpAgnosticTree: string|null} | null}
+ */
+function captureWorktreeTrees(root, includeBumpAgnosticTree) {
   const indexFile = join(tmpdir(), `closeout-index-${process.pid}-${Date.now()}.idx`);
   // `input` requires stdin to be a PIPE: with `stdio[0] === 'ignore'` Node
   // silently discards the `input` option, and `hash-object --stdin` then hashes
@@ -134,6 +143,7 @@ export function worktreeTrees(root) {
     if (written.status !== 0) return null;
     const tree = (written.stdout ?? '').trim();
     if (!isTreeId(tree)) return null;
+    if (!includeBumpAgnosticTree) return { tree, bumpAgnosticTree: null };
 
     // Mask the bump files IN the index, then write the tree again. Read the
     // blob back from the INDEX (not the worktree) so the masking sees the same
@@ -173,5 +183,5 @@ export function worktreeTrees(root) {
  * @returns {string | null}
  */
 export function worktreeTree(root) {
-  return worktreeTrees(root)?.tree ?? null;
+  return captureWorktreeTrees(root, false)?.tree ?? null;
 }

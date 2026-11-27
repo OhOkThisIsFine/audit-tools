@@ -341,7 +341,8 @@ export function evaluateBacklog(files, baseline) {
   let totalEntries = 0;
   let grandfathered = 0;
   const distribution = [];
-  const presentFiles = new Set(files.map((f) => f.file));
+  /** @type {Map<string, {bytes: number, titles: Set<string>}>} */
+  const measured = new Map();
 
   for (const { file, text, previousText, document } of files) {
     const entries = parseEntries(text, document?.entries);
@@ -349,6 +350,7 @@ export function evaluateBacklog(files, baseline) {
     const fileBytes = sizeOf(text);
     const sinceHead = sinceHeadLine(previousText === undefined ? null : sizeOf(previousText), fileBytes);
     distribution.push({ file, fileBytes, entries });
+    if (!measured.has(file)) measured.set(file, {bytes: fileBytes, titles: new Set(entries.map(e => e.title))});
 
     if (fileBytes > FILE_BUDGET_BYTES) {
       // The one ratchet. `open-bugs.md` is over on the day this landed: splitting by
@@ -429,18 +431,18 @@ export function evaluateBacklog(files, baseline) {
   // the budget could fire — the recorded ceiling follows the file down.
   const staleCeilings = Object.keys(baseline.fileCeilings)
     .filter((file) => {
-      const overBudget = files.find((f) => f.file === file);
-      return overBudget === undefined || sizeOf(overBudget.text) <= FILE_BUDGET_BYTES;
+      const overBudget = measured.get(file);
+      return overBudget === undefined || overBudget.bytes <= FILE_BUDGET_BYTES;
     })
     .sort(compareCodeUnits);
   for (const file of staleCeilings) {
     const recorded = baseline.fileCeilings[file];
-    const current = files.find((f) => f.file === file);
+    const current = measured.get(file);
     violations.push(
       `docs/backlog/.size-baseline.json caps ${file} at ${recorded} bytes, but ` +
         (current === undefined
           ? `no such backlog file exists`
-          : `the file is now ${sizeOf(current.text)} bytes (budget ${FILE_BUDGET_BYTES})`) +
+          : `the file is now ${current.bytes} bytes (budget ${FILE_BUDGET_BYTES})`) +
         ` — a ceiling only bounds a file that is OVER the budget, so this one caps nothing ` +
         `while it sits in the baseline. The recorded ceiling follows the file down.`,
     );
@@ -459,14 +461,13 @@ export function evaluateBacklog(files, baseline) {
       const separator = key.indexOf("::");
       const file = separator === -1 ? key : key.slice(0, separator);
       const title = separator === -1 ? "" : key.slice(separator + 2);
-      const source = files.find((f) => f.file === file);
-      return source === undefined || !parseEntries(source.text, source.document?.entries).some((e) => e.title === title);
+      return !measured.get(file)?.titles.has(title);
     }).sort(compareCodeUnits);
     for (const key of found) {
       const file = key.slice(0, key.indexOf("::"));
       violations.push(
         `docs/backlog/.size-baseline.json amnesties "${key}", but ` +
-          (presentFiles.has(file)
+          (measured.has(file)
             ? `no entry with that title exists in ${file} any more (renamed or deleted)`
             : `${file} does not exist`) +
           ` — a stale amnesty never matches, so it is dead data rather than a live exemption.`,

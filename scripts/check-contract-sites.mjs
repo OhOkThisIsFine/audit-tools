@@ -159,6 +159,20 @@ export function reconcileContractSites({
   const errors = [];
   const byType = new Map(contractTypes.map((c) => [c.type, c]));
   const bySchema = new Map(contractTypes.map((c) => [c.schema, c]));
+  const trackedSet = new Set(tracked);
+  /** @type {Map<string, {text: string} | {error: unknown}>} */
+  const schemaReads = new Map();
+  /** @param {string} file */
+  function schemaText(file) {
+    let read = schemaReads.get(file);
+    if (!read) {
+      try { read = {text: readText(file)}; }
+      catch (error) { read = {error}; }
+      schemaReads.set(file, read);
+    }
+    if ('error' in read) throw read.error;
+    return read.text;
+  }
 
   // The DECLARED MARKERS, derived once and reused by both halves below: the
   // denominator refusal (a type nothing declares) and the field-set check (a
@@ -178,7 +192,7 @@ export function reconcileContractSites({
 
   // ── 1. rendered schemas: the property set must equal the contract's ─────────
   for (const [schemaFile, producer] of Object.entries(schemaProducers)) {
-    if (!tracked.includes(schemaFile)) {
+    if (!trackedSet.has(schemaFile)) {
       errors.push(
         `${schemaFile} is declared in CONTRACT_SCHEMA_PRODUCERS but is not a tracked file — the ` +
           `derivation names a schema nothing renders.`,
@@ -196,7 +210,7 @@ export function reconcileContractSites({
     }
     let rendered;
     try {
-      rendered = JSON.parse(readText(schemaFile));
+      rendered = JSON.parse(schemaText(schemaFile));
     } catch (error) {
       errors.push(`${schemaFile} could not be parsed as JSON: ${/** @type {Error} */ (error).message}`);
       continue;
@@ -218,8 +232,9 @@ export function reconcileContractSites({
   // ── 1b. the reverse: every registry contract that IS a rendered schema ─────
   // A contract whose rendered schema nobody paired is the silent half of the
   // same hole — the schema would keep describing the old field set forever.
+  const schemaPaths = contractTypes.length ? tracked.filter(schemaFiles) : [];
   for (const contract of contractTypes) {
-    const matching = tracked.filter((f) => schemaFiles(f) && mentionsContract(readText, f, contract.type));
+    const matching = schemaPaths.filter((f) => mentionsContract(schemaText, f, contract.type));
     if (matching.length === 0) continue;
     const paired = matching.some((f) => f in schemaProducers);
     if (!paired) {

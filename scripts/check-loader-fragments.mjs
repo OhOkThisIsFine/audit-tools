@@ -33,6 +33,8 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 export function checkLoaderFragments({ fragments = LOADER_FRAGMENTS, readFile }) {
   const failures = [];
   const normalized = new Map();
+  /** @type {ReturnType<typeof loaderFragmentAssets> | undefined} */
+  let assets;
   const textOf = (path) => {
     if (!normalized.has(path)) {
       normalized.set(path, normalizeFragmentText(readFile(path)));
@@ -65,7 +67,7 @@ export function checkLoaderFragments({ fragments = LOADER_FRAGMENTS, readFile })
     // No OTHER reconciled asset restates it: an asset that is not a declared
     // carrier must point instead, so a second full statement cannot quietly
     // reappear (the axis-1 drift).
-    for (const path of loaderFragmentAssets(fragments)) {
+    for (const path of (assets ??= loaderFragmentAssets(fragments))) {
       if (verbatimIn.includes(path)) continue;
       if ((fragment.pointers ?? []).some((pointer) => pointer.path === path)) continue;
       if (textOf(path).includes(needle)) {

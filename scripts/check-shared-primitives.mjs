@@ -257,10 +257,10 @@ export function scanFile(file, content) {
   /** @type {Violation[]} */
   const violations = [];
 
-  const isPatternDataSource = PATTERN_DATA_SOURCES.some((row) => row.file === file);
+  if (PATTERN_DATA_SOURCES.some((row) => row.file === file)) return violations;
 
   for (const rule of SINGLE_DEFINITION_RULES) {
-    if (isPatternDataSource || homesOf(rule).includes(file)) continue;
+    if (homesOf(rule).includes(file)) continue;
     const re = definitionRegex(rule.name);
     for (const m of content.matchAll(re)) {
       violations.push({
@@ -278,7 +278,6 @@ export function scanFile(file, content) {
   for (const rule of PATTERN_RULES) {
     if (rule.homes.includes(file)) continue;
     if (rule.exceptions.some((e) => e.file === file)) continue;
-    if (isPatternDataSource) continue;
     if (rule.requiresAlso && !rule.requiresAlso.test(content)) continue;
     for (const m of content.matchAll(rule.regex)) {
       violations.push({

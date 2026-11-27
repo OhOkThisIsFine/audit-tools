@@ -144,9 +144,11 @@ function containsMutatingCall(node) {
 /** The claim names, in strength order — for validation and for error text. */
 export const CLOSURE_CLAIMS = ['pure', 'reads-only', 'mutates'];
 
-/** Runtime imports/re-exports only; erased type dependencies carry no I/O. */
-function runtimeSpecifiersOf(text) {
-  const source = ts.createSourceFile("module.ts", text, ts.ScriptTarget.Latest, true);
+/**
+ * Runtime imports/re-exports only; erased type dependencies carry no I/O.
+ * @param {ts.SourceFile} source
+ */
+function runtimeSpecifiersOf(source) {
   const out = [];
   for (const statement of source.statements) {
     if (ts.isImportDeclaration(statement)) {
@@ -203,12 +205,18 @@ export function checkDeclaredClaims(root, declared) {
   const known = new Set(modules);
   /** @type {Map<string, string[]>} */
   const edges = new Map();
-  const runtimeSpecifiers = new Map();
+  const ioImporters = new Set();
+  const mutatingDeclarations = new Set();
   for (const module of modules) {
     const text = readFileSync(join(root, module), 'utf8');
+    const source = ts.createSourceFile(module, text, ts.ScriptTarget.Latest, true);
     const targets = [];
-    const specs = runtimeSpecifiersOf(text);
-    runtimeSpecifiers.set(module, specs);
+    const specs = runtimeSpecifiersOf(source);
+    if (specs.some(spec => IO_BUILTINS.test(spec))) ioImporters.add(module);
+    const claim = declared.get(module);
+    if ((claim === 'reads-only' || claim === 'mutates') && containsMutatingCall(source)) {
+      mutatingDeclarations.add(module);
+    }
     for (const spec of specs) {
       if (!spec.startsWith('.') && !/^audit-tools\/shared(?:\/|$)/.test(spec)) continue;
       const target = resolveSpecifier(root, module, spec, known);
@@ -233,12 +241,6 @@ export function checkDeclaredClaims(root, declared) {
   const failures = [];
   for (const [module, claim] of declared) {
     if (!known.has(module)) continue; // absence is the closure gate's own report
-    let text;
-    try {
-      text = readFileSync(join(root, module), 'utf8');
-    } catch {
-      continue; // unreadable is reported elsewhere; do not manufacture a second verdict
-    }
     if (!CLOSURE_CLAIMS.includes(claim)) {
       failures.push({
         module,
@@ -248,13 +250,9 @@ export function checkDeclaredClaims(root, declared) {
       });
       continue;
     }
-    const closure = closureOf(module);
-    const ioModules = closure.filter((m) => {
-      return (runtimeSpecifiers.get(m) ?? []).some((spec) => IO_BUILTINS.test(spec));
-    });
-    const mutates = containsMutatingCall(ts.createSourceFile(module, text, ts.ScriptTarget.Latest));
-
-    if (claim === 'pure' && ioModules.length > 0) {
+    const ioModules = claim === 'pure' ? closureOf(module).filter(m => ioImporters.has(m)) : [];
+    const mutates = mutatingDeclarations.has(module);
+    if (ioModules.length > 0) {
       failures.push({
         module,
         claim,
