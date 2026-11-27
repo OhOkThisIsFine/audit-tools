@@ -22,7 +22,7 @@ This is explicit opt-in. The default test suite and release gate are unchanged.
 | Contract | Current witness | Still needed for rollout |
 | --- | --- | --- |
 | Audit continuity and truthful completion | Recorded stop survives a new CLI process; accepted binding persists in both reports; duplicate replay and stale/changed review refusals; skipped analyzer cannot be credited | Coverage reporting under partial execution and analyzer recovery after retry |
-| Remediation provenance and verification | Pending request survives restart; real close rejects an unapproved revision and a failing verification; a verified Git edit promotes matching machine and human results and completed state | Prove dispatch and evidence admission independently; exercise restart after an interrupted report write |
+| Remediation provenance and verification | Pending request survives restart; real close rejects an unapproved revision and a failing verification; a verified Git edit resumes after an interrupted report write without repeating verification, then promotes matching reports and completed state | Prove dispatch and worker evidence admission independently |
 | Git path fidelity | Real index and dirty working tree; nested-root refusal; original index unchanged | Owned worktree/snapshot cleanup across a restart and failed Git probe |
 | Shipped product behavior | Real checkout wrappers; offline npm tarball contents and its audit prompt; actual timeout reaps the tool-owned child | Fresh install and generated host assets; cancellation with a subprocess tree, not just one child |
 | Release and development checks | Unchanged and still run through the current documented entry points | Explicit inventory and comparison before any default or release change |

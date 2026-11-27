@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -27,7 +27,7 @@ test("a plan replays without change and closes only after approval and a verifie
   const code = "export const title = count => String(count);";
   await writeFile(join(root,"title.mjs"),code);
   await put(join(root,"package.json"),{name:"approved-close-fixture",private:true,scripts:{test:"node verify.mjs"}});
-  await writeFile(join(root,"verify.mjs"),'import assert from "node:assert/strict";import {title} from "./title.mjs";assert.equal(title(2),"Items (2)");');
+  await writeFile(join(root,"verify.mjs"),'import assert from "node:assert/strict";import {appendFileSync} from "node:fs";import {title} from "./title.mjs";appendFileSync(".audit-tools/check-runs","test\\n");assert.equal(title(2),"Items (2)");');
   const git = (...args) => execFileSync("git",args,{cwd:root,windowsHide:true,encoding:"utf8"});
   const commit = label => git("-c","user.name=Fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-qm",label);
   git("init","--template=","-q");
@@ -101,8 +101,20 @@ test("a plan replays without change and closes only after approval and a verifie
   git("add","title.mjs");
   commit("Include actual count");
   const landed = git("rev-parse","HEAD").trim();
-  const completed = await runClosePhase({...state,
-    items:{title:{...state.items.title,host_landed_commit:landed,host_landed_files:["title.mjs"]}}},options);
+  const closing = {...state,items:{title:{...state.items.title,host_landed_commit:landed,host_landed_files:["title.mjs"]}}};
+  // A deliberate filesystem obstruction interrupts reporting after verification.
+  // Removing just that empty directory must resume the recorded operation.
+  const markdownPath = join(root,".audit-tools","remediation-report.md");
+  await mkdir(markdownPath);
+  await assert.rejects(runClosePhase(closing,options));
+  const receipt = JSON.parse(await readFile(join(artifactsDir,"remediation-closing-result.json"),"utf8"));
+  assert.ok(receipt.pending_report,"A report interruption must retain the closing receipt.");
+  const verificationRuns = join(root,".audit-tools","check-runs");
+  const beforeResume = await readFile(verificationRuns,"utf8");
+  assert.equal(beforeResume,"test\ntest\n");
+  await rmdir(markdownPath);
+  const completed = await runClosePhase(closing,options);
+  assert.equal(await readFile(verificationRuns,"utf8"),beforeResume);
   assert.equal(completed.status,"complete");
   const report = JSON.parse(await readFile(join(root,".audit-tools","remediation-outcomes.json"),"utf8"));
   assert.equal(report.final_gate.passed,true);
