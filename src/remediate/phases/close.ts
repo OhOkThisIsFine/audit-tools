@@ -2319,7 +2319,7 @@ export async function runClosePhase(
           item.completed_at = now;
           item.failure_reason = verdict.status === "lead_persists"
             ? `Mechanical re-verify: analyzer '${verdict.analyzer_id}' still reports source ${findingId}. Rework the linked execution unit.`
-            : `Mechanical re-verify: required analyzer evidence for source ${findingId} is unavailable: ${verdict.reason ?? "reason not reported"}. Restore the verifier before closing.`;
+            : `Mechanical re-verify: required analyzer evidence for source ${findingId} is unavailable: ${verdict.reason ?? "reason not reported"}. Restore the original comparable analyzer configuration and scope. If the audit did not capture a comparison receipt, reopen the source review and record an independently checkable assertion before closing.`;
         }
       }
     }
