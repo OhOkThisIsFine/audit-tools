@@ -67,6 +67,8 @@ function reusableFixture(populate: () => void) {
   let saved: string | undefined;
   return () => {
     if (saved) {
+      // Replace the disposable repo rather than overwriting Git's read-only objects.
+      rmSync(repo, { recursive: true, force: true });
       cpSync(saved, repo, { recursive: true });
       return;
     }
