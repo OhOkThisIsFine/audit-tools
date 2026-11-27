@@ -70,6 +70,34 @@ describe("question evidence reuse", () => {
     expect(noConditions).toEqual([]);
   });
 
+  it("reuses one currently proven lead, never its stale or unmeasured comparison receipt", async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), "question-analyzer-rebind-"));
+    const path = "a.ts";
+    const actual = "flagged\n";
+    try {
+      await writeFile(join(sourceRoot, path), actual);
+      const provenance = { analyzer_id: "local", path, snippet_hash: hashAnalyzerSnippet(actual, 1)! };
+      const item = { id: "n", category: "c", severity: "low", path, line_start: 1, summary: "lead" };
+      const original = { ...item, provenance: { ...provenance, comparison_fingerprint: "old" } };
+      const advisory = { ...item, provenance };
+      const input = { snapshot_id: "frozen", sourceRoot, sourceFiles: new Map([[path, hashContent(actual)]]),
+        analyzerResults: [{ tool: "local", results: [original, advisory, original] }] };
+      const status = { tool: "local", status: "findings" as const, resolved: true, exit_code: 0, comparison_fingerprint: "old" };
+      const [measured] = await collectQuestionEvidence({ ...input, analyzerStatuses: [status] });
+      expect(measured?.analyzer_provenance).toEqual(original.provenance);
+      expect(measured?.dependencies).toContainEqual({ kind: "evidence", key: measured.evidence_id, fingerprint: "old" });
+      expect(await collectQuestionEvidence({ ...input, analyzerStatuses: [status] })).toEqual([measured]);
+      for (const analyzerStatuses of [[], [{ ...status, comparison_fingerprint: "drifted" }], [{ ...status, dropped_rows: 1 }]]) {
+        const unverified = await collectQuestionEvidence({ ...input, analyzerStatuses });
+        expect(unverified).toHaveLength(1);
+        expect(unverified[0]).toMatchObject({ evidence_id: measured.evidence_id, dependencies: [
+          { kind: "source", key: path, fingerprint: hashContent(actual) },
+        ] });
+        expect(unverified[0]?.analyzer_provenance).toBeUndefined();
+      }
+    } finally { await rm(sourceRoot, { recursive: true, force: true }); }
+  });
+
   it("reads one frozen file once for concurrent receipt refs without merging their checks", async () => {
     const sourceRoot = await mkdtemp(join(tmpdir(), "question-evidence-receipt-"));
     const content = "first\nsecond\n";

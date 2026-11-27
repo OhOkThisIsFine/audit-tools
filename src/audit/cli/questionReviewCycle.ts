@@ -37,6 +37,7 @@ export async function deriveCurrentQuestionBindings(
   }));
   const evidence = await collectQuestionEvidence({
     snapshot_id: plan.snapshot_id, sourceRoot, sourceFiles, analyzerResults: bundle.external_analyzer_results ?? [],
+    analyzerStatuses: bundle.external_analyzer_acquisition?.tool_statuses,
   });
   const bindings = await questionWorkloadBindings(bundle, sourceRoot, evidence, verifiedSourceFiles, reopens);
   return { bindings, evidence, sourceFiles };

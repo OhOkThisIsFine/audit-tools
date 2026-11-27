@@ -178,6 +178,13 @@ export function projectQuestionReview(question: ReviewQuestion, answers: readonl
     .sort((a, b) => compareCodeUnits(a.submission.submission_id, b.submission.submission_id));
   const current = sameQuestion.filter((row) => dependencies !== undefined &&
     row.submission.revision_id === question.revision_id &&
+    // Earlier ledgers could accept analyzer obligations without recording the
+    // receipt dependency. Confirm their explicit claims against current evidence.
+    row.submission.answer.findings.every(finding => finding.verification.every(obligation =>
+      obligation.kind !== "analyzer" || (obligation.provenance.comparison_fingerprint &&
+        finding.evidence_ids.some(key => currentBindings.has(dependencyIdentity([{
+          kind: "evidence", key, fingerprint: obligation.provenance.comparison_fingerprint!,
+        }])))))) &&
     row.dependency_bindings.length > 0 && row.dependency_bindings.every((item) => {
       const identity = dependencyIdentity([item]);
       return currentBindings.has(identity) || shared?.has(identity);

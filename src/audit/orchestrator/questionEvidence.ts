@@ -3,7 +3,7 @@ import { readFile, realpath } from "node:fs/promises";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import { resolveWithinRoot } from "../../shared/io/pathContainment.js";
 import { analyzerProvenanceKey, hashAnalyzerSnippetLines } from "../../shared/analyzers/provenance.js";
-import type { ExternalAnalyzerResults } from "../../shared/analyzers/types.js";
+import { isDegradedExternalAnalyzerStatus, type ExternalAnalyzerResults, type ExternalAnalyzerToolStatus } from "../../shared/analyzers/types.js";
 import { hashContent } from "../../shared/hash.js";
 import type { ReviewDependency, ReviewEvidence } from "../../shared/types/reviewQuestion.js";
 
@@ -141,6 +141,8 @@ interface QuestionEvidenceInput {
   /** Frozen, in-scope file hashes from the review planner. */
   sourceFiles: ReadonlyMap<string, string>;
   analyzerResults?: readonly ExternalAnalyzerResults[] | undefined;
+  /** Only the native executor's current marker, never imported status data. */
+  analyzerStatuses?: readonly ExternalAnalyzerToolStatus[] | undefined;
   runtimeReceipts?: readonly RuntimeReceipt[];
   /** Recomputed from authoritative current discovery and execution conditions. */
   currentDependencies?: readonly ReviewDependency[];
@@ -189,6 +191,9 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
       start >= 1 && end >= start && end <= source.length;
   }
   const records = new Map<string, ReviewEvidence>();
+  const currentAnalyzerProof = new Map((input.analyzerStatuses ?? []).flatMap(status =>
+    status.comparison_fingerprint && !isDegradedExternalAnalyzerStatus(status)
+      ? [[status.tool, status.comparison_fingerprint] as const] : []));
   for (const result of input.analyzerResults ?? []) {
     for (const item of result.results) {
       const p = item.provenance;
@@ -199,11 +204,17 @@ export async function collectQuestionEvidence(input: QuestionEvidenceInput): Pro
       const source = await loadFrozen(ref.path);
       if (source === undefined || hashAnalyzerSnippetLines(source, start, ref.end_line) !== p.snippet_hash) continue;
       const evidence_id = `lead-${hashContent(JSON.stringify([analyzerProvenanceKey(p), start, ref.end_line]))}`;
+      const comparison = p.comparison_fingerprint && currentAnalyzerProof.get(p.analyzer_id) === p.comparison_fingerprint;
+      // A duplicate advisory observation must not shadow native current evidence.
+      if (records.get(evidence_id)?.analyzer_provenance) continue;
       records.set(evidence_id, {
         schema_version: "audit-tools/question-review/v1", evidence_id, snapshot_id, kind: "source",
         status: "observed", source_refs: [ref],
-        dependencies: [{ kind: "source", key: ref.path, fingerprint: sourceFiles.get(ref.path)! }],
-        ...(p.comparison_fingerprint ? { analyzer_provenance: p } : {}),
+        dependencies: [
+          { kind: "source", key: ref.path, fingerprint: sourceFiles.get(ref.path)! },
+          ...(comparison ? [{ kind: "evidence" as const, key: evidence_id, fingerprint: p.comparison_fingerprint! }] : []),
+        ],
+        ...(comparison ? { analyzer_provenance: p } : {}),
         description: "An analyzer flagged this frozen source span; inspect the source before interpreting the lead.",
       });
     }

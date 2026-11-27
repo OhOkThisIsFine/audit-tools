@@ -48,8 +48,9 @@ describe("question review acceptance", () => {
     const binding = makeBinding("a");
     const answer = submission("a", "findings");
     const provenance = { analyzer_id: "fixture", path: ref.path, snippet_hash: "original", comparison_fingerprint: "measured" };
+    const receipt = { kind: "evidence", key: "lead", fingerprint: provenance.comparison_fingerprint } as const;
     const lead: ReviewEvidence = { schema_version: v, evidence_id: "lead", snapshot_id: identity.snapshot_id,
-      kind: "source", source_refs: [ref], dependencies: [source], status: "observed",
+      kind: "source", source_refs: [ref], dependencies: [source, receipt], status: "observed",
       description: "Synthetic analyzer lead", analyzer_provenance: provenance };
     binding.evidence = [lead];
     binding.assignment.available_evidence_ids = [lead.evidence_id];
@@ -68,8 +69,15 @@ describe("question review acceptance", () => {
     finding.evidence_ids = [];
     expect(() => acceptQuestionReview([], binding, answer, "now")).toThrow(/must come from cited issued evidence/);
     finding.evidence_ids = [lead.evidence_id];
-    expect(acceptQuestionReview([], binding, answer, "now").record.submission.answer.findings[0]!.verification)
-      .toEqual([obligation]);
+    const accepted = acceptQuestionReview([], binding, answer, "now").record;
+    expect(accepted.submission.answer.findings[0]!.verification).toEqual([obligation]);
+    expect(accepted.dependency_bindings).toContainEqual(receipt);
+    const older = { ...accepted, dependency_bindings: [source, membership] };
+    for (const record of [accepted, older]) {
+      expect(projectQuestionReview(binding.question, [record], [source, membership, receipt]).current).toEqual([record]);
+      expect(projectQuestionReview(binding.question, [record], [source, membership]).stale).toEqual([record]);
+      expect(projectQuestionReview(binding.question, [record], [source, membership, { ...receipt, fingerprint: "new" }]).stale).toEqual([record]);
+    }
   });
 
   it("projects the same current and stale history using one shared frozen-source index", () => {

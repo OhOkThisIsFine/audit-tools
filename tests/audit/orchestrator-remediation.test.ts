@@ -152,6 +152,28 @@ test("external analyzer import invalidates current plan inputs without erasing t
   expect(run.updated.audit_report).toBeUndefined();
 });
 
+test("partial analyzer recovery is additive and replay leaves native receipts and reports untouched", () => {
+  const path = "src/workflow.ts";
+  const original = { id: "A", category: "behavior", severity: "low", summary: "Original", path,
+    provenance: { analyzer_id: "fixture", path, snippet_hash: "a", comparison_fingerprint: "native-a" } };
+  const newItem = { ...original, id: "B", summary: "New", provenance: { ...original.provenance, snippet_hash: "b" } };
+  const old = { tool: "fixture", generated_at: "original timestamp", results: [original] };
+  const bundle = { external_analyzer_results: [old], audit_report: "# previous" };
+  const marker = { tool: "fixture", resolved: true, status: "success" as const, exit_code: 0, comparison_fingerprint: "untrusted" };
+  const replay = runExternalAnalyzerImportExecutor(bundle, { tool: "fixture", generated_at: "different timestamp", results: [original] });
+  expect(replay.artifacts_written).toEqual([]);
+  expect(replay.updated).toBe(bundle);
+
+  const recovered = runExternalAnalyzerImportExecutor(bundle, { tool: "fixture", results: [newItem, newItem], tool_statuses: [marker] });
+  expect(recovered.updated.external_analyzer_results?.[0]?.results).toEqual([
+    original, { ...newItem, provenance: { analyzer_id: "fixture", path, snippet_hash: "b" } },
+  ]);
+  expect(recovered.updated.external_analyzer_results?.[0]?.tool_statuses).toBeUndefined();
+  expect(recovered.updated.audit_report).toBeUndefined();
+  const empty = runExternalAnalyzerImportExecutor(recovered.updated, { tool: "fixture", results: [] });
+  expect(empty.updated).toBe(recovered.updated);
+});
+
 test("deriveAuditState keeps explicit pending follow-up tasks actionable after coverage is complete", () => {
   const state = deriveAuditState({
     repo_manifest: {
