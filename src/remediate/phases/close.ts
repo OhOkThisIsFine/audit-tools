@@ -2312,14 +2312,18 @@ export async function runClosePhase(
         },
       );
       if (verdict.status === "lead_persists" || analyzerVerify.unverified.includes(findingId)) {
+        const blockedObligations = (analyzerVerify.obligations[findingId] ?? [])
+          .filter(row => row.status !== "verified_mechanically")
+          .map(row => `${row.source_finding_id}/${row.obligation_id}: ${row.reason ?? row.status}`);
+        const details = blockedObligations.length ? ` (${blockedObligations.join("; ")})` : "";
         for (const unit of state.plan.units.filter(unit => unit.source_finding_ids.includes(findingId))) {
           const item = state.items[unit.id];
           if (!item || !isVerifiedCompleteStatus(item.status)) continue;
           item.status = "blocked";
           item.completed_at = now;
           item.failure_reason = verdict.status === "lead_persists"
-            ? `Mechanical re-verify: analyzer '${verdict.analyzer_id}' still reports source ${findingId}. Rework the linked execution unit.`
-            : `Mechanical re-verify: required analyzer evidence for source ${findingId} is unavailable: ${verdict.reason ?? "reason not reported"}. Restore the original comparable analyzer configuration and scope. If the audit did not capture a comparison receipt, reopen the source review and record an independently checkable assertion before closing.`;
+            ? `Mechanical re-verify: analyzer '${verdict.analyzer_id}' still reports source ${findingId}${details}. Rework the linked execution unit.`
+            : `Mechanical re-verify: required analyzer evidence for source ${findingId} is unavailable: ${verdict.reason ?? "reason not reported"}${details}. Restore the original comparable analyzer configuration and scope. If the audit did not capture a comparison receipt, reopen the source review and record an independently checkable assertion before closing.`;
         }
       }
     }

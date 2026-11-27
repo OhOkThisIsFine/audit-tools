@@ -263,6 +263,7 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
     { input: FLAGGED_SOURCE, present: true, expected: "triage", verdict: "lead_persists" },
     { input: FIXED_SOURCE, present: true, expected: "complete", verdict: "verified_mechanically" },
     { input: FIXED_SOURCE, present: false, expected: "triage", verdict: "skipped" },
+    { input: FIXED_SOURCE, present: true, legacy: true, expected: "triage", verdict: "skipped" },
     { input: FLAGGED_SOURCE, present: true, changedScope: true, expected: "triage", verdict: "skipped" },
   ] as const)("requires every original analyzer obligation to clear: $verdict", async ({ input, present, expected, verdict, ...scenario }) => {
     writeFileSync(join(REPO_DIR, "src", "dup.ts"), input);
@@ -283,12 +284,12 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
       source_refs: [{ path: "src/dup.ts" }],
       verification: [{ kind: "analyzer", obligation_id: `verify-${id}`, provenance }],
     });
+    const originalB = { ...provenanceFor(FLAGGED_SOURCE), analyzer_id: present ? "fake-analyzer" : "unavailable-analyzer" };
+    const legacy = "legacy" in scenario && scenario.legacy;
+    if (legacy) delete originalB.comparison_fingerprint;
     finding.question_review_sources = [
       original("original-a", finding.analyzer_provenance!),
-      original("original-b", {
-        ...provenanceFor(FLAGGED_SOURCE),
-        analyzer_id: present ? "fake-analyzer" : "unavailable-analyzer",
-      }),
+      original("original-b", originalB),
     ];
     const candidate = fakeCandidate();
     const changedScope = "changedScope" in scenario && scenario.changedScope;
@@ -309,6 +310,9 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
       { source_finding_id: "original-a", obligation_id: "verify-original-a", status: changedScope ? "skipped" : "verified_mechanically" },
       { source_finding_id: "original-b", obligation_id: "verify-original-b", status: verdict },
     ]);
+    if (legacy) expect(next.items!.F1.failure_reason).toMatch(
+      /original-b\/verify-original-b: original analyzer evidence.*reopen the source review/,
+    );
     if (changedScope) expect(next.items!.F1.failure_reason).toMatch(/scope\/config changed/);
     if (expected === "complete") {
       const outcomes = JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
