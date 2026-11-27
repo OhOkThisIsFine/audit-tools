@@ -1,8 +1,9 @@
 // The official attester may carry ONE verified ledger-only transition, never a
 // second suite pass or a blanket ignored path. Fixtures contain synthetic run
 // evidence; this suite does not claim to qualify the implementation checkout.
-import { afterEach, expect, test } from 'vitest';
-import { readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { afterAll, afterEach, expect, test } from 'vitest';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -15,8 +16,7 @@ import * as stamps from '../../scripts/shared/suiteGreenStamp.mjs';
 
 const repos: string[] = [];
 afterEach(() => { for (const repo of repos.splice(0)) rmSync(repo, { recursive: true, force: true }); });
-function setup(beforeAttest?: (repo: string) => void) {
-  const repo = initGateRepo(); repos.push(repo);
+function produceFixture(repo: string, beforeAttest?: (repo: string) => void) {
   g(repo, 'branch', '-M', 'main');
   writeFileSync(join(repo, '.gitignore'), '.claude/*\n!.claude/loop-core-attestations.json\n');
   stageLoopCoreFile(repo);
@@ -32,11 +32,35 @@ function setup(beforeAttest?: (repo: string) => void) {
   const b = g(repo, 'write-tree').stdout.trim();
   return { repo, a, b, original };
 }
+function setupFresh(beforeAttest?: (repo: string) => void) {
+  const repo = initGateRepo();
+  repos.push(repo);
+  return produceFixture(repo, beforeAttest);
+}
+
+// Consumer cases mutate independent copies of the real producer's output.
+// Copy the tiny repository, including its index and objects, rather than
+// repeating git init/config, stamping and attesting for every mutation.
+let template: ReturnType<typeof produceFixture> | undefined;
+let templatePath: string | undefined;
+afterAll(() => {
+  if (templatePath) rmSync(templatePath, { recursive: true, force: true });
+});
+function setup() {
+  if (!template) {
+    templatePath = initGateRepo();
+    template = produceFixture(templatePath);
+  }
+  const repo = mkdtempSync(join(tmpdir(), 'suite-transition-'));
+  repos.push(repo);
+  cpSync(template.repo, repo, { recursive: true });
+  return { ...template, repo };
+}
 function verdict(repo: string, tree: string) {
   return stamps.suiteQualificationVerdict(repo, tree, { concernsBlock: true });
 }
 test('official producer qualifies exact B while the original full-suite stamp remains byte-identical on A', () => {
-  const { repo, a, b, original } = setup();
+  const { repo, a, b, original } = setupFresh();
   expect(a).not.toBe(b);
   expect(readFileSync(stamps.suiteGreenStampPath(repo), 'utf8')).toBe(original);
   expect(stamps.suiteGreenVerdict(stamps.readSuiteGreenStamp(repo), b).ok).toBe(false);
@@ -217,7 +241,7 @@ require('node:module').syncBuiltinESMExports();`);
 });
 
 test('a diverged worktree makes the producer abstain from the exception', () => {
-  const { repo, b, original } = setup((root) => writeFileSync(join(root, 'sentinel.txt'), 'DIVERGED\n'));
+  const { repo, b, original } = setupFresh((root) => writeFileSync(join(root, 'sentinel.txt'), 'DIVERGED\n'));
   const record = JSON.parse(readFileSync(recordPath(repo, b), 'utf8'));
   expect(record.preflight.attributable).toBe(false);
   expect(record.suite_transition).toBeUndefined();
