@@ -192,7 +192,8 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
       const result = spawnSync("git", args, { cwd: seed, encoding: "utf8" });
       if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr || result.error}`);
     };
-    git("init", "-q");
+    // The seed never uses Git's sample hooks; do not copy them into every fixture.
+    git("init", "-q", "--template=");
     git("config", "user.email", "test@example.com");
     git("config", "user.name", "Test");
     git("commit", "--allow-empty", "--no-gpg-sign", "-q", "-m", "fixture baseline");

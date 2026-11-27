@@ -66,7 +66,8 @@ async function createBaselineFixture() {
   // Never `git add`ed, so it stays untracked and out of every landed diff, the
   // same way `.counter` itself does.
   await writeFile(join(root, COUNTER_SCRIPT), COUNTER_SCRIPT_SOURCE);
-  git(root, ["init"]);
+  // Each test gets a copy of this seed without unused Git sample hooks.
+  git(root, ["init", "--template="]);
   git(root, ["config", "user.email", "test@example.com"]);
   git(root, ["config", "user.name", "Test"]);
   git(root, ["add", "src/a.ts", "src/b.ts"]);

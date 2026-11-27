@@ -90,7 +90,8 @@ async function seedDirtyRepo(): Promise<string> {
   await writeFile(join(root, ".gitignore"), "node_modules/\n.env\n.audit-tools/\n");
   await writeFile(join(root, "src", "a.ts"), "export const a = 1;\n");
   await writeFile(join(root, "src", "old.ts"), "export const o = 1;\n");
-  await git(root, ["init", "-q"]);
+  // This seed is copied into each dirty-tree case; sample hooks are immaterial.
+  await git(root, ["init", "-q", "--template="]);
   await git(root, ["add", "-A"]);
   await git(root, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]);
   await writeFile(join(root, "src", "a.ts"), "export const a = 2;\n");
