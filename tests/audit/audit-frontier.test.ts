@@ -17,6 +17,7 @@ import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMe
 import { computeStaleArtifacts } from "../../src/audit/orchestrator/staleness.js";
 import { runExternalAnalyzerImportExecutor } from "../../src/audit/orchestrator/ingestionExecutors.js";
 import { hashAnalyzerSnippet } from "../../src/shared/analyzers/provenance.js";
+import { runQuestionSynthesisExecutor } from "../../src/audit/orchestrator/synthesisExecutors.js";
 import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
@@ -190,6 +191,81 @@ test("the host may examine admitted non-suggested files but an excluded file nev
     submitted.inspected_sources.push({ path: HIDDEN, start_line: 1 });
     await expect(submitAuditQuestionResult({ ...boundary, assignmentId: submitted.assignment_id,
       source: JSON.stringify(submitted) })).rejects.toThrow(/(?:outside|unbound|not admitted).*not-admitted|not-admitted.*(?:outside|unbound|not admitted)/iu);
+  });
+});
+
+test("confirmed exclusions govern evidence, accepted answers and synthesis on the question frontier", async () => {
+  await withTempRepo(async (root) => {
+    const source = await sourceFixture(root);
+    // The analyzer ran during evidence preparation, before the scope decision.
+    const leadText = await readFile(join(root, SCHEDULED), "utf8");
+    const bundle = plan(runExternalAnalyzerImportExecutor(source, { tool: "fixture-static", results: [{
+      id: "scheduled-lead", category: "fixture", severity: "low", path: SCHEDULED, line_start: 1,
+      summary: "Synthetic pre-scope lead", provenance: {
+        analyzer_id: "fixture-static", path: SCHEDULED, snippet_hash: hashAnalyzerSnippet(leadText, 1)!,
+      },
+    }] }).updated);
+
+    const boundary = { root, sourceRoot: root, artifactsDir: join(root, ".audit-tools", "audit") };
+    const first = await deriveQuestionCycleUnlocked({ ...boundary, bundle });
+    const live = { ...boundary, runId: first.runId };
+    const manual = first.pending.find(item => item.question.requested_parts.length === 1 &&
+      item.assignment.suggested_sources.some(ref => ref.path === MANUAL))!;
+    expect(first.evidence.flatMap(item => item.source_refs).map(ref => ref.path)).toContain(SCHEDULED);
+    await publishAuditQuestionWorkload({ ...live, bindings: first.pending });
+    const prior = manualOnly(manual, "accepted-before-scope-exclusion");
+    const scheduled = { path: SCHEDULED, start_line: 1 };
+    prior.inspected_sources.push(scheduled);
+    const observationId = prior.answer.observations[0]!.observation_id;
+    prior.answer.outcome = "findings";
+    prior.answer.parts[0]!.outcome = "findings";
+    prior.answer.findings.push({
+      schema_version: VERSION, finding_id: "old-scheduled-defect",
+      question_id: prior.question_id, revision_id: prior.revision_id,
+      kind: "confirmed_defect", severity: "medium", confidence: "high",
+      claim: "Scheduled operations do not restore the checkpoint",
+      consequence: "Scheduled resume may discard earlier state",
+      next_step: "Restore the checkpoint before scheduling",
+      source_refs: [scheduled], observation_ids: [observationId], evidence_ids: [],
+      verification: [{ kind: "assertion", obligation_id: "verify-scheduled", expected: "Scheduled checkpoint survives", source_refs: [scheduled] }],
+    });
+    prior.answer.findings.push({
+      ...prior.answer.findings[0]!, finding_id: "old-scheduled-opportunity", kind: "design_opportunity",
+      claim: "Scheduled resume can share its checkpoint implementation",
+    });
+    prior.answer.observations[0]!.source_refs.push(scheduled);
+    const submit = (submission: ReviewSubmission) => submitAuditQuestionResult({ ...live,
+      assignmentId: submission.assignment_id, source: JSON.stringify(submission) });
+    expect((await submit(prior)).kind).toBe("accepted");
+    const synthesize = (input: ArtifactBundle, cycle: Awaited<ReturnType<typeof deriveQuestionCycleUnlocked>>) =>
+      runQuestionSynthesisExecutor(input, { auditRead: null, questionReview: {
+        accepted: cycle.answers, evidence: cycle.evidence, adjudications: cycle.adjudications,
+        consolidations: cycle.consolidations, dependenciesByQuestion: cycle.dependenciesByQuestion,
+      } }).updated;
+    const wide = await deriveQuestionCycleUnlocked({ ...boundary, bundle });
+    const wideReport = synthesize(bundle, wide);
+    expect(wideReport.audit_findings?.findings).toHaveLength(1);
+    expect(wideReport.audit_report).toContain("## Supported design opportunities");
+
+    const narrowed = structuredClone(bundle);
+    narrowed.intent_checkpoint!.excluded_scope = [{ path: SCHEDULED, reason: "Exclude scheduled work" }];
+    const planned = plan(narrowed);
+    const current = await deriveQuestionCycleUnlocked({ ...boundary, bundle: planned });
+    expect(current.runId).toBe(first.runId);
+    expect(current.answers.map(row => row.submission.submission_id)).toEqual([prior.submission_id]);
+    expect(current.evidence.flatMap(item => item.source_refs).map(ref => ref.path)).not.toContain(SCHEDULED);
+    expect(current.bindings.flatMap(item => item.sourceFiles).map(file => file.path)).not.toContain(SCHEDULED);
+    const reissued = current.pending.find(item => item.question.question_id === manual.question.question_id)!;
+    expect(reissued.question.revision_id).toBe(manual.question.revision_id);
+    await publishAuditQuestionWorkload({ ...live, bindings: current.pending });
+    const excluded = manualOnly(reissued, "outside-current-scope");
+    excluded.inspected_sources.push(scheduled);
+    await expect(submit(excluded)).rejects.toThrow(/outside this assignment/i);
+    const report = synthesize(planned, current);
+    expect(report.audit_findings?.findings).toEqual([]);
+    expect(report.audit_report).toContain("Actionable confirmed defects: 0.");
+    expect(report.audit_report).not.toContain("## Supported design opportunities");
+    expect(report.audit_report).toContain("Exclude scheduled work");
   });
 });
 
