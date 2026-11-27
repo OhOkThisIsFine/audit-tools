@@ -1,4 +1,4 @@
-import { conformanceReviewPaths } from "../../src/remediate/steps/dispatch/contractConformanceReview.js";
+import { checkConformanceSubject, conformanceReviewPaths } from "../../src/remediate/steps/dispatch/contractConformanceReview.js";
 import { submitRemediationGateResult } from "../../src/remediate/steps/submitGateResult.js";
 import { assertSuccessfulConformance, checkTriageConformance, triageEvidenceContext } from "../../src/remediate/phases/triageConformance.js";
 import { runClosePhase, buildRemediationOutcomesReport, cleanupTempBranchesAndArtifacts } from "../../src/remediate/phases/close.js";
@@ -7,7 +7,7 @@ import { StateStore, type RemediationState } from "../../src/remediate/state/sto
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { runRequiredTest, type RequiredTestFailure } from "../../src/remediate/steps/dispatch/requiredTests.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Fixture, cleanupHostHandoffFixtures, cleanupRoots, fixture, boundState, persistBoundState, resultFor, decisionFor, writeResult, landA } from "./helpers/hostHandoffCorroborationFixture.js";
+import { type Fixture, cleanupHostHandoffFixtures, cleanupRoots, fixture, boundState, persistBoundState, resultFor, decisionFor, writeResult, landA, git } from "./helpers/hostHandoffCorroborationFixture.js";
 import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,7 @@ import { hasBoundRemediationSubmission, ingestRemediationHostResults, submitReme
 
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import { readSubmissionLedger } from "audit-tools/shared";
+import { canonicalPlanFixture, canonicalUnitFixture } from "./helpers/canonicalPlanFixture.js";
 
 afterEach(cleanupHostHandoffFixtures);
 
@@ -136,7 +137,6 @@ describe("independent conformance admission and captured verification evidence",
       await writeFile(join(dir, "intent_checkpoint.json"), JSON.stringify({ schema_version: "intent-checkpoint/v1", confirmed_by: "host", confirmed_at: new Date().toISOString(), scope_summary: "fixture", intent_summary: "independent review", conformance_review: true }));
       if (twoBlocks) await writeFile(join(dir, "triage-counter.cjs"), "const fs = require('node:fs'); const p = '.audit-tools/remediation/triage-count'; const n = fs.existsSync(p) ? Number(fs.readFileSync(p)) : 0; fs.writeFileSync(p, String(n + 1)); process.exit(n === 0 ? 0 : 1);");
       if (requiredTest === "node .audit-tools/remediation/triage-mutate.cjs") await writeFile(join(dir, "triage-mutate.cjs"), "require('node:fs').appendFileSync('src/a.ts', '// changed\\n');");
-      if (requiredTest === "node .audit-tools/remediation/triage-stable.cjs") await writeFile(join(dir, "triage-stable.cjs"), "process.exit(0);");
       if (requiredTest === "node .audit-tools/remediation/record-test.cjs") {
         await writeFile(join(dir, "record-test.cjs"),
           "const fs = require('node:fs'); fs.appendFileSync('.audit-tools/remediation/test-count', 'run\\n'); process.exit(fs.existsSync('.audit-tools/remediation/test-red') ? 1 : 0);");
@@ -154,7 +154,33 @@ describe("independent conformance admission and captured verification evidence",
     await writeResult(value, result);
     return result;
   }
-  async function answerConformance(value: Fixture, options: { mode?: string; verdict?: string; binding?: string } = {}) {
+  type ConformanceTarget = Pick<Fixture, "artifactsDir" | "runId"> & {
+    item: Pick<Fixture["item"], "id" | "obligation_ids">;
+  };
+
+  async function planOnlyConformance({ withGit = true, requiredTests = ['node -e "process.exit(0)"'] } = {}) {
+    const root = await mkdtemp(join(tmpdir(), "triage-conformance-plan-"));
+    cleanupRoots.push(root);
+    const artifactsDir = join(root, ".audit-tools", "remediation");
+    await mkdir(artifactsDir, { recursive: true });
+    if (withGit) {
+      await mkdir(join(root, "src"));
+      await writeFile(join(root, "src", "a.ts"), "export const value = 1;\n");
+      git(root, ["init"]);
+      git(root, ["add", "src/a.ts"]);
+      git(root, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "baseline"]);
+    }
+    const unit = canonicalUnitFixture("B1", { required_tests: requiredTests });
+    const plan = canonicalPlanFixture({ units: [unit] });
+    const state: RemediationState = {
+      status: "triage", plan, items: { B1: { unit_id: "B1", status: "blocked" } },
+      run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
+      conformance_review: { run_id: plan.plan_id, enabled: true },
+    };
+    return { root, artifactsDir, state, runId: plan.plan_id, item: { id: unit.id, obligation_ids: unit.requirement_ids } };
+  }
+
+  async function answerConformance(value: ConformanceTarget, options: { mode?: string; verdict?: string; binding?: string } = {}) {
     const paths = conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id);
     const request = JSON.parse(await readFile(paths.request, "utf8")) as { binding: string };
     await writeFile(paths.response, JSON.stringify({
@@ -164,6 +190,26 @@ describe("independent conformance admission and captured verification evidence",
       obligations: value.item.obligation_ids.map(obligation_id => ({ obligation_id, verdict: "satisfied", evidence: ["src/a.ts:1 exports the required name and value"] })),
     }));
   }
+  it("rejects non-independent and insufficient reviews at the shared file-based verdict boundary", async () => {
+    const value = await planOnlyConformance({ withGit: false });
+    const check = () => checkConformanceSubject({
+      artifactsDir: value.artifactsDir, runId: value.runId, itemId: value.item.id,
+      obligationIds: value.item.obligation_ids, content: { verified: "stable subject" },
+      evidenceInstruction: "Check the bound test evidence",
+    });
+    await expect(check()).resolves.toMatchObject({
+      ok: false, issue: { code: "conformance_review_required" },
+    });
+    for (const [answer, code] of [
+      [{ mode: "unavailable" }, "conformance_review_unavailable"],
+      [{ mode: "degraded" }, "conformance_review_unavailable"],
+      [{ verdict: "insufficient" }, "conformance_review_insufficient"],
+    ] as const) {
+      await answerConformance(value, answer);
+      await expect(check()).resolves.toMatchObject({ ok: false, issue: { code } });
+    }
+  });
+
   describe("opt-in independent contract conformance lifecycle", () => {
     it.each(["landed", "no-change"] as const)(
       "does not spawn required tests until the exact %s result is independently reviewed",
@@ -304,14 +350,18 @@ describe("independent conformance admission and captured verification evidence",
       expect(step.step_kind).toBe("confirm_resume_or_restart");
     });
     it("new guidance still requires the source-conflict choice", async () => {
-      const value = await conformanceFixture(); await writeConformanceResult(value); await persistBoundState(value);
+      const value = await conformanceFixture();
+      await writeResult(value, resultFor(value, value.baseline));
+      await persistBoundState(value);
       const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir, guidanceText: "Use a different scope" });
       expect(step.step_kind).toBe("input_conflict");
       expect((await new StateStore(value.artifactsDir).loadState())!.items![value.item.id]!.status).toBe("pending");
     });
 
     it.each(["pause", "cancel"] as const)("%s still stops before returned work is ingested", async (action) => {
-      const value = await conformanceFixture(); await writeConformanceResult(value); await persistBoundState(value);
+      const value = await conformanceFixture();
+      await writeResult(value, resultFor(value, value.baseline));
+      await persistBoundState(value);
       const store = new StateStore(value.artifactsDir);
       await store.withActiveOperator(() => store.setOperatorLifecycleUnderPhaseLock(action));
       const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir });
@@ -350,18 +400,7 @@ describe("independent conformance admission and captured verification evidence",
       expect(again.step_kind).toBe("review_contract_conformance");
       const requestC = JSON.parse(await readFile(paths.request, "utf8")) as { binding: string };
       expect(requestC.binding).not.toBe(requestB.binding);
-      const current = (await store.loadState())!;
-      expect(current.items!.B1.status).toBe("blocked");
-      // Response variants share the same review boundary. Keep the full
-      // controller for changes to the bound tree and the reopened unit.
-      for (const [answer, code] of [
-        [{ mode: "unavailable" }, "conformance_review_unavailable"],
-        [{ mode: "degraded" }, "conformance_review_unavailable"],
-        [{ verdict: "insufficient" }, "conformance_review_insufficient"],
-      ] as const) {
-        await answerConformance(value, answer);
-        await expect(checkReview(current)).resolves.toMatchObject({ ok: false, issue: { code } });
-      }
+      expect((await store.loadState())!.items!.B1.status).toBe("blocked");
       expect(JSON.parse(await readFile(paths.request, "utf8")).binding).toBe(requestC.binding);
       await answerConformance(value);
       const accepted = await runTriagePhase((await store.loadState())!, { root: value.root, artifactsDir: value.artifactsDir });
@@ -382,8 +421,8 @@ describe("independent conformance admission and captured verification evidence",
       expect(reopened.items!.B1.conformance_review).toEqual(priorReceipt);
     });
     it("closing refuses successful units without required conformance receipts", async () => {
-      const value = await conformanceFixture();
-      const state: RemediationState = boundState(value);
+      const value = await planOnlyConformance({ withGit: false });
+      const state = value.state;
       state.items!.B1!.status = "resolved_no_change";
       state.status = "closing";
       state.closing_plan = { action: "none" };
@@ -415,7 +454,6 @@ describe("independent conformance admission and captured verification evidence",
       await ingestConformance(value); await answerConformance(value);
       const accepted = await ingestConformance(value);
       await writeFile(join(value.root, "src/b.ts"), "export const other = 29;\n");
-      const { git } = await import("./helpers/hostHandoffCorroborationFixture.js");
       git(value.root, ["add", "src/b.ts"]); git(value.root, ["commit", "-m", "land other unit"]);
       await expect(assertSuccessfulConformance(value.root, value.artifactsDir, accepted.state)).resolves.toBeUndefined();
     });
@@ -432,32 +470,28 @@ describe("independent conformance admission and captured verification evidence",
       expect((await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir })).step_kind).toBe("review_contract_conformance");
       expect((await new StateStore(value.artifactsDir).loadState())!.items!.B1.status).toBe("blocked");
     });
-    it("triage evidence binds an explicitly invoked ignored test script", async () => {
-      const value = await conformanceFixture("node .audit-tools/remediation/triage-stable.cjs");
-      const before = await triageEvidenceContext(value.root, boundState(value), value.item.id);
-      expect(before).not.toBeNull();
-      await writeFile(join(value.artifactsDir, "triage-stable.cjs"), "process.exit(1);");
-      expect(await triageEvidenceContext(value.root, boundState(value), value.item.id)).not.toEqual(before);
-    });
-    it("triage evidence binds an ignored invoked script beneath an in-root dot-dot-prefixed directory", async () => {
-      const value = await conformanceFixture("node ..cache/triage-stable.cjs");
+    it("triage evidence binds explicitly invoked scripts in otherwise ignored locations", async () => {
+      const scripts = [".audit-tools/remediation/triage-stable.cjs", "..cache/triage-stable.cjs"];
+      const value = await planOnlyConformance({ requiredTests: scripts.map(script => "node " + script) });
       await mkdir(join(value.root, "..cache"));
       await writeFile(join(value.root, ".git", "info", "exclude"), "\n..cache/\n", { flag: "a" });
-      const script = join(value.root, "..cache", "triage-stable.cjs");
-      await writeFile(script, "process.exit(0);");
-      const before = await triageEvidenceContext(value.root, boundState(value), value.item.id);
+      for (const path of scripts) await writeFile(join(value.root, path), "process.exit(0);");
+      let before = await triageEvidenceContext(value.root, value.state, value.item.id);
       expect(before).not.toBeNull();
-      await writeFile(script, "process.exit(1);");
-      expect(await triageEvidenceContext(value.root, boundState(value), value.item.id)).not.toEqual(before);
+      for (const path of scripts) {
+        await writeFile(join(value.root, path), "process.exit(1);");
+        const after = await triageEvidenceContext(value.root, value.state, value.item.id);
+        expect(after, path).not.toBeNull();
+        expect(after, path).not.toEqual(before);
+        before = after;
+      }
     });
     it("fully-green cleanup preserves the actual triage conformance subject with promoted evidence", async () => {
-      const value = await conformanceFixture();
-      const state: RemediationState = boundState(value);
-      state.items!.B1.status = "blocked";
-      delete state.host_handoff;
-      await runTriagePhase(state, { root: value.root, artifactsDir: value.artifactsDir });
+      const value = await planOnlyConformance();
+      await runTriagePhase(value.state, { root: value.root, artifactsDir: value.artifactsDir });
       await answerConformance(value);
-      const accepted = await runTriagePhase(state, { root: value.root, artifactsDir: value.artifactsDir });
+      const accepted = await runTriagePhase(value.state, { root: value.root, artifactsDir: value.artifactsDir });
+      expect(accepted.items!.B1!.status).toBe("resolved_no_change");
       accepted.status = "complete";
       const paths = conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id);
       const subject = JSON.parse(await readFile(paths.request, "utf8"));
@@ -494,7 +528,8 @@ describe("independent conformance admission and captured verification evidence",
 
 
   it("a required-review handoff cannot be accepted with its run snapshot dropped", async () => {
-    const value = await conformanceFixture(); await writeConformanceResult(value);
+    const value = await conformanceFixture();
+    await writeResult(value, resultFor(value, value.baseline));
     const state = boundState(value);
     delete state.conformance_review;
     const outcome = await ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state });
