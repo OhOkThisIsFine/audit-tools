@@ -102,7 +102,7 @@ on:
       - "scripts/shared/suite-green-status.mjs"
       - "skills/**"
       - "spec/audit/artifact-contract.md"
-      - "spec/audit/dependency-map.md"
+      - "spec/audit/dependency-map.generated.md"
       - "spec/audit/executor-catalog.md"
       - "spec/audit/executor-producers.generated.md"
       - "src/**"

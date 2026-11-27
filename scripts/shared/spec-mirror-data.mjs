@@ -62,7 +62,13 @@ export const SPEC_MIRROR_SOURCE_FILES = [
 /** The three docs carrying generated regions. */
 export const ARTIFACT_CONTRACT_DOC = "spec/audit/artifact-contract.md";
 export const EXECUTOR_CATALOG_DOC = "spec/audit/executor-catalog.md";
-export const DEPENDENCY_MAP_DOC = "spec/audit/dependency-map.md";
+export const DEPENDENCY_MAP_DOC = "spec/audit/dependency-map.generated.md";
+export const DEPENDENCY_REFERENCE_HEADINGS = {
+  "phase-1": "## Phase 1 — intake",
+  "phase-2": "## Phase 2 — structure",
+  "phase-3": "## Phase 3 — planning & execution",
+  "phase-4": "## Phase 4 — reporting",
+};
 
 /** Every doc the render writes into. */
 export const SPEC_MIRROR_DOCS = [

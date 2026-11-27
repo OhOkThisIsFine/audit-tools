@@ -11,8 +11,11 @@
 // pins the two refusals the whole design rests on: membership reconciled in BOTH
 // directions, and a splice that refuses a missing or duplicated marker pair
 // rather than picking a region.
-import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc-paths.generated.mjs";
+import { buildPreCommitLegs } from "../../scripts/shared/derived-file-preflight.mjs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -20,13 +23,20 @@ import {
   readRegistries,
   reconcileRegions,
   renderRegion,
+  runGenerator,
   spliceRegion,
 } from "../../scripts/shared/generate-spec-mirrors.mjs";
 import {
+  ARTIFACT_CONTRACT_DOC,
+  DEPENDENCY_MAP_DOC,
+  DEPENDENCY_MAP_FILE,
+  EXECUTOR_CATALOG_DOC,
   SPEC_MIRROR_DOCS,
+  SPEC_MIRROR_SOURCE_FILES,
   SPEC_MIRROR_REGIONS,
 } from "../../scripts/shared/spec-mirror-data.mjs";
 
+const PROTECTED_DEPENDENCY_DOC = "spec/audit/dependency-map.md";
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const registries = readRegistries(REPO_ROOT);
 const docText = (doc: string): string =>
@@ -130,5 +140,60 @@ describe("splicing refuses a doc whose markers it cannot trust", () => {
   it("names the generator in the banner a reader is told not to edit past", () => {
     expect(beginMarker(region.id)).toContain("scripts/shared/generate-spec-mirrors.mjs");
     expect(beginMarker(region.id)).toContain("DO NOT EDIT BY HAND");
+  });
+});
+
+describe("dependency mirror uses an exact generated-only reference", () => {
+  it("regenerates only the reference after a canonical dependency edit and rejects stale, malformed, or missing output", () => {
+    const root = mkdtempSync(join(tmpdir(), "dependency-spec-mirror-"));
+    const emit = (check: boolean) => runGenerator({ root, check, out: () => {}, err: () => {} });
+    try {
+      for (const path of [...SPEC_MIRROR_SOURCE_FILES, ...SPEC_MIRROR_DOCS, PROTECTED_DEPENDENCY_DOC]) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        writeFileSync(join(root, path), readFileSync(join(REPO_ROOT, path)));
+      }
+      const read = (path: string) => readFileSync(join(root, path), "utf8");
+      const protectedText = read(PROTECTED_DEPENDENCY_DOC);
+      const mirror = join(root, DEPENDENCY_MAP_DOC);
+      const before = read(DEPENDENCY_MAP_DOC);
+      expect(emit(true)).toBe(0);
+      const dependencySource = read(DEPENDENCY_MAP_FILE);
+      const from = '"repo_manifest.json": ["tooling_manifest.json"]';
+      expect(dependencySource).toContain(from);
+      writeFileSync(join(root, DEPENDENCY_MAP_FILE), dependencySource.replace(from,
+        '"repo_manifest.json": ["tooling_manifest.json", "intent_checkpoint.json"]'));
+      expect(emit(true)).toBe(1);
+      expect(read(DEPENDENCY_MAP_DOC)).toBe(before);
+      expect(emit(false)).toBe(0);
+      expect(emit(true)).toBe(0);
+      expect(read(DEPENDENCY_MAP_DOC)).toContain("| `repo_manifest.json` | `tooling_manifest.json`, `intent_checkpoint.json` |");
+      expect(read(PROTECTED_DEPENDENCY_DOC)).toBe(protectedText);
+      writeFileSync(mirror, read(DEPENDENCY_MAP_DOC) + "\nUnapproved prose outside generated markers.\n");
+      expect(emit(true)).toBe(1);
+      expect(emit(false)).toBe(0);
+      expect(emit(true)).toBe(0);
+      rmSync(mirror);
+      expect(emit(true)).toBe(1);
+      expect(emit(false)).toBe(0);
+      expect(emit(true)).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the protected notes on the constitutional path but routes the reference to mirror checks", () => {
+    expect(isConstitutionalDocPath(PROTECTED_DEPENDENCY_DOC)).toBe(true);
+    expect(isConstitutionalDocPath(ARTIFACT_CONTRACT_DOC)).toBe(true);
+    expect(isConstitutionalDocPath(EXECUTOR_CATALOG_DOC)).toBe(true);
+    expect(isConstitutionalDocPath(DEPENDENCY_MAP_DOC)).toBe(false);
+    const leg = buildPreCommitLegs().find(leg => leg.id === "check:spec-mirrors");
+    expect(leg?.triggered({ staged: [DEPENDENCY_MAP_DOC] })).toBe(true);
+    expect(docText(PROTECTED_DEPENDENCY_DOC)).toContain(`[generated dependency tables](dependency-map.generated.md)`);
+    expect(docText(PROTECTED_DEPENDENCY_DOC)).not.toContain("BEGIN GENERATED spec-mirror");
+    expect(docText(DEPENDENCY_MAP_DOC)).toContain("[dependency rules and notes](dependency-map.md)");
+    for (const phase of ["phase-1", "phase-2", "phase-3", "phase-4"]) {
+      expect(docText(PROTECTED_DEPENDENCY_DOC)).toContain("(dependency-map.generated.md#" + phase + ")");
+      expect(docText(DEPENDENCY_MAP_DOC)).toContain(`<a id="${phase}"></a>`);
+    }
   });
 });

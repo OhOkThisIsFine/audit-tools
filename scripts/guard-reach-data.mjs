@@ -551,9 +551,9 @@ export const GUARDS = [
     impl: 'check:spec-mirrors',
     preCommit: 'reach',
     fix:
-      'a generated table region in spec/audit/artifact-contract.md, executor-catalog.md or ' +
-      'dependency-map.md is stale — run `node scripts/shared/generate-spec-mirrors.mjs`, then ' +
-      're-stage the doc(s). Never hand-edit between the markers: the rows come from ' +
+      'a generated table in spec/audit/artifact-contract.md, executor-catalog.md or ' +
+      'dependency-map.generated.md is stale — run `node scripts/shared/generate-spec-mirrors.mjs`, then ' +
+      're-stage the generated output. The rows come from ' +
       'ARTIFACT_DEFINITIONS / EXECUTOR_REGISTRY / ARTIFACT_DEPENDS_ON_MAP and the Purpose/Notes ' +
       'prose from scripts/shared/spec-mirror-data.mjs. If the check instead names a row the ' +
       'declaration and the registry disagree about, fix the declaration — a new registry entry ' +

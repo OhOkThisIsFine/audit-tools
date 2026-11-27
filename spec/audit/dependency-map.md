@@ -20,46 +20,19 @@ table by `invertDependencyMap` — there is exactly one hand-authored adjacency
 representation, so the two views can never drift. This document mirrors the
 canonical (upstream) direction for the same reason.
 
-The four phase tables below are GENERATED from `ARTIFACT_DEPENDS_ON_MAP` by
-`scripts/shared/generate-spec-mirrors.mjs` (`npm run check:spec-mirrors` gates
-them) — every cell is registry-derived, and only which phase a row is filed under
-is declared, in `scripts/shared/spec-mirror-data.mjs`. These headings group the
-dependency rows and do not define executor order. Never hand-edit between the
-markers; edit the map and re-run the generator.
+The [generated dependency tables](dependency-map.generated.md) mirror the registry and are checked by
+`npm run check:spec-mirrors`. Their headings group rows and do not define executor order.
 
 ### Phase 1 — intake
 
-<!-- BEGIN GENERATED spec-mirror dependency-map#phase-1 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
-| Artifact | Depends on |
-|---|---|
-| `repo_manifest.json` | `tooling_manifest.json` |
-| `file_disposition.json` | `repo_manifest.json` |
-<!-- END GENERATED spec-mirror dependency-map#phase-1 -->
+[Generated Phase 1 table](dependency-map.generated.md#phase-1).
 
 `repo_manifest.json` is rebuilt when the tooling/environment probe changes (a
 different analyzer version can classify files differently).
 
 ### Phase 2 — structure
 
-<!-- BEGIN GENERATED spec-mirror dependency-map#phase-2 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
-| Artifact | Depends on |
-|---|---|
-| `graph_bundle.json` | `repo_manifest.json`, `file_disposition.json`, `external_analyzer_results.json` |
-| `analyzer_capability.json` | `graph_bundle.json` |
-| `unit_manifest.json` | `repo_manifest.json`, `file_disposition.json` |
-| `surface_manifest.json` | `repo_manifest.json`, `file_disposition.json` |
-| `critical_flows.json` | `repo_manifest.json`, `file_disposition.json`, `surface_manifest.json`, `critical-flow-fallback.json` |
-| `risk_register.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json` |
-| `git_history.json` | `repo_manifest.json`, `file_disposition.json` |
-| `external_analyzer_acquisition.json` | `repo_manifest.json`, `file_disposition.json` |
-| `design_assessment.json` | `unit_manifest.json`, `critical_flows.json` |
-| `conceptual_review_adjudication.json` | `design_assessment.json` |
-| `docs_digest.json` | `repo_manifest.json`, `file_disposition.json` |
-| `structure_decomposition.json` | `repo_manifest.json`, `file_disposition.json`, `graph_bundle.json` |
-| `charter_register.json` | `unit_manifest.json`, `intent_checkpoint.json`, `repo_manifest.json`, `graph_bundle.json` |
-| `charter_clarification.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json`, `structure_decomposition.json` |
-| `systemic_challenge.json` | `charter_register.json`, `conceptual_review_adjudication.json`, `intent_checkpoint.json`, `repo_manifest.json` |
-<!-- END GENERATED spec-mirror dependency-map#phase-2 -->
+[Generated Phase 2 table](dependency-map.generated.md#phase-2).
 
 `charter_clarification.json` (Phase D charter-difference clarification loop) and
 `systemic_challenge.json` (Phase E second-order-adversary challenge loop) both
@@ -134,11 +107,7 @@ three writers).
 
 ### Phase 3 — planning & execution
 
-<!-- BEGIN GENERATED spec-mirror dependency-map#phase-3 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
-| Artifact | Depends on |
-|---|---|
-| `review_plan.json` | `repo_manifest.json`, `file_disposition.json`, `scope.json`, `intent_checkpoint.json`, `surface_manifest.json`, `critical_flows.json`, `unit_manifest.json`, `graph_bundle.json`, `charter_register.json`, `design_assessment.json`, `systemic_challenge.json`, `external_analyzer_results.json` |
-<!-- END GENERATED spec-mirror dependency-map#phase-3 -->
+[Generated Phase 3 table](dependency-map.generated.md#phase-3).
 
 `scope.json` records full scope or, for `--since`, the changed seed and expanded
 neighbor file sets. It is a direct input to `review_plan.json`; planning writes
@@ -153,13 +122,7 @@ are raw archival evidence, not dependency inputs.
 
 ### Phase 4 — reporting
 
-<!-- BEGIN GENERATED spec-mirror dependency-map#phase-4 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
-| Artifact | Depends on |
-|---|---|
-| `audit-report.md` | `review_plan.json`, `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `design_assessment.json`, `conceptual_review_adjudication.json`, `structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `syntax_resolution_status.json`, `external_analyzer_results.json`, `agent-feedback.jsonl` |
-| `audit-findings.json` | `review_plan.json` |
-| `synthesis-narrative.json` | `audit-findings.json` |
-<!-- END GENERATED spec-mirror dependency-map#phase-4 -->
+[Generated Phase 4 table](dependency-map.generated.md#phase-4).
 
 `review_plan.json` is a declared dependency of both `audit-findings.json` and
 `audit-report.md`. Synthesis writes the machine report and its Markdown render
@@ -194,8 +157,8 @@ edge is added by editing the registry, never a table.
 
 ### Example 1
 
-If `repo_manifest.json` changes, every artifact whose generated dependency row
-above lists `repo_manifest.json` is stale, and so is every artifact downstream of
+If `repo_manifest.json` changes, every artifact whose [generated dependency row](dependency-map.generated.md)
+lists `repo_manifest.json` is stale, and so is every artifact downstream of
 those — the structure rows first, then the planning, execution and reporting rows
 that list a stale artifact. The generated tables are the sole authoritative
 enumeration; this example deliberately names none of them, so it cannot omit

@@ -75,6 +75,27 @@ describe("commit-gate at git's boundary: a real `git commit` is judged by git ru
     expect(r.landed).toBe(true);
   });
 
+
+  test("generated dependency reference does not need an override, but the handwritten rules do", () => {
+    const dir = join(repo, "spec", "audit");
+    mkdirSync(dir, { recursive: true });
+    const generated = "spec/audit/dependency-map.generated.md";
+    const protectedDoc = "spec/audit/dependency-map.md";
+    writeFileSync(join(repo, generated), readFileSync(join(REPO_ROOT, generated)));
+    g("add", generated);
+    const referenceOnly = realCommit("-m", "update generated dependency tables");
+    expect(referenceOnly.status, referenceOnly.stderr).toBe(0);
+    expect(referenceOnly.landed).toBe(true);
+    writeFileSync(join(repo, protectedDoc), readFileSync(join(REPO_ROOT, protectedDoc)));
+    g("add", protectedDoc);
+    const protectedRules = realCommit("-m", "change handwritten dependency rules");
+    expect(protectedRules.status).not.toBe(0);
+    expect(protectedRules.landed).toBe(false);
+    expect(protectedRules.stderr).toContain("rewrites CONSTITUTIONAL doc(s)");
+    expect(protectedRules.stderr).toContain("no owner-decision override record exists");
+    expect(protectedRules.stderr).toContain(protectedDoc);
+  });
+
   test("npm checks do not inherit git's hook-local repository bindings", () => {
     writeFileSync(
       join(repo, "check.mjs"),
