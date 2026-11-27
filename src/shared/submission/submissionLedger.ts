@@ -326,7 +326,8 @@ export async function appendSubmissionEvent<
   const ledgerPath = submissionLedgerPath(artifactsDir);
   await withFileLock(
     ledgerLockPath(ledgerPath),
-    async () => {
+    async (assertOwnership) => {
+      await assertOwnership();
       await appendNdjsonFile(ledgerPath, event);
     },
   );

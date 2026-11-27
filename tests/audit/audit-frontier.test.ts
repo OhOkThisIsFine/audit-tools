@@ -1,5 +1,5 @@
 import { projectQuestionForReport } from "../../src/audit/reporting/questionReport.js";
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hashContent } from "audit-tools/shared";
@@ -8,7 +8,7 @@ import { updateRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js
 import { queryReviewerGraph } from "../../src/audit/cli/reviewGraphCommand.js";
 import { cmdNextStep } from "../../src/audit/cli/nextStepCommand.js";
 import { deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
-import { publishAuditQuestionWorkload, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
+import { publishAuditQuestionWorkload, readAuditQuestionLedger, readAuditQuestionWorkload, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { projectQuestionReview, type AuditQuestionBinding } from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
 import { questionWorkloadBindings } from "../../src/audit/cli/questionWorkloadBindings.js";
 import { writeCoreArtifacts, type ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -22,6 +22,19 @@ import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
+
+const lockFixture = vi.hoisted(() => ({ failCommitCheck: false }));
+vi.mock("audit-tools/shared", async (load) => {
+  const shared = await load<typeof import("audit-tools/shared")>();
+  const withFileLock: typeof shared.withFileLock = (path, body, ...options) =>
+    shared.withFileLock(path, (check) => body(async () => {
+      if (lockFixture.failCommitCheck && path.endsWith("host-accepted-results.lock")) {
+        throw new Error("fixture: ownership unavailable at commit");
+      }
+      await check();
+    }), ...options);
+  return { ...shared, withFileLock };
+});
 
 const VERSION = REVIEW_QUESTION_CONTRACT_VERSION;
 const MANUAL = "src/manual.ts";
@@ -282,6 +295,13 @@ test("the published question frontier resumes from accepted answers, reuses unre
     const accept = (answer: ReviewSubmission) => submitAuditQuestionResult({ ...boundary, runId: first.runId,
       assignmentId: answer.assignment_id, source: JSON.stringify(answer) });
     await publishAuditQuestionWorkload({ ...boundary, runId: first.runId, bindings: first.pending });
+    lockFixture.failCommitCheck = true;
+    try {
+      await expect(accept(oldAnswer)).rejects.toThrow("fixture: ownership unavailable at commit");
+    } finally {
+      lockFixture.failCommitCheck = false;
+    }
+    expect((await readAuditQuestionLedger({ ...boundary, runId: first.runId })).answers).toEqual([]);
     expect((await accept(oldAnswer)).kind).toBe("accepted");
     expect((await accept(manualOnly(manual, "manual-answer"))).kind).toBe("accepted");
     expect((await accept(oldAnswer)).kind).toBe("replay");
@@ -302,7 +322,16 @@ test("the published question frontier resumes from accepted answers, reuses unre
     expect(changed.pending.some(binding => binding.question.question_id === manual.question.question_id)).toBe(false);
     expect(projectQuestionReview(rebound.question, changed.answers,
       changed.dependenciesByQuestion.get(rebound.question.question_id)).stale).toHaveLength(1);
-    await publishAuditQuestionWorkload({ ...boundary, runId: changed.runId, bindings: changed.pending });
+    const publish = () => publishAuditQuestionWorkload({ ...boundary, runId: changed.runId, bindings: changed.pending });
+    const alreadyIssued = await readAuditQuestionWorkload({ ...boundary, runId: changed.runId });
+    lockFixture.failCommitCheck = true;
+    try {
+      await expect(publish()).rejects.toThrow("fixture: ownership unavailable at commit");
+    } finally {
+      lockFixture.failCommitCheck = false;
+    }
+    expect(await readAuditQuestionWorkload({ ...boundary, runId: changed.runId })).toEqual(alreadyIssued);
+    await publish();
     await expect(accept({ ...oldAnswer, submission_id: "late-new-result" })).rejects.toThrow(/not in the current issued workload/i);
   });
 });

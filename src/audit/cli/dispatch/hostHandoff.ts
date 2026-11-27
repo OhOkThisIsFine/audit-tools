@@ -856,7 +856,7 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
       "--artifacts-dir", toPosixPath(paths.artifactsDir), "--workload-sha256", digest],
     assignments: workload.work_items.map(({ binding }) => ({ assignment_id: binding.assignment.assignment_id })),
   };
-  await withFileLock(paths.acceptedLockPath, async () => {
+  await withFileLock(paths.acceptedLockPath, async (assertOwnership) => {
     try {
       const prior = await readQuestionWorkload(paths);
       for (const item of workload.work_items) {
@@ -877,6 +877,7 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
       await writeJsonFile(snapshot, workload);
     }
     await saveImmutableReviewText(routingPath, stableStringify(routing) + "\n");
+    await assertOwnership();
     await writeJsonFile(questionWorkloadPointer(paths), { sha256: digest });
   });
   return { workload, workload_path: snapshot, routing_path: routingPath };
@@ -929,7 +930,7 @@ export async function reopenAuditQuestions(params: QuestionBoundary & {
 }) {
   const paths = resolveBoundaryPaths(params);
   const request = ReviewReopenRequestSchema.parse(params.request);
-  return withFileLock(paths.acceptedLockPath, async () => {
+  return withFileLock(paths.acceptedLockPath, async (assertOwnership) => {
     const ledger = await readQuestionLedger(paths);
     const prior = ledger.reopens.find(event => event.reopen_id === request.reopen_id);
     if (prior) {
@@ -959,6 +960,7 @@ export async function reopenAuditQuestions(params: QuestionBoundary & {
         throw new Error("Reopen must name exactly the current accepted submission IDs.");
       }
     }
+    await assertOwnership();
     await writeJsonFile(paths.acceptedLedgerPath, {
       ...ledger, reopens: [...ledger.reopens, {
         ...request, reopened_at: new Date().toISOString(),
@@ -982,7 +984,7 @@ export async function consolidateAuditQuestionFindings(params: QuestionBoundary 
   const key = ({ answer_id, finding_id }: typeof decision.sources[number]) => questionClaimKey(answer_id, finding_id);
   const keys = new Set(decision.sources.map(key));
   if (keys.size !== decision.sources.length) throw new Error("Consolidation requires distinct accepted claim references.");
-  return withFileLock(paths.acceptedLockPath, async () => {
+  return withFileLock(paths.acceptedLockPath, async (assertOwnership) => {
     const ledger = await readQuestionLedger(paths);
     const prior = ledger.consolidations.find(row => row.decision_id === decision.decision_id);
     if (prior) {
@@ -1002,6 +1004,7 @@ export async function consolidateAuditQuestionFindings(params: QuestionBoundary 
       return sources.every(id => actionable.has(id)) ? sources : [];
     }));
     if ([...keys].some(id => consumed.has(id))) throw new Error("An accepted claim is already in a consolidation.");
+    await assertOwnership();
     await writeJsonFile(paths.acceptedLedgerPath, {
       ...ledger, consolidations: [...ledger.consolidations, decision],
     });
@@ -1014,7 +1017,7 @@ export async function submitAuditQuestionResult(params: QuestionBoundary & { ass
   const paths = resolveBoundaryPaths(params);
   const submission = ReviewSubmissionSchema.parse(JSON.parse(params.source));
   if (params.assignmentId !== submission.assignment_id) throw new Error("Result assignment differs from its destination");
-  return withFileLock(paths.acceptedLockPath, async () => {
+  return withFileLock(paths.acceptedLockPath, async (assertOwnership) => {
     const workload = await readQuestionWorkload(paths);
     const ledger = await readQuestionLedger(paths);
     const item = workload.work_items.find((entry) => entry.binding.assignment.assignment_id === params.assignmentId);
@@ -1022,8 +1025,10 @@ export async function submitAuditQuestionResult(params: QuestionBoundary & { ass
       throw new Error("Review assignment is not in the current issued workload");
     }
     const accepted = acceptQuestionReview(ledger.answers, hydrateQuestionBinding(workload, item.binding), submission, new Date().toISOString());
-    if (accepted.kind === "accepted") await writeJsonFile(paths.acceptedLedgerPath,
-      { ...ledger, answers: [...ledger.answers, accepted.record] });
+    if (accepted.kind === "accepted") {
+      await assertOwnership();
+      await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, answers: [...ledger.answers, accepted.record] });
+    }
     return accepted;
   });
 }
@@ -1088,7 +1093,7 @@ function questionSchemaCorrection(issue: z.ZodError["issues"][number]): string {
 
 export async function ingestAuditQuestionResults(params: QuestionBoundary, currentAssignmentIds?: ReadonlySet<string>) {
   const paths = resolveBoundaryPaths(params);
-  return withFileLock(paths.acceptedLockPath, async () => {
+  return withFileLock(paths.acceptedLockPath, async (assertOwnership) => {
     const workload = await readQuestionWorkload(paths);
     const ledger = await readQuestionLedger(paths);
     const answers = [...ledger.answers];
@@ -1124,7 +1129,10 @@ export async function ingestAuditQuestionResults(params: QuestionBoundary, curre
       }
     }
     const accepted_count = answers.length - ledger.answers.length;
-    if (accepted_count) await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, answers });
+    if (accepted_count) {
+      await assertOwnership();
+      await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, answers });
+    }
     return { accepted_count, answers, adjudications: ledger.adjudications, consolidations: ledger.consolidations, reopens: ledger.reopens, issues };
   });
 }
@@ -1133,7 +1141,7 @@ export async function ingestAuditQuestionResults(params: QuestionBoundary, curre
 export async function adjudicateAuditQuestionResult(params: QuestionBoundary & { adjudication: ReviewAdjudication }) {
   const paths = resolveBoundaryPaths(params);
   const adjudication = ReviewAdjudicationSchema.parse(params.adjudication);
-  return withFileLock(paths.acceptedLockPath, async () => {
+  return withFileLock(paths.acceptedLockPath, async (assertOwnership) => {
     const workload = await readQuestionWorkload(paths);
     const ledger = await readQuestionLedger(paths);
     const epochs = questionReopenDependencies(ledger.reopens);
@@ -1149,7 +1157,10 @@ export async function adjudicateAuditQuestionResult(params: QuestionBoundary & {
       ...binding.evidence.flatMap((evidence) => evidence.dependencies),
     ]);
     const decision = validateQuestionAdjudication(ledger.answers, ledger.adjudications, adjudication, question, dependencies);
-    if (decision === "accepted") await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, adjudications: [...ledger.adjudications, adjudication] });
+    if (decision === "accepted") {
+      await assertOwnership();
+      await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, adjudications: [...ledger.adjudications, adjudication] });
+    }
     return decision;
   });
 }

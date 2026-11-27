@@ -252,12 +252,13 @@ export async function appendFrictionUnderLock(
   tool: FrictionCaptureArtifact["tool"] = "remediate-code",
   links?: FrictionRunLinkUpdate,
 ): Promise<TriagedFrictionArtifact> {
-  return withFileLock(frictionLockPath(artifactsDir, runId), async () => {
+  return withFileLock(frictionLockPath(artifactsDir, runId), async (assertOwnership) => {
     const existing = await readOptionalJsonFile<TriagedFrictionArtifact>(
       frictionCapturePath(artifactsDir, runId),
     );
     const base = existing ?? emptyRecord(runId, tool);
     const next = mergeFrictionRunLinks(mutate(base), links);
+    await assertOwnership();
     await writeJsonFile(frictionCapturePath(artifactsDir, runId), next);
     return next;
   });
