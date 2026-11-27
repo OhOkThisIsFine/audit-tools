@@ -16,15 +16,15 @@ Initial pilot covers only restart/gating and evidence semantics; it is not quali
 From the repository root:
 
     npm run build
-    node --test experiments/contract-tests/pilot.mjs experiments/contract-tests/audit-smoke.mjs experiments/contract-tests/remediation-smoke.mjs experiments/contract-tests/git-boundary.mjs
+    node --test experiments/contract-tests/pilot.mjs experiments/contract-tests/audit-smoke.mjs experiments/contract-tests/remediation-smoke.mjs experiments/contract-tests/git-boundary.mjs experiments/contract-tests/delivery-boundaries.mjs
 
-The exact first Windows build-and-test run against c9d2f2f was 26.56 seconds,
-six tests passed, no skips. This number describes the current prototype only.
+The Windows build and prototype took 26.97 seconds: eight passed, no skips.
+This does not qualify untested behavior or replace the existing release gate.
 
 | Contract | Current witness | Still needed for rollout |
 | --- | --- | --- |
 | Audit continuity and truthful completion | Recorded stop survives a new CLI process; one accepted binding persists in both promoted reports | Incorrect binding, duplicate admission, and incomplete coverage checks with inputs that can actually fail |
 | Remediation provenance and verification | Pending request survives restart; a real fixture test goes red then green; report reflects gate and unit status | Approved revision, a verified edit, resume after an interrupted write, and terminal report promotion |
 | Git path fidelity | Real index and dirty working tree; nested-root refusal; original index unchanged | Owned worktree/snapshot cleanup across a restart and failed Git probe |
-| Shipped product behavior | Real source-checkout wrappers used in audit and remediation smoke | A packaged-bin/install witness and Windows child cancellation |
+| Shipped product behavior | Real checkout wrappers; offline npm tarball contents and its audit prompt; actual timeout reaps the tool-owned child | Fresh install and generated host assets; cancellation with a subprocess tree, not just one child |
 | Release and development checks | Unchanged and still run through the current documented entry points | Explicit inventory and comparison before any default or release change |
