@@ -5,6 +5,7 @@ import type { ExecutionUnit, Finding, RemediationHostHandoffRecord } from "../..
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
+  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -16,7 +17,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { execFileHidden } from "../helpers/spawn.mjs";
 
@@ -248,12 +249,18 @@ async function headOf(root: string): Promise<string> {
   return await git(root, ["rev-parse", "HEAD"]);
 }
 
-/**
- * Turn a fresh temp dir into a git repository holding the four source files the
- * fixture blocks declare as their write scope, and return the baseline commit.
- */
-async function initGitRoot(root: string): Promise<string> {
-  await git(root, ["init"]);
+let seedRepo: Promise<{ root: string; sha: string }> | undefined;
+let seedRoot: string | undefined;
+
+afterAll(async () => {
+  if (seedRoot) await rm(seedRoot, { recursive: true, force: true });
+});
+
+// Build the four-file Git baseline once per test module.
+async function buildGitSeed(): Promise<{ root: string; sha: string }> {
+  const root = await mkdtemp(join(tmpdir(), "remediation-host-handoff-seed-"));
+  seedRoot = root;
+  await git(root, ["init", "--template="]);
   await git(root, ["config", "user.email", "fixture@example.invalid"]);
   await git(root, ["config", "user.name", "Fixture"]);
   await git(root, ["config", "commit.gpgsign", "false"]);
@@ -264,7 +271,15 @@ async function initGitRoot(root: string): Promise<string> {
   }
   await git(root, ["add", ...files]);
   await git(root, ["commit", "-m", "baseline"]);
-  return await headOf(root);
+  return { root, sha: await headOf(root) };
+}
+
+async function initGitRoot(root: string): Promise<string> {
+  const seed = await (seedRepo ??= buildGitSeed());
+  // A plain filesystem copy, not a shared worktree or a clone with a remote.
+  // Every case can change its own refs, index, config and tracked files.
+  await cp(seed.root, root, { recursive: true });
+  return seed.sha;
 }
 
 /**
@@ -279,8 +294,7 @@ let landedCounter = 0;
 async function landCommit(root: string, file: string): Promise<string> {
   const marker = ++landedCounter;
   writeFileSync(join(root, file), `export const value = ${String(marker)};\n`, "utf8");
-  await git(root, ["add", file]);
-  await git(root, ["commit", "-m", `land ${String(marker)}`]);
+  await git(root, ["commit", "-m", `land ${String(marker)}`, "--", file]);
   return await headOf(root);
 }
 

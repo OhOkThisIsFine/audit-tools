@@ -74,12 +74,13 @@ describe("obligation evidence-coverage floor", () => {
     expect(ingested.state.items.B1!.status).toBe("resolved");
   });
 
+  // Coverage is validated before Git corroboration. The existing baseline is
+  // sufficient for these rejected results; only the accepted case needs an edit.
   it("refuses a result that omits evidence for a bound obligation, naming the uncovered id", async () => {
     const value = await fixture({ contractOverlays: true });
-    const after = await landA(value);
     await writeResult(
       value,
-      evidenceFor(value, after, [
+      evidenceFor(value, value.baseline, [
         {
           obligation_id: "mod-a:invariant:1",
           evidence: ["src/a.ts:1 keeps the export named value"],
@@ -94,10 +95,9 @@ describe("obligation evidence-coverage floor", () => {
 
   it("refuses evidence for an obligation the work item does not bind, naming the unknown id", async () => {
     const value = await fixture({ contractOverlays: true });
-    const after = await landA(value);
     await writeResult(
       value,
-      evidenceFor(value, after, [
+      evidenceFor(value, value.baseline, [
         {
           obligation_id: "mod-a:invariant:1",
           evidence: ["src/a.ts:1 keeps the export named value"],
@@ -120,10 +120,9 @@ describe("obligation evidence-coverage floor", () => {
 
   it("refuses an evidence entry with no non-empty citation strings", async () => {
     const value = await fixture({ contractOverlays: true });
-    const after = await landA(value);
     await writeResult(
       value,
-      evidenceFor(value, after, [
+      evidenceFor(value, value.baseline, [
         { obligation_id: "mod-a:invariant:1", evidence: ["   "] },
         {
           obligation_id: "mod-a:output:2",
@@ -140,8 +139,7 @@ describe("obligation evidence-coverage floor", () => {
   it("binds the fallback requirement without a module contract and refuses empty coverage", async () => {
     const value = await fixture();
     expect(value.item.obligation_ids).toEqual(["REQ-B1"]);
-    const after = await landA(value);
-    await writeResult(value, evidenceFor(value, after, []));
+    await writeResult(value, evidenceFor(value, value.baseline, []));
     const ingested = await ingest(value);
     expect(ingested.accepted_count).toBe(0);
     expect(ingested.state.items.B1?.status).toBe("pending");
