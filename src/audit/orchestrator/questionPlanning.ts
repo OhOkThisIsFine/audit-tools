@@ -542,14 +542,20 @@ function routePriorReviewSignals(
       continue;
     }
     const lens = claimLens(claim.lens);
-    const expectation = `Verify the accepted ${lane} claim without assuming its conclusion: ${claim.title}. ${claim.summary}\n` +
-      "Trace the implicated callers and resulting state. Decide whether the claimed consequence is supported, current behavior is justified, or essential evidence is missing.";
+    const designOption = lane === "conceptual" && claim.title.startsWith("Design option:");
+    const expectation = designOption
+      ? `Compare this accepted conceptual option without assuming it should be adopted: ${claim.title}. ${claim.summary}\n` +
+        "Verify the local premise in source and trace the requirements and callers the current design serves. Compare concrete costs, benefits, behavior preserved, and migration effort for each plausible option, including keeping the current design. Explain when keeping it wins, identify an evidence-backed deciding check if needed, and distinguish measurements, estimates, and unknowns. Treat a supported alternative as a design opportunity, not a defect."
+      : `Verify the accepted ${lane} claim without assuming its conclusion: ${claim.title}. ${claim.summary}\n` +
+        "Trace the implicated callers and resulting state. Decide whether the claimed consequence is supported, current behavior is justified, or essential evidence is missing.";
     const needsCountercheck = claim.severity === "critical" || claim.severity === "high" ||
       claim.grounding?.status !== "grounded";
     const parts = needsCountercheck ? [
       { part_id: "supported-outcome", expectation },
       { part_id: DISCONFIRMATION_PART_ID, expectation:
-        "Check the strongest plausible counterexample, exception, or unreachable-caller explanation. Use a separate precise source location or already-authorized executed evidence. Mark this part clean only when the checked alternative does not overturn a supported defect; if evidence is missing, leave the claim a lead. Do not create a reproduction or run new commands." },
+        designOption
+          ? "Independently check the strongest reason to retain the current design, or why the option's premise may be absent or already addressed. Use a separate precise source location or already-authorized evidence. Explain whether this changes the recommendation or leaves it undecided. Do not create a reproduction or run new commands."
+          : "Check the strongest plausible counterexample, exception, or unreachable-caller explanation. Use a separate precise source location or already-authorized executed evidence. Mark this part clean only when the checked alternative does not overturn a supported defect; if evidence is missing, leave the claim a lead. Do not create a reproduction or run new commands." },
     ] : undefined;
     const target = add(lens, key, "invariant", claim.title, refs, [], expectation, { evidence: [[key, digest(claim)]], parts });
     disposition(key, "promoted", `Accepted ${lane} claim preserved for verification, not treated as proof.`, refs, target);

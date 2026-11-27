@@ -33,6 +33,33 @@ function fixture(): ArtifactBundle {
 }
 
 describe("question-led audit planning", () => {
+  it("frames only a tagged conceptual recommendation as a design tradeoff rather than a defect", () => {
+    const bundle = fixture();
+    const recommendation: Finding = {
+      id: "OPTION-1", title: "Design option: Replace two adapters with one",
+      category: "design_simplification", severity: "medium", confidence: "high", lens: "architecture",
+      summary: "Two callers share a persistence mechanism.", affected_files: [{ path: "src/resume-store.ts" }],
+    };
+    bundle.design_assessment = {
+      generated_at: "x", findings: [], contract_reviewed: true, conceptual_reviewed: true,
+      contract_findings: [recommendation],
+      conceptual_findings: [recommendation, { ...recommendation, id: "CONCEPTUAL-DEFECT", title: "Completion records are dropped" }],
+    };
+    const plan = buildReviewQuestionPlan(bundle, { snapshotId: "fixture" });
+    const questionFor = (signal: string) => plan.questions.find(question => question.question_id ===
+      plan.signal_dispositions?.find(disposition => disposition.signal_id === signal)?.question_id)!;
+    const option = questionFor("design-conceptual:OPTION-1");
+    expect(option.expected_outcome).toContain("including keeping the current design");
+    expect(option.expected_outcome).toContain("as a design opportunity, not a defect");
+    expect(option.requested_parts.find(part => part.part_id === DISCONFIRMATION_PART_ID)?.expectation)
+      .toContain("strongest reason to retain the current design");
+    for (const signal of ["design-contract:OPTION-1", "design-conceptual:CONCEPTUAL-DEFECT"]) {
+      const defect = questionFor(signal);
+      expect(defect.expected_outcome).toContain("Decide whether the claimed consequence is supported");
+      expect(defect.requested_parts.find(part => part.part_id === DISCONFIRMATION_PART_ID)?.expectation)
+        .toContain("does not overturn a supported defect");
+    }
+  });
   it("carries accepted claims, distinguishes material charter gaps, and accounts for every structural signal", async () => {
     const bundle = fixture();
     const related = { path: "src/manual-detail.ts", language: "text", size_bytes: 100, hash: "manual-detail" };
