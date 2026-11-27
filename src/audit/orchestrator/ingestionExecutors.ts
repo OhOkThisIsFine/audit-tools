@@ -151,6 +151,13 @@ function applySelectiveDeepening(params: {
   };
 }
 
+/**
+ * Retired audit-task producer: kept for historical fixtures, not a supported
+ * CLI or resume path. The live question cycle has no automatic post-answer
+ * selective-deepening; archived tasks can be reported by status or preserved
+ * by rollover, but are not scheduled. Do not confuse this with live operator
+ * reopen or the upstream systemic challenge.
+ */
 export function runResultIngestionExecutor(
   bundle: ArtifactBundle,
   results: AuditResult[],

@@ -183,7 +183,7 @@ async function writeActiveRun(
   );
 }
 
-test("cmdStatus includes pending task counts from the ACTIVE run, not the newest-named directory", async () => {
+test("cmdStatus reports legacy deepening as archived counts, not a live question handoff", async () => {
   await withTempDir(async (tempDir) => {
     const artifactsDir = join(tempDir, ".audit-tools/audit");
     // The run the loop is ON. Its name sorts BEFORE the other run's, which is
@@ -205,7 +205,7 @@ test("cmdStatus includes pending task counts from the ACTIVE run, not the newest
 
     const pendingTasks = [
       { task_id: "t1", unit_id: "u1", pass_id: "p1", lens: "security", file_paths: [], rationale: "r", status: "complete" },
-      { task_id: "t2", unit_id: "u1", pass_id: "p1", lens: "security", file_paths: [], rationale: "r" },
+      { task_id: "deepening:archived", unit_id: "u1", pass_id: "deepening:p1", lens: "security", file_paths: [], rationale: "r" },
       { task_id: "t3", unit_id: "u2", pass_id: "p1", lens: "security", file_paths: [], rationale: "r" },
     ];
     await writeActiveRun(artifactsDir, activeRunId, pendingTasks);
@@ -220,6 +220,8 @@ test("cmdStatus includes pending task counts from the ACTIVE run, not the newest
     expect(parsed.archived_pending_tasks.total).toBe(3);
     expect(parsed.archived_pending_tasks.remaining).toBe(2);
     expect(parsed.archived_pending_tasks.run_id).toBe(activeRunId);
+    expect(parsed.question_review_handoff).toBeNull();
+    expect(parsed.question_review).toBeNull();
   });
 });
 

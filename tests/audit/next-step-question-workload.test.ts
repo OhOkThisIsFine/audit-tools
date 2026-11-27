@@ -424,10 +424,19 @@ test("next-step and submission handlers resume durable answers and hands off an 
     const secondAnswer = await put(repeated.work_items[0]!);
     for (const item of redispatched.work_items.filter(item => item !== replacement && item !== untouched)) await put(item);
     const trail: string[] = [];
+    const assertNoLegacyFollowup = () => {
+      expect(existsSync(join(base, "audit_tasks.json"))).toBe(false);
+      expect(existsSync(join(base, "runtime_validation_tasks.json"))).toBe(false);
+    };
+    assertNoLegacyFollowup();
     let complete = false;
     for (let i = 0; i < 8; i++) {
       const step = await next();
       trail.push(`${step.step_kind}:${step.status}`);
+      // Real next-step must synthesize the bound inconclusive answers, not
+      // secretly schedule retired audit-task followups during terminal folds.
+      assertNoLegacyFollowup();
+      expect(step.step_kind).not.toBe("dispatch_review");
       if (step.step_kind === "synthesis_narrative") {
         const target = step.artifact_paths.synthesis_narrative_results;
         expect(typeof target).toBe("string");
