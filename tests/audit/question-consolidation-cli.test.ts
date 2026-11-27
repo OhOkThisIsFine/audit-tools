@@ -1,14 +1,20 @@
 import { expect, test } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { advanceToDispatchReady, callNextStep } from "./helpers/completion-harness.js";
+import { persistAnalyzerSettings } from "../../src/shared/analyzerPolicy.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { REVIEW_QUESTION_CONTRACT_VERSION as version, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
 async function exerciseConsolidation(reopen: boolean) {
   await withTempRepo(async root => {
     const run = (args: string[]) => runWrapper(args, { cwd: root }).then(result => JSON.parse(result.stdout));
-    const step = await advancePastDesignReview(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    // This validates consolidation, not analyzer selection/acquisition.
+    await persistAnalyzerSettings(root, { typescript: "skip" });
+    const next = () => callNextStep(root, artifactsDir);
+    const step = await advanceToDispatchReady(root);
     const { run_id, work_items } = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8")) as {
       run_id: string;
       work_items: { binding: { question: ReviewQuestion; assignment: ReviewAssignment }; result_path: string }[];
@@ -50,7 +56,7 @@ async function exerciseConsolidation(reopen: boolean) {
     expect(rest.length).toBeGreaterThan(0);
     const accepted = chosen.map(({ binding }) => makeAnswer(binding, true));
     await Promise.all(chosen.map((item, index) => put(item, accepted[index]!)));
-    const compacted = await run(["next-step"]);
+    const compacted = await next();
     expect(compacted.progress.pending_tasks).toBe(rest.length);
     const file = join(root, ".audit-tools", "same-repair.json");
     const decision = { decision_id: "same-repair", decided_by: "fixture-operator", reason: "Both reports require the same check.",
@@ -69,12 +75,12 @@ async function exerciseConsolidation(reopen: boolean) {
         questions: [{ question_id: target.question_id, revision_id: target.revision_id, snapshot_id: target.snapshot_id,
           expected_submission_ids: [target.submission_id] }] }));
       await run(["reopen-questions", "--from", reopenFile]);
-      const reissued = await run(["next-step"]);
+      const reissued = await next();
       const active = JSON.parse(await readFile(reissued.artifact_paths.host_workload, "utf8")) as { work_items: typeof work_items };
       const replacement = active.work_items.find(item => item.binding.question.question_id === target.question_id)!;
       const newAnswer = makeAnswer(replacement.binding, true);
       await put(replacement, newAnswer);
-      await run(["next-step"]);
+      await next();
       const combined = { ...decision, decision_id: "replacement-repair",
         sources: [decision.sources[1]!, { answer_id: newAnswer.submission_id, finding_id: "claim" }] };
       await writeFile(file, JSON.stringify(combined));
@@ -82,6 +88,7 @@ async function exerciseConsolidation(reopen: boolean) {
       decisions.push(combined);
     }
     await Promise.all(rest.map(item => put(item, makeAnswer(item.binding, false))));
+    // The final report still comes from a new public CLI process.
     const finished = await run(["next-step"]);
     const report = JSON.parse(await readFile(join(root, ".audit-tools/audit", "audit-findings.json"), "utf8"));
     expect(finished.step_kind).not.toBe("dispatch_review");
