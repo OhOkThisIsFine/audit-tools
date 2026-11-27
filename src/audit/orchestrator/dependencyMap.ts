@@ -252,7 +252,9 @@ export const ARTIFACT_DEPENDENTS_MAP: DependencyMap =
  * `findPriorityOrderingViolations` (advance.ts) checks every declared pair is
  * genuinely late; an ordinary slice edge must be early instead.
  */
-export const LATE_INPUT_EDGES: Partial<Record<ArtifactFileName, readonly ArtifactFileName[]>> = {};
+export const LATE_INPUT_EDGES: Partial<Record<ArtifactFileName, readonly ArtifactFileName[]>> = {
+  "review_plan.json": ["systemic_challenge.json"],
+};
 
 /** True when `downstream ← upstream` is a declared late-input edge. */
 export function isLateInputEdge(downstream: string, upstream: string): boolean {

@@ -132,11 +132,13 @@ function makeBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
   };
 }
 
-test("the registry is contract-pinned: charter_register's three edges, and charter_clarification's two edges", () => {
+test("the registry is contract-pinned to actual consumer inputs", () => {
   expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS).sort()).toEqual([
     "charter_clarification.json",
     "charter_register.json",
+    "review_plan.json",
   ]);
+  expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS["review_plan.json"]!)).toEqual(["systemic_challenge.json"]);
   // Clarification reads repo_manifest only as the normalized path universe
   // (groundDesignFindings → repoPathUniverse) and the decomposition only as
   // consensus membership (placeInSubsystem); its register and intent edges are not sliced.

@@ -341,8 +341,10 @@ export interface CarriedAdvisoryNotice {
   readonly advisoryNotice: readonly string[];
 }
 
+type QuestionReviewStep = { kind: "question_review"; state: AuditState; bundle: ArtifactBundle; runId: string; workloadPath: string; routingPath: string; graphIndexFailed?: boolean; pendingCount: number; rejectedCount: number; rejections: readonly { assignmentId: string; guidance: string }[] };
+
 export type NextStepResult = (
-  | { kind: "question_review"; state: AuditState; bundle: ArtifactBundle; runId: string; workloadPath: string; routingPath: string; graphIndexFailed?: boolean; pendingCount: number; rejectedCount: number; rejections: readonly { assignmentId: string; guidance: string }[] }
+  | QuestionReviewStep
   | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
@@ -350,7 +352,7 @@ export type NextStepResult = (
   | { kind: "charter_comparison"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_fidelity"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_clarification"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle; questionReview?: QuestionReviewStep }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "intent_equivalence"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
@@ -3020,7 +3022,7 @@ export function buildAuditObligations(
     // Charter clarification (Phase D triangulation loop).
     charter_clarification_current: omittableObligation(handleCharterClarificationBranch),
     // Systemic challenge (Phase E loop-until-dry).
-    systemic_challenge_current: omittableObligation(handleSystemicChallengeBranch),
+    systemic_challenge_current: runSystemicChallengeObligation,
     // The audit-task dispatch obligation maps to the host-delegation
     // semantic_review_executor (no deterministic runner) → host review.
     audit_tasks_completed: (bundle, ctx) => runHostDelegationObligation(bundle, ctx),
@@ -3067,10 +3069,31 @@ async function runDesignReviewObligation(
   return { kind: "transition", state: branch.bundle };
 }
 
-async function runHostDelegationObligation(
-  bundle: ArtifactBundle,
-  ctx: AuditNextStepCtx,
-): Promise<AuditOutcome> {
+async function runSystemicChallengeObligation(bundle: ArtifactBundle, ctx: AuditNextStepCtx): Promise<AuditOutcome> {
+  const state = deriveAuditState(bundle, { emitStaleness: false });
+  const branch = await handleSystemicChallengeBranch(ctx.params, bundle, state, ctx.tx);
+  if (branch.action === "continue") return { kind: "transition", state: branch.bundle };
+  if (branch.action === "run_omit") return runDeterministicExecutor(bundle, ctx);
+  // Both lane types retain their normal input bindings and submission paths.
+  // Import ordinary submissions already received; a partial workload does not
+  // prevent the adversary's next round from being issued.
+  if (!bundle.review_plan) return { kind: "emit", step: branch.result, state: bundle };
+  const { carried, questionReview } = await prepareQuestionDispatch(bundle, ctx);
+  return {
+    kind: "emit", state: carried,
+    step: { ...branch.result, state: deriveAuditState(carried, { emitStaleness: false }), bundle: carried, questionReview },
+  };
+}
+
+async function runHostDelegationObligation(bundle: ArtifactBundle, ctx: AuditNextStepCtx): Promise<AuditOutcome> {
+  const { carried, questionReview } = await prepareQuestionDispatch(bundle, ctx);
+  return questionReview ? { kind: "emit", step: questionReview, state: carried }
+    : { kind: "transition", state: carried };
+}
+
+async function prepareQuestionDispatch(bundle: ArtifactBundle, ctx: AuditNextStepCtx): Promise<{
+  carried: ArtifactBundle; questionReview?: QuestionReviewStep;
+}> {
   const sourceRoot = requireSourceRoot(ctx.params);
   const cycle = await deriveQuestionCycleUnlocked({
     root: ctx.params.root, sourceRoot, artifactsDir: ctx.params.artifactsDir, bundle,
@@ -3083,7 +3106,7 @@ async function runHostDelegationObligation(
     delete carried.audit_report;
     delete carried.synthesis_narrative;
   }
-  if (cycle.pending.length === 0) return { kind: "transition", state: carried };
+  if (cycle.pending.length === 0) return { carried };
   const pendingIds = new Set(cycle.pending.map(({ assignment }) => assignment.assignment_id));
   const pendingIssues = cycle.issues.filter(issue => pendingIds.has(issue.assignment_id));
   const rejections = pendingIssues.slice(0, 8)
@@ -3094,12 +3117,11 @@ async function runHostDelegationObligation(
     graph: bundle.graph_bundle,
   });
   return {
-    kind: "emit",
-    step: { kind: "question_review", state: deriveAuditState(carried, { emitStaleness: false }), bundle: carried,
+    carried,
+    questionReview: { kind: "question_review", state: deriveAuditState(carried, { emitStaleness: false }), bundle: carried,
       runId: cycle.runId, workloadPath: published.workload_path, routingPath: published.routing_path,
       graphIndexFailed: published.workload.graph_index_failed, pendingCount: cycle.pending.length,
       rejectedCount: pendingIssues.length, rejections },
-    state: carried,
   };
 }
 

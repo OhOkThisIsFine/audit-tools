@@ -10,9 +10,15 @@ import {
   commitFold,
   createFoldTransaction,
 } from "../../src/audit/cli/foldTransaction.js";
+import { systemicChallengeLane } from "../../src/audit/cli/laneSubmissions.js";
+import { submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
+import { readAuditQuestionWorkload, readAuditQuestionLedger } from "../../src/audit/cli/dispatch/hostHandoff.js";
+import { hashContent } from "../../src/shared/hash.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION } from "../../src/shared/types/reviewQuestion.js";
 import { cmdNextStep } from "../../src/audit/cli/nextStepCommand.js";
 import { handleDesignReviewBranch } from "../../src/audit/cli/nextStepHelpers.js";
 import {
+  loadArtifactBundle,
   writeCoreArtifacts,
   type ArtifactBundle,
 } from "../../src/audit/io/artifacts.js";
@@ -96,7 +102,7 @@ test("fresh guidance reaches the production confirm-intent depth proposal", asyn
   });
 });
 
-test("production systemic dispatch never advertises the deleted deep-review judge result", async () => {
+test("first systemic round dispatches ordinary questions too, without the deleted deep-review judge result", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     const perspectiveResultPath = join(
@@ -112,8 +118,15 @@ test("production systemic dispatch never advertises the deleted deep-review judg
     await mkdir(join(artifactsDir, "submissions"), { recursive: true });
     await writeFile(perspectiveResultPath, "[]\n");
 
+    const sourcePath = "src/api/auth.ts";
+    const source = await readFile(join(root, sourcePath), "utf8");
+    const base = readyForIntentBundle();
+    base.repo_manifest!.files[0] = {
+      path: sourcePath, language: "typescript", size_bytes: Buffer.byteLength(source), hash: hashContent(source),
+    };
+    base.surface_manifest = { surfaces: [{ id: "fixture", kind: "interface", entrypoint: sourcePath, exposure: "local" }] };
     const bundle: ArtifactBundle = captureCompletedDesignReviews({
-      ...readyForIntentBundle(),
+      ...base,
       intent_checkpoint: {
         schema_version: "intent-checkpoint/v1",
         confirmed_at: "2026-01-01T00:00:00.000Z",
@@ -195,6 +208,10 @@ test("production systemic dispatch never advertises the deleted deep-review judg
       await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
     );
     expect(step.step_kind).toBe("systemic_challenge");
+    expect(step.progress.pending_tasks).toBeGreaterThan(0);
+    expect(step.artifact_paths.review_routing).toBeTruthy();
+    expect(step.artifact_paths.host_workload).toBeTruthy();
+    expect(await readFile(step.prompt_path, "utf8")).toContain("ordinary submissions need not all arrive first");
     // Host-facing paths are forward-slash tokens on every OS (toPromptPathToken).
     expect(step.access.read_paths).toContain(toPromptPathToken(perspectiveResultPath));
     expect(step.access.read_paths).not.toContain(toPromptPathToken(deletedJudgeResultPath));
@@ -206,6 +223,51 @@ test("production systemic dispatch never advertises the deleted deep-review judg
     const normalizedPrompt = prompt.replace(/\\+/g, "/");
     expect(normalizedPrompt).toContain(perspectiveResultPath.replace(/\\+/g, "/"));
     expect(normalizedPrompt).not.toContain(deletedJudgeResultPath.replace(/\\+/g, "/"));
+
+    const argv = ["--root", root, "--artifacts-dir", artifactsDir];
+    const boundary = { root, artifactsDir, runId: step.run_id };
+    const initial = await readAuditQuestionWorkload(boundary);
+    const { assignment, question } = initial.work_items[0]!.binding;
+    const submission = {
+      schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
+      submission_id: "ordinary-answer-before-challenge-ends",
+      assignment_id: assignment.assignment_id,
+      question_id: question.question_id,
+      snapshot_id: question.snapshot_id,
+      revision_id: question.revision_id,
+      inspected_sources: assignment.suggested_sources.slice(0, 1),
+      evidence_ids: [],
+      limitations: ["Synthetic review did not establish the requested behavior."],
+      answer: { outcome: "inconclusive", findings: [], observations: [], parts: question.requested_parts.map(part => ({
+        part_id: part.part_id, outcome: "inconclusive", observation_ids: [],
+      })) },
+    };
+    expect(await submitWorkItemResult({
+      root, artifactsDir, workItemId: assignment.assignment_id, source: JSON.stringify(submission),
+    })).toMatchObject({ disposition: "accepted" });
+
+    const supplemental = {
+      id: "SYS-OVERLAP", title: "Consolidate redundant formatting",
+      category: "design_simplification", severity: "medium", confidence: "high", lens: "architecture",
+      summary: "A separate check can evaluate whether adjacent formatting steps duplicate work.",
+      affected_files: [{ path: "src/api/auth.ts" }],
+      evidence: ["src/api/auth.ts:1-3: the fixture defines one exported formatter-like operation."],
+    };
+    const advanceRound = async (findings: readonly unknown[]) => {
+      const before = await loadArtifactBundle(artifactsDir);
+      await writeBoundReviewFixture(artifactsDir, systemicChallengeLane(before.systemic_challenge!.rounds), { findings });
+      await cmdNextStep(argv);
+      return loadArtifactBundle(artifactsDir);
+    };
+    expect((await advanceRound([supplemental])).review_plan?.questions).toHaveLength(initial.work_items.length);
+    expect((await advanceRound([])).review_plan?.questions).toHaveLength(initial.work_items.length);
+    const final = await advanceRound([]);
+    expect(final.systemic_challenge?.stop_reason).toBe("converged");
+    expect(final.review_plan?.questions.some(q => q.expected_outcome.includes(supplemental.title))).toBe(true);
+    expect(final.review_plan?.questions.find(q => q.question_id === question.question_id)?.revision_id).toBe(question.revision_id);
+    expect((await readAuditQuestionLedger(boundary)).answers.map(a => a.submission)).toContainEqual(submission);
+    expect((await readAuditQuestionWorkload(boundary)).work_items.some(({ binding }) =>
+      binding.assignment.assignment_id === assignment.assignment_id)).toBe(false);
   });
 });
 

@@ -1243,7 +1243,8 @@ const emitCharterClarification = emissionRow<"charter_clarification">(
 
 // sites-pinned: tests/audit/systemic-round-identity.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 const emitSystemicChallenge = emissionRow<"systemic_challenge">(
-  async ({ root, sourceRoot, artifactsDir }, result) => {
+  async (ctx, result) => {
+    const { root, sourceRoot, artifactsDir } = ctx;
     // Phase E second-order adversary (loop-until-dry): the tool has opened the loop
     // and computed the language-neutral aggregate-metrics digest. The host dispatches
     // a SEPARATE adversary agent whose mandate is optimization/better-way; it writes
@@ -1285,16 +1286,22 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
         },
       ],
     });
+    const questionStep = result.questionReview
+      ? questionDispatchParams(ctx, result.questionReview, true)
+      : undefined;
     return currentStepPlan({
       artifactsDir,
       stepKind: "systemic_challenge",
       status: "ready",
-      runId: null,
+      runId: questionStep?.runId ?? null,
+      progress: questionStep?.progress,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute the second-order-adversary lane prompt (a separate agent from the one that drove this audit), write its findings to the results path, then run next-step. If no independent context is available, stop and report that the review could not be performed; do not write results or advance. Two consecutive rounds with no new findings converge the loop.",
+        "Execute the second-order-adversary lane prompt (a separate agent from the one that drove this audit), write its findings to the results path, then run next-step. If no independent context is available, stop and report that the review could not be performed; do not write adversary results or advance the challenge. Two consecutive rounds with no new findings converge the loop." +
+        (questionStep ? " Dispatch pending ordinary question assignments alongside the adversary. They use independent submissions; do not wait for all ordinary answers to continue the challenge." : ""),
       repoRoot: root,
     artifactPaths: {
+      ...questionStep?.artifactPaths,
       systemic_challenge_prompt: fanout.lanes[0]!.promptPath,
       systemic_challenge_results: submissionPath,
       systemic_charter_register: join(artifactsDir, "charter_register.json"),
@@ -1324,10 +1331,12 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
             "An EMPTY findings array records a quiet round. The loop ends after two consecutive rounds find nothing new.",
           continueCommand,
         }),
+        ...(questionStep ? ["", "## Independent work available now", "Dispatch ordinary assignments alongside this adversary if the host has delegation capacity. Ordinary answers already in flight need not be redone. Do not wait for all ordinary answers before advancing the systemic round.", questionStep.prompt] : []),
       ].join("\n"),
       access: {
         read_paths: [...new Set([
           ...fanout.readPaths,
+          ...(result.questionReview ? [result.questionReview.routingPath] : []),
           join(artifactsDir, "systemic_challenge.json"),
         ])],
         write_paths: fanout.writePaths,
@@ -1929,15 +1938,15 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
  * Exported together with the handled-kinds set below so a drift guard imports
  * the real thing instead of reconstructing it by reading a branch chain.
  */
-export const NEXT_STEP_EMISSION_TABLE: Readonly<
-  Record<NextStepEmissionKind, NextStepEmissionRow>
-> = {
-  question_review: async ({ result, root, artifactsDir }) => {
-    if (result.kind !== "question_review") throw new Error("Expected a question review step");
+function questionDispatchParams(
+  { root, artifactsDir }: Pick<NextStepEmitContext, "root" | "artifactsDir">,
+  result: NextStepResultOf<"question_review">,
+  alongsideSystemic = false,
+): Parameters<typeof writeCurrentStep>[0] {
     const next = nextStepCommand(root, artifactsDir);
     const rejected = result.rejectedCount > 0;
     const rejectionSummary = `Could not accept ${result.rejectedCount} saved question ${result.rejectedCount === 1 ? "result" : "results"}.`;
-    return { via: "current", params: {
+    return {
       artifactsDir, repoRoot: root, stepKind: "dispatch_review", status: "ready", runId: result.runId,
       allowedCommands: [next],
       progress: {
@@ -1960,7 +1969,9 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
         "For each pending assignment ID being dispatched, use the executable and version prefix from the continuation command, followed by prepare_review_argv_prefix followed by --work-item and that assignment ID. The command returns a prompt_path, not the prompt.",
         "To prepare multiple delegated assignments in one call, use the same prefix with --work-items <id1,id2,...> instead of --work-item, up to 64 distinct current IDs. For each ready outcome, send only its own packet.prompt_path and authorized read_paths to its reviewer. A refused outcome has no packet; inspect its reason without widening the scope. Do not open the packets or the workload here.",
         "With delegation, pass that file directly to the reviewer harness, or send the reviewer only the instruction to read that path. Share the frozen workspace and the named read_paths. Do not open reviewer prompts in the dispatcher conversation.",
-        "If the host truly cannot delegate, prepare exactly one pending assignment and read only its prompt_path and the evidence it authorizes. Answer and submit that bound question, run the continuation once to ingest it, then stop for fresh context. Do not open the full workload, invent a smaller task, or substitute self-review for any step that requires independence.",
+        ...(alongsideSystemic ? [] : [
+          "If the host truly cannot delegate, prepare exactly one pending assignment and read only its prompt_path and the evidence it authorizes. Answer and submit that bound question, run the continuation once to ingest it, then stop for fresh context. Do not open the full workload, invent a smaller task, or substitute self-review for any step that requires independence.",
+        ]),
         "If an indexed graph lookup fails during review, retain the exact query, its returned status or stderr, and the frozen source identity. After a concrete host repair, run the continuation to obtain current graph handles, then rerun that query on the same frozen source. If it cannot be repaired, continue with native file links or frozen source and record the missing indexed coverage in each affected answer. Preserve accepted answers.",
         ...(rejected ? [
           "## Saved results not accepted",
@@ -1973,10 +1984,18 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
         ...(result.bundle.review_plan?.omissions.length ? [
           `${result.bundle.review_plan.omissions.length} inventory entr${result.bundle.review_plan.omissions.length === 1 ? "y was" : "ies were"} omitted from issued questions. See the review plan for reasons. Omission is not evidence of clean coverage; do not treat these entries as reviewed.`,
         ] : []),
-        "Wait for the bound reviewer submissions, then run: " + next,
+        (alongsideSystemic
+          ? "Ordinary reviews can continue across adversary rounds. Run the continuation when the adversary result is saved; ordinary submissions need not all arrive first: "
+          : "Wait for the bound reviewer submissions, then run: ") + next,
       ].join("\n\n"),
-    }};
-  },
+    };
+}
+
+export const NEXT_STEP_EMISSION_TABLE: Readonly<
+  Record<NextStepEmissionKind, NextStepEmissionRow>
+> = {
+  question_review: emissionRow<"question_review">(async (ctx, result) =>
+    currentStepPlan(questionDispatchParams(ctx, result))),
   complete: emitComplete,
   blocked: emitBlocked,
   design_review_parallel: emitDesignReviewParallel,

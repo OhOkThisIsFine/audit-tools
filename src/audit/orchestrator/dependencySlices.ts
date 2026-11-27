@@ -29,6 +29,7 @@
  * which is safe.
  */
 import { contentSha256 } from "../../shared/submission/hostHandoffCore.js";
+import { systemicChallengeEnded } from "../types/systemicChallenge.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
   charterPacketReadSet,
@@ -139,9 +140,13 @@ function charterGraphEdgeSlice(bundle: ArtifactBundle): unknown {
   return memberDependencyEdgeLines(bundle);
 }
 
+export function completedSystemicFindings(bundle: ArtifactBundle) {
+  return systemicChallengeEnded(bundle.systemic_challenge) ? bundle.systemic_challenge?.findings ?? [] : [];
+}
+
 /**
- * The edge registry: `downstream → upstream → projection`. Two downstreams
- * are registered: `charter_register.json` (the expensive extraction step, the
+ * The edge registry: `downstream → upstream → projection` (including the completed
+ * systemic findings consumed by the question plan). The charter slices cover `charter_register.json` (the expensive extraction step, the
  * live incident driver), `charter_clarification.json` on its manifest edge
  * (path universe only, above) and its decomposition edge (consensus membership:
  * `placeInSubsystem` reads only `{node_id, members}`, and a whole-artifact edge
@@ -161,6 +166,9 @@ function charterGraphEdgeSlice(bundle: ArtifactBundle): unknown {
 export const DEPENDENCY_SLICE_PROJECTIONS: Partial<
   Record<string, Partial<Record<string, SliceProjection>>>
 > = {
+  "review_plan.json": {
+    "systemic_challenge.json": completedSystemicFindings,
+  },
   "charter_register.json": {
     "unit_manifest.json": charterUnitPartitionSlice,
     "repo_manifest.json": charterReadFileSlice,

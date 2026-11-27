@@ -415,7 +415,7 @@ export function deriveAuditState(
   );
 
   // Phase E systemic improvement-seeking challenge — the loop-until-dry second-order
-  // adversary pass. Runs after the charter-clarification loop and before planning. The
+  // adversary pass. Runs alongside ordinary review after base planning. The
   // base satisfaction is the usual exists+fresh check on systemic_challenge.json (its
   // deps: charter_register / intent_checkpoint / repo_manifest). At a shallow ceiling
   // (the default) the executor writes an `omitted` register in one deterministic step,
@@ -439,7 +439,7 @@ export function deriveAuditState(
       "systemic_challenge_current",
       systemicOpen ? "missing" : systemicBase,
       systemicOpen
-        ? "Systemic challenge loop still open (a challenge round has not yet returned nothing-new) before planning proceeds." +
+        ? "Systemic challenge loop still open (a challenge round has not yet returned nothing-new) before synthesis proceeds." +
           (systemicCeiling !== undefined
             ? ` The loop also ends at ${systemicCeiling} rounds, or on a recorded host-forced stop — neither is a dry signal.`
             : "")

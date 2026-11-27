@@ -4,6 +4,7 @@ import {
   BUILT_IN_REVIEW_LENSES, DISCONFIRMATION_PART_ID, REVIEW_QUESTION_CONTRACT_VERSION, ReviewLensSchema,
   type ReviewInventoryItem, type ReviewPlan, type ReviewQuestion, type ReviewSourceRef,
 } from "../../shared/types/reviewQuestion.js";
+import { completedSystemicFindings } from "./dependencySlices.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import { EXTRACTOR_HEURISTIC_NOTE, isTestPath } from "../extractors/pathPatterns.js";
@@ -530,7 +531,7 @@ function routePriorReviewSignals(
   const lanes = [
     ["contract", bundle.design_assessment?.contract_reviewed ? bundle.design_assessment.contract_findings : []],
     ["conceptual", bundle.design_assessment?.conceptual_reviewed ? bundle.design_assessment.conceptual_findings : []],
-    ["systemic", bundle.systemic_challenge?.findings],
+    ["systemic", completedSystemicFindings(bundle)],
   ] as const;
   for (const [lane, claims] of lanes) for (const claim of claims ?? []) {
     const key = `design-${lane}:${claim.id}`, refs = anchors(claim);
