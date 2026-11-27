@@ -131,6 +131,9 @@ describe("lens coverage states what a selected lens delivered", () => {
 
   it("names the un-exercised lenses in the rendered report", () => {
     const markdown = renderAuditReportMarkdown(modelWithSelection());
+    expect(markdown).toContain("Files marked complete in the review ledger:");
+    expect(markdown).toContain("not proof that every line was inspected");
+    expect(markdown).not.toContain("Fully audited files:");
     expect(markdown).toContain("Selected lenses without findings");
     expect(markdown).toContain("performance");
     expect(markdown).toContain("custom:provenance-labelling");

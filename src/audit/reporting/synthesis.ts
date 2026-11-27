@@ -1461,7 +1461,8 @@ export function renderAuditReportMarkdown(
             " — judge-authored claims about whether each defect is present at HEAD, not tool runs",
         ]
       : []),
-    `- Fully audited files: ${report.summary.audited_file_count}`,
+    `- Files marked complete in the review ledger: ${report.summary.audited_file_count}`,
+    "- File coverage is a reviewer declaration checked against assigned paths and line counts, not proof that every line was inspected.",
     `- Excluded non-auditable files: ${report.summary.excluded_file_count}`,
     "",
   );
@@ -1681,6 +1682,7 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
   const lines = [
     AUDITOR_REPORT_MARKER, "# Audit Report", "",
     `Coverage: **${review.completion}**. Snapshot: ${review.snapshot_id}.`,
+    "Coverage tracks accepted answers to planned questions. Source references and evidence are checked, but the reported inspection is not independently observed.",
     `Actionable confirmed defects: ${report.findings.length}. Repair work blocks: ${report.work_blocks.length}.`,
   ];
   if (report.executive_summary?.trim() || report.themes?.length || report.top_risks?.length) {

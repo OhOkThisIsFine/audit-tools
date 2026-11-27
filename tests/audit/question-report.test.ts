@@ -71,6 +71,7 @@ test("does not promote a supported clean part into clean coverage of an unanswer
   });
   expect(normalizeExistingFindingsReport(report)).toEqual(report);
   const markdown = renderAuditReportMarkdown(report);
+  expect(markdown).toContain("reported inspection is not independently observed");
   expect(markdown).toContain("scheduled: **unreviewed**");
   expect(markdown).toContain("Evidence needed for scheduled: Collect evidence for the expectation: Scheduled resume restores state.");
   expect(markdown).toContain("Accepted answer answer-1 (recorded, not a resolution)");
