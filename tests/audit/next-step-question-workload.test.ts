@@ -3,8 +3,10 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS, advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
+import { ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS, withTempRepo } from "./helpers/next-step-harness.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { captureConsole } from "./helpers/captureConsole.mjs";
+import { runCli } from "../../src/audit/cli.js";
 import { callNextStep } from "./helpers/completion-harness.js";
 import { walkStepsUntilTerminal } from "./helpers/step-driver.js";
 import { submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
@@ -14,6 +16,13 @@ import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.
 import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questionReviewReport.js";
 import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
+
+/** Same argv validation, dispatch and persisted artifacts, without a fresh Node process. */
+async function runCommand(argv: string[], { cwd }: { cwd: string }) {
+  const result = await captureConsole(() => runCli(["node", "audit-code", ...argv, "--root", cwd]));
+  if (result.code !== 0) throw new Error(result.stderr.trim());
+  return result;
+}
 
 function prepareWorkload(root: string) {
   const artifactsDir = join(root, ".audit-tools", "audit");
@@ -155,7 +164,7 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       if (index === 0) {
         const readLedger = () => existsSync(ledgerFile) ? readFile(ledgerFile) : undefined;
         const ledgerBeforeRefusal = await readLedger();
-        await expect(runWrapper(["force-synthesis"], { cwd: root })).rejects.toThrow(/report-ready state/);
+        await expect(runCommand(["force-synthesis"], { cwd: root })).rejects.toThrow(/report-ready state/);
         expect(await readLedger()).toEqual(ledgerBeforeRefusal);
         await writeFile(file, JSON.stringify({ ...response, answer: {
           ...response.answer, parts: [{ part_id: "not-an-assigned-part", outcome: "inconclusive", observation_ids: [] }],
@@ -179,29 +188,29 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       }
     }
     const ledgerBefore = await readFile(ledgerFile, "utf8");
-    const { stdout } = await runWrapper(["synthesize"], { cwd: root });
+    const { stdout } = await runCommand(["synthesize"], { cwd: root });
     expect(JSON.parse(stdout)).toMatchObject({ selected_executor: "synthesis_executor" });
     const working = join(root, ".audit-tools", "audit", "audit-findings.json");
     const report = QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(working, "utf8")));
     expect(report.question_review.questions).toHaveLength(workItems.length);
     expect(report.question_review.completion).toBe("incomplete");
     expect(await readFile(ledgerFile, "utf8")).toBe(ledgerBefore);
-    const next = await runWrapper(["next-step"], { cwd: root });
+    const next = await runCommand(["next-step"], { cwd: root });
     expect(JSON.parse(next.stdout).step_kind).toBe("synthesis_narrative");
   });
 });
 
 type WorkItem = { binding: { question: ReviewQuestion; assignment: ReviewAssignment }; result_path: string };
 
-test("normal CLI resumes durable answers and hands off an honestly incomplete question report", async () => {
+test("next-step and submission handlers resume durable answers and hands off an honestly incomplete question report", async () => {
   await withTempRepo(async (root) => {
     await writeFile(join(root, "src", "resume.ts"), "export function resumePending(): string { return 'pending'; }\n");
-    const next = () => runWrapper(["next-step"], { cwd: root }).then(({ stdout }) => JSON.parse(stdout));
+    const next = () => runCommand(["next-step"], { cwd: root }).then(({ stdout }) => JSON.parse(stdout));
     const workloadFor = async (step: Awaited<ReturnType<typeof next>>) => {
       expect(step.step_kind).toBe("dispatch_review");
       return JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8")) as { run_id: string; work_items: WorkItem[] };
     };
-    const initialStep = await advancePastDesignReview(root);
+    const initialStep = await prepareWorkload(root);
     const initial = await workloadFor(initialStep);
     const initialRouting = JSON.parse(await readFile(initialStep.artifact_paths.review_routing, "utf8"));
     expect(initial.work_items.length).toBeGreaterThan(1);
@@ -253,7 +262,7 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     const firstAnswer = await put(first);
     const resumed = await workloadFor(await next());
     expect(resumed.run_id).toBe(initial.run_id);
-    await expect(runWrapper(["prepare-review", "--work-item", second.binding.assignment.assignment_id,
+    await expect(runCommand(["prepare-review", "--work-item", second.binding.assignment.assignment_id,
       "--workload-sha256", initialRouting.workload_sha256], { cwd: root })).rejects.toThrow(/fingerprint is not current/);
     expect(resumed.work_items.some(({ binding }) => binding.assignment.assignment_id === firstAnswer.assignment_id)).toBe(false);
     const base = join(root, ".audit-tools", "audit");
@@ -269,7 +278,7 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
       throw error;
     });
     expect(beforeLateGuidance).toBeNull();
-    await expect(runWrapper(["next-step", "--guidance", "First guidance after dispatch"], { cwd: root }))
+    await expect(runCommand(["next-step", "--guidance", "First guidance after dispatch"], { cwd: root }))
       .rejects.toThrow(/active question review cannot change guidance/u);
     await expect(readFile(lateGuidance, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     const request = join(base, "reopen.json");
@@ -289,7 +298,7 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     const historicalBytes = JSON.stringify(priorTooling);
     await writeFile(toolingFile, historicalBytes);
     await writeFile(metadataFile, JSON.stringify(metadata));
-    const reopen = () => runWrapper(["reopen-questions", "--from", request], { cwd: root }).then(({ stdout }) => JSON.parse(stdout));
+    const reopen = () => runCommand(["reopen-questions", "--from", request], { cwd: root }).then(({ stdout }) => JSON.parse(stdout));
     await writeFile(request, JSON.stringify(decision));
     await expect(reopen()).rejects.toThrow(/review plan is missing or stale/u);
     expect(await accepted()).toEqual([firstAnswer]);
@@ -325,8 +334,8 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     const snapshotPath = join(base, "run-snapshot.json");
     const preservedSnapshot = await readFile(snapshotPath, "utf8");
     const preservedMetadata = await readFile(metadataFile, "utf8");
-    await expect(runWrapper(["intake"], { cwd: root })).rejects.toThrow(/not standalone analysis/u);
-    await expect(runWrapper(["next-step", "--since", "HEAD"], { cwd: root }))
+    await expect(runCommand(["intake"], { cwd: root })).rejects.toThrow(/not standalone analysis/u);
+    await expect(runCommand(["next-step", "--since", "HEAD"], { cwd: root }))
       .rejects.toThrow(/cannot change source scope or formatting consent/u);
     expect(await readFile(snapshotPath, "utf8")).toBe(preservedSnapshot);
     expect(await readFile(metadataFile, "utf8")).toBe(preservedMetadata);
@@ -338,9 +347,9 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     const originalGuidance = await readGuidance();
     const alternativeGuidance = join(base, "different-guidance.md");
     await writeFile(alternativeGuidance, "Do a different audit.\n");
-    await expect(runWrapper(["next-step", "--guidance", "A different task"], { cwd: root }))
+    await expect(runCommand(["next-step", "--guidance", "A different task"], { cwd: root }))
       .rejects.toThrow(/cannot change guidance/u);
-    await expect(runWrapper(["next-step", "--guidance-file", alternativeGuidance], { cwd: root }))
+    await expect(runCommand(["next-step", "--guidance-file", alternativeGuidance], { cwd: root }))
       .rejects.toThrow(/cannot change guidance/u);
     expect(await readGuidance()).toBe(originalGuidance);
     await mkdir(dirname(guidancePath), { recursive: true });
@@ -386,7 +395,7 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     const untouched = redispatched.work_items.find(item => item.binding.question.question_id === repeated.work_items[0]!.binding.question.question_id);
     expect(untouched).toEqual(repeated.work_items[0]);
     const replacementAnswer = await put(replacement);
-    const submitted = await runWrapper(["submit", "--work-item", replacementAnswer.assignment_id,
+    const submitted = await runCommand(["submit", "--work-item", replacementAnswer.assignment_id,
       "--from", resolve(root, replacement.result_path)], { cwd: root });
     expect(JSON.parse(submitted.stdout)).toMatchObject({ disposition: "accepted", submission_id: replacementAnswer.submission_id });
     const secondAnswer = await put(repeated.work_items[0]!);
