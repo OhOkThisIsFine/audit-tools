@@ -48,6 +48,7 @@
     "check:scripts": "tsc -p tsconfig.scripts.json",
     "test:doc-contract": "node scripts/shared/run-vitest-gate.mjs tests/audit/release-contract.test.ts tests/audit/host-asset-renderer-drift.test.ts tests/shared/handoff-roadmap.test.ts",
     "test": "npm run build && node scripts/shared/run-vitest-gate.mjs",
+    "test:contracts": "npm run build && node --test experiments/contract-tests/pilot.mjs experiments/contract-tests/audit-smoke.mjs experiments/contract-tests/git-boundary.mjs experiments/contract-tests/delivery-boundaries.mjs experiments/contract-tests/plan-authority.mjs experiments/contract-tests/functional-regressions.mjs experiments/contract-tests/review-evidence.mjs",
     "test:single": "npm run build && node scripts/shared/run-vitest-gate.mjs",
     "verify:guards": "node scripts/shared/run-vitest-gate.mjs --retry=2 --exclude \"**/next-step-question-cli-smoke.test.ts\" --exclude \"**/audit-code-wrapper-*.test.ts\" --exclude \"**/audit/next-step-core-*.test.ts\" --exclude \"**/seam-host-only-next-step.test.ts\" --exclude \"**/*-e2e.test.*\" --exclude \"**/next-step-implement-dispatch.test.ts\" --exclude \"**/next-step-pipeline-dispatch.test.ts\"",
     "verify:checks": "node scripts/shared/profile-run.mjs verify-checks --catalog=checks",

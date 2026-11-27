@@ -15,15 +15,13 @@ Initial pilot covers only restart/gating and evidence semantics; it is not quali
 
 From the repository root:
 
-    npm run build
-    node --test experiments/contract-tests/pilot.mjs experiments/contract-tests/audit-smoke.mjs experiments/contract-tests/git-boundary.mjs experiments/contract-tests/delivery-boundaries.mjs experiments/contract-tests/plan-authority.mjs experiments/contract-tests/functional-regressions.mjs
+    npm run test:contracts
 
-The Windows build and prototype took 26.97 seconds: eight passed, no skips.
-This does not qualify untested behavior or replace the existing release gate.
+This is explicit opt-in. The default test suite and release gate are unchanged.
 
 | Contract | Current witness | Still needed for rollout |
 | --- | --- | --- |
-| Audit continuity and truthful completion | Recorded stop survives a new CLI process; one accepted binding persists in both promoted reports | Incorrect binding, duplicate admission, and incomplete coverage checks with inputs that can actually fail |
+| Audit continuity and truthful completion | Recorded stop survives a new CLI process; accepted binding persists in both reports; duplicate replay and stale/changed review refusals; skipped analyzer cannot be credited | Coverage reporting under partial execution and analyzer recovery after retry |
 | Remediation provenance and verification | Pending request survives restart; real close rejects an unapproved revision and a failing verification; a verified Git edit promotes matching machine and human results and completed state | Prove dispatch and evidence admission independently; exercise restart after an interrupted report write |
 | Git path fidelity | Real index and dirty working tree; nested-root refusal; original index unchanged | Owned worktree/snapshot cleanup across a restart and failed Git probe |
 | Shipped product behavior | Real checkout wrappers; offline npm tarball contents and its audit prompt; actual timeout reaps the tool-owned child | Fresh install and generated host assets; cancellation with a subprocess tree, not just one child |
