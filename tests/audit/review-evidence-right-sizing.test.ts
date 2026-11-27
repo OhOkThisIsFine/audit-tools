@@ -159,14 +159,29 @@ describe("design-review call-site map: an index plus one slice per unit", () => 
       ...examples[0]!, unit_id: `scope-unit-${index + 1}`,
       files: index === 44 ? ["src/b/three.ts"] : examples[0]!.files,
     }));
+    // This unit is beyond the bounded inline summary. Only the full sidecar
+    // should render its lens description, and it should do so once per recon.
+    let deepRenders = 0;
+    const lenses = [...units[44]!.required_lenses];
+    const joinLenses = lenses.join;
+    Object.defineProperty(lenses, "join", { value: (separator: string) => {
+      deepRenders++;
+      return joinLenses.call(lenses, separator);
+    } });
+    units[44]!.required_lenses = lenses;
+
     const recon = prepareDesignReviewRecon({
       ...base,
       unit_manifest: { ...base.unit_manifest!, units },
       intent_checkpoint: { ...excludesPerformance, excluded_scope: [{ path: "src/b/three.ts", reason: "third party" }] },
     }, { max_units: 1 });
     expect(recon.structuralContext).not.toContain("scope-unit-45 [excluded:");
-    expect(recon.deepEvidence.text).toContain("scope-unit-44 [in scope]");
-    expect(recon.deepEvidence.text).toContain("scope-unit-45 [excluded:");
+    expect(deepRenders).toBe(0);
+    const deepEvidence = recon.deepEvidence;
+    expect(deepEvidence.text).toContain("scope-unit-44 [in scope]");
+    expect(deepEvidence.text).toContain("scope-unit-45 [excluded:");
+    expect(recon.deepEvidence).toBe(deepEvidence);
+    expect(deepRenders).toBe(1);
   });
 
   test("a mixed unit anchors only primary files; excluded paths remain dependency context", () => {

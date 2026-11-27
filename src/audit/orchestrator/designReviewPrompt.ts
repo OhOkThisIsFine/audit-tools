@@ -814,6 +814,7 @@ export function prepareDesignReviewRecon(
     bundle, startingPoints, fileMap, options.lenses ?? resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection),
   );
   const charterContext = renderCharterContext(bundle);
+  let deepEvidence: DesignReviewRecon["deepEvidence"] | undefined;
   return {
     structuralContext: [header, details(), orientation].join("\n"),
     charterContext,
@@ -826,10 +827,13 @@ export function prepareDesignReviewRecon(
       "",
       orientation,
     ].join("\n"),
-    deepEvidence: {
-      filename: "design-review-shared-evidence.md",
-      label: "Shared deep-review evidence (consult the sections in the order named in the prompt)",
-      text: ["# Shared deep-review evidence", "", ...graphProvenance, details(Infinity), charterContext].join("\n"),
+    get deepEvidence() {
+      // Structural and shallow consumers never publish this unbounded sidecar.
+      return deepEvidence ??= {
+        filename: "design-review-shared-evidence.md",
+        label: "Shared deep-review evidence (consult the sections in the order named in the prompt)",
+        text: ["# Shared deep-review evidence", "", ...graphProvenance, details(Infinity), charterContext].join("\n"),
+      };
     },
     fileMap,
   };
