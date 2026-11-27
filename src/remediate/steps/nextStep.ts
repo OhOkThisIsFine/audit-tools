@@ -10,6 +10,7 @@ import { presentReportStep } from "./frictionCloseout.js";
 import { reviewFilterDispositionsPath, persistReviewFilterDispositions, type PersistedReviewFilterDispositions } from "../review/filterDispositions.js";
 import { intentInterpretationPath, readPersistedIntentInterpretationSync, readOrRepairIntentInterpretation } from "../intent/intentPersistence.js";
 import { requestedFindingSelection, renderFindingSelection, type FindingSelectionOptions } from "../intakeSelection.js";
+import { suggestDeclaredMakeTest } from "../../shared/tooling/testCommand.js";
 import { parseCommandString } from "../../shared/tooling/commandShape.js";
 // sites-pinned: tests/remediate/path-a-source-provenance.test.ts, tests/remediate/path-a-phantom-source.test.ts, tests/remediate/next-step-replan-safety.test.ts, tests/remediate/close-plan-authority.test.ts, tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/deferred-clarification.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
 // (the free-form branch's write
@@ -2025,6 +2026,11 @@ async function emitFinalGateRedStep(ctx: {
           "nothing. So fix something before you run next-step again.";
   const nextCommand = loaderCommand("next-step");
   const recoveryCommand = `${nextCommand} --verification-command "<operator-approved command>"`;
+  const declaredTestHint = gate.results.length === 0 ? suggestDeclaredMakeTest(root) : undefined;
+  const declaredTestHintText = declaredTestHint
+    ? "The root Makefile contains a test target. Candidate: `" + renderPromptCommand(declaredTestHint) +
+      "`. Inspect the target and obtain the operator's explicit approval before using it.\n\n"
+    : "";
   return {
     kind: "emit",
     step: await writeCurrentStep({
@@ -2036,10 +2042,10 @@ async function emitFinalGateRedStep(ctx: {
       prompt: gate.results.length === 0 ? `
 # Verification command required
 
-This repository declares no executable build, typecheck, lint, or test command.
+No build, typecheck, lint, or test command was admitted by automatic discovery.
 No verification ran, and this run cannot advance or close as verified.
 
-Ask the operator to supply a verification command, then run:
+${declaredTestHintText}Ask the operator to approve a verification command, then run:
 
 \`${recoveryCommand}\`
 

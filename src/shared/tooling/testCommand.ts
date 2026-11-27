@@ -1,5 +1,5 @@
 // sites-pinned: tests/shared/testCommand.test.ts, tests/shared/maven-command-discovery.test.ts, tests/shared/command-discovery-integration.test.ts, tests/remediate/arbitrary-repository-gates.test.ts
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Single project-command discovery shared by both orchestrators. Before
@@ -202,4 +202,45 @@ export function discoverProjectCommands(root: string): ProjectCommands {
   }
 
   return result;
+}
+
+/**
+ * A static lead for the existing operator-approved verification pause, never
+ * command admission. GNU Make selects the first of these root filenames.
+ * Do not evaluate Make syntax, follow includes, or spawn make to find targets.
+ */
+export function suggestDeclaredMakeTest(root: string): string[] | undefined {
+  for (const name of ["GNUmakefile", "makefile", "Makefile"]) {
+    const path = join(root, name);
+    let descriptor: number | undefined;
+    try {
+      if (!lstatSync(path).isFile()) return undefined;
+      descriptor = openSync(path, "r");
+      const bytes = Buffer.alloc(64 * 1024 + 1);
+      let length = 0;
+      while (length < bytes.length) {
+        const count = readSync(descriptor, bytes, length, bytes.length - length, null);
+        if (count === 0) break;
+        length += count;
+      }
+      if (length === bytes.length) return undefined;
+      const text = bytes.subarray(0, length).toString("utf8").replace(/\\\r?\n/g, " ");
+      let defineDepth = 0;
+      for (const line of text.split(/\r?\n/)) {
+        if (line.startsWith("\t")) continue;
+        if (/^\s*(?:(?:override|export|private)\s+)*define\s/.test(line)) defineDepth++;
+        if (defineDepth > 0) {
+          if (/^\s*endef\s*(?:#.*)?$/.test(line)) defineDepth--;
+          continue;
+        }
+        if (/^ *test *:{1,2}(?![:=])/.test(line)) return ["make", "test"];
+      }
+      return undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+    }
+  }
+  return undefined;
 }

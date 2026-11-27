@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverProjectCommands } from "../../src/shared/tooling/testCommand.js";
+import { discoverProjectCommands, suggestDeclaredMakeTest } from "../../src/shared/tooling/testCommand.js";
 import { isAdmittedProjectTestCommand } from "../../src/shared/tooling/projectTestAdmission.js";
 import { finalGateBinding } from "../../src/remediate/steps/gateCommands.js";
 import { readFinalGateVerdict, runToolOwnedFinalGate, writeFinalGateVerdict } from "../../src/remediate/steps/finalGate.js";
@@ -65,4 +65,26 @@ test.each([0, 1])("mixed-project final gate preserves npm build and Cargo test e
   expect(calls).toEqual([["npm", "run", "build"], ["cargo", "test"]]);
   expect(result.outcome).toBe("executed");
   expect(result.passed).toBe(status === 0);
+});
+
+test.each([
+  ["target", "test: check\n\tnode checks.mjs\n", ["make", "test"]],
+  ["variable assignment", "test ::= node checks.mjs\n", undefined],
+  ["comment", "# test: fake\n", undefined],
+  ["definition", "define VAR\ntest: fake\nendef\n", undefined],
+  ["recipe text", "all:\n\ttest: fake\n", undefined],
+  ["included file", "include elsewhere.mk\n", undefined],
+] as const)("static Make hint distinguishes %s and never admits execution", (_label, text, expected) => {
+  const root = repo();
+  writeFileSync(join(root, "Makefile"), text);
+  expect(suggestDeclaredMakeTest(root)).toEqual(expected);
+  expect(discoverProjectCommands(root).test).toBeUndefined();
+  expect(isAdmittedProjectTestCommand(["make", "test"], root)).toBe(false);
+});
+
+test("Make hints respect effective root file priority", () => {
+  const root = repo();
+  writeFileSync(join(root, "GNUmakefile"), "all:\n");
+  writeFileSync(join(root, "Makefile"), "test:\n\tnode checks.mjs\n");
+  expect(suggestDeclaredMakeTest(root)).toBeUndefined();
 });

@@ -953,6 +953,21 @@ describe("arbitrary repository phase-boundary gates", () => {
     expect(recovered.step_kind).not.toBe("final_gate_red");
     expect((await new StateStore(ARTIFACTS_DIR).loadState())?.plan?.test_command).toBe('node "test suite.mjs"');
   });
+  it("a declared Make target is suggested without execution until explicitly approved", async () => {
+    await establishGeneric();
+    await writeFile(join(REPO_DIR, "Makefile"), "test:\n\tnode test.mjs\n");
+    const first = await decideNextStep({ root: REPO_DIR, finalGateRunner: () => { throw Error("no spawn"); } });
+    expect(first.step_kind).toBe("final_gate_red");
+    const prompt = await readFile(first.prompt_path, "utf8");
+    expect(prompt).toContain("Verification command required");
+    expect(prompt).toContain("Candidate: `make test`");
+    expect(prompt).toContain("explicit approval");
+    const calls: string[][] = [];
+    const recovered = await decideNextStep({ root: REPO_DIR, verificationCommand: "make test", finalGateRunner: argv => { calls.push(argv); return { status: 0 }; } });
+    expect(calls).toEqual([["make", "test"]]);
+    expect(recovered.step_kind).not.toBe("final_gate_red");
+    expect((await new StateStore(ARTIFACTS_DIR).loadState())?.plan?.test_command).toBe("make test");
+  });
 });
 
 // A valid historical baseline does not permit a failed live discovery to become
