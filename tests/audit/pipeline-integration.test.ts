@@ -3,7 +3,7 @@ import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charter
 /**
  * N-A08: Audit pipeline integration tests.
  *
- * Five integration scenarios:
+ * Four integration scenarios:
  *   1. Batch-deterministic block — all five sub-steps complete in a single
  *      next-step invocation; no intermediate deterministic pauses returned.
  *   2. Intent-checkpoint gating — planning_artifacts stays missing until the
@@ -13,8 +13,6 @@ import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charter
  *      entries are present before either is consumed.
  *   4. Semantic review - the ledger-derived question frontier owns completion;
  *      a retired whole-file task cannot satisfy it.
- *   5. Narrative omission — synthesis_narrative writes status='omitted' when no
- *      optional narrative is submitted; the run terminates cleanly.
  */
 import { test, expect } from "vitest";
 import {
@@ -26,10 +24,6 @@ import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRe
 import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { decideNextStep, PRIORITY } from "../../src/audit/orchestrator/nextStep.js";
 import { EXECUTOR_REGISTRY, isHostDelegationExecutor } from "../../src/audit/orchestrator/executors.js";
-import {
-  runSynthesisExecutor,
-  runSynthesisNarrativeExecutor,
-} from "../../src/audit/orchestrator/synthesisExecutors.js";
 import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
 import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import {
@@ -409,114 +403,4 @@ test("S4: synthesis follows question review and is not a second host review", ()
   expect(synthesisIdx).toBeGreaterThan(reviewIdx);
   const synthEntry = EXECUTOR_REGISTRY.find((e) => e.id === "synthesis_executor");
   expect(synthEntry?.kind).toBe("deterministic");
-});
-
-// ── Scenario 5: Narrative omission ───────────────────────────────────────────
-
-test("S5: runSynthesisNarrativeExecutor writes status='omitted' when no narrative is supplied", () => {
-  const synth = runSynthesisExecutor({ audit_results: [] }, undefined, { auditRead: null });
-  const run = runSynthesisNarrativeExecutor(synth.updated, undefined, { auditRead: null });
-
-  expect(run.updated.synthesis_narrative?.status, "synthesis_narrative must be status='omitted' when no narrative is supplied").toBe("omitted");
-  expect(run.artifacts_written.includes("synthesis-narrative.json"), "synthesis-narrative.json must be in artifacts_written").toBeTruthy();
-});
-
-test("S5: after synthesis_narrative with status='omitted', deriveAuditState shows synthesis_narrative_current satisfied", () => {
-  const synth = runSynthesisExecutor({ audit_results: [] }, undefined, { auditRead: null });
-  const run = runSynthesisNarrativeExecutor(synth.updated, undefined, { auditRead: null });
-  const bundle = run.updated;
-
-  const state = deriveAuditState(bundle);
-  const narrativeObl = state.obligations.find(
-    (o) => o.id === "synthesis_narrative_current",
-  );
-  expect(narrativeObl?.state, "synthesis_narrative_current must be satisfied after omitted narrative").toBe("satisfied");
-});
-
-test("S5: omitted narrative run terminates cleanly — audit_report present, synthesis is the final step", () => {
-  // Start from a fully-satisfied post-synthesis bundle (all upstream obligations
-  // present) so that synthesis_narrative is the only remaining obligation.
-  // The key assertion: after synthesis_narrative omits, no further steps are needed.
-  const synthReadyBundle: ArtifactBundle = {
-    // All upstream obligations satisfied
-    repo_manifest: { repository: { name: "test" }, generated_at: "2026-01-01T00:00:00Z", files: [] },
-    file_disposition: { files: [] },
-    auto_fixes_applied: { fixes: [] },
-    syntax_resolution_status: { resolved: true },
-    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
-    unit_manifest: { units: [] },
-    surface_manifest: { surfaces: [] },
-    graph_bundle: { graphs: {} },
-    critical_flows: { flows: [] },
-    risk_register: { items: [] },
-    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
-    design_assessment: {
-      generated_at: "2026-01-01T00:00:00Z",
-      findings: [],
-      contract_reviewed: true,
-      conceptual_reviewed: true,
-    },
-    intent_checkpoint: makeValidCheckpoint(),
-    coverage_matrix: { files: [] },
-    flow_coverage: { flows: [] },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [],
-    requeue_tasks: [],
-    audit_results: [],
-    // Synthesis already complete
-    audit_findings: {
-      contract_version: "v1",
-      audit_read: null,
-      summary: {
-        finding_count: 0,
-        work_block_count: 0,
-        severity_breakdown: {},
-        audited_file_count: 0,
-        excluded_file_count: 0,
-        runtime_validation_status_breakdown: {},
-      },
-      findings: [],
-      coherence_trace: {
-        normalized_items: [],
-        components: [],
-      },
-      work_blocks: [],
-      work_block_seams: [],
-    },
-    audit_report: "# Audit Report\n\nNo findings.\n",
-    // synthesis_narrative NOT yet present — that's what we're testing
-  };
-
-  const run = runSynthesisNarrativeExecutor(captureCompletedDesignReviews(synthReadyBundle), undefined, { auditRead: null });
-  const bundle = run.updated;
-
-  // audit_report must be retained (from synthesis)
-  expect(bundle.audit_report, "audit_report must be present").toBeTruthy();
-  expect(bundle.synthesis_narrative?.status, "narrative status must be omitted").toBe("omitted");
-
-  // After omit, synthesis_narrative_current is satisfied
-  const state = deriveAuditState(bundle);
-  const narrativeObl = state.obligations.find((o) => o.id === "synthesis_narrative_current");
-  expect(narrativeObl?.state, "synthesis_narrative_current must be satisfied").toBe("satisfied");
-
-  // No further obligations requiring host delegation should remain
-  // (synthesis_narrative was the last host-delegation step in the pipeline)
-  const postNarrativeHostObl = state.obligations.filter(
-    (o) =>
-      (o.state === "missing" || o.state === "stale") &&
-      PRIORITY.indexOf(o.id) > PRIORITY.indexOf("synthesis_narrative_current") &&
-      isHostDelegationExecutor(
-        EXECUTOR_REGISTRY.find((e) => e.obligation_ids.includes(o.id))?.id ?? "",
-      ),
-  );
-  expect(postNarrativeHostObl.length, `No host-delegation obligations should come after synthesis_narrative; found: ${postNarrativeHostObl.map((o) => o.id).join(", ")}`).toBe(0);
-});
-
-test("S5: omitted narrative does not inject narrative sections into audit-findings.json", () => {
-  const synth = runSynthesisExecutor({ audit_results: [] }, undefined, { auditRead: null });
-  const run = runSynthesisNarrativeExecutor(synth.updated, undefined, { auditRead: null });
-  const findings = run.updated.audit_findings;
-
-  expect(findings?.themes, "themes must be absent when narrative is omitted").toBe(undefined);
-  expect(findings?.executive_summary, "executive_summary must be absent when narrative is omitted").toBe(undefined);
 });

@@ -28,12 +28,28 @@ const { commitFold, createFoldTransaction } = await import(
 const { cmdResynthesize } = await import("../../src/audit/cli/resynthesizeCommand.js");
 const { systemicPremiseToken } = await import("../../src/audit/orchestrator/systemicChallengeExecutor.js");
 const { readJsonFile } = await import("../../src/shared/io/json.js");
-const { canonicalizeConceptualAttributionIds, renderAuditReportMarkdown } = await import(
+const { applyNarrative, buildAuditFindingsReport, buildAuditReportModel, canonicalizeConceptualAttributionIds, renderAuditReportMarkdown } = await import(
   "../../src/audit/reporting/synthesis.js"
 );
-const { runSynthesisExecutor, runSynthesisNarrativeExecutor } = await import(
-  "../../src/audit/orchestrator/synthesisExecutors.js"
-);
+// Generate archived findings fixtures without invoking the retired audit writers.
+// The assertions below still exercise the report's supported archive renderer.
+function renderArchivedDesignReport(bundle: ArtifactBundle) {
+  const report = buildAuditFindingsReport(buildAuditReportModel({
+    results: [], designAssessment: bundle.design_assessment,
+  }), null);
+  return { updated: { ...bundle, audit_findings: report, audit_report: renderAuditReportMarkdown(report, {
+    conceptual_adjudication: bundle.conceptual_review_adjudication,
+  }) } };
+}
+
+function renderArchivedNarrative(bundle: ArtifactBundle, executive_summary: string) {
+  const source = renderArchivedDesignReport(bundle).updated.audit_findings;
+  const report = applyNarrative(bundle.audit_findings!, { themes: [], executive_summary });
+  return { updated: { ...bundle, audit_findings: report, audit_report: renderAuditReportMarkdown(report, {
+    conceptual_adjudication: bundle.conceptual_review_adjudication,
+    conceptual_attribution_id_source: source,
+  }) } };
+}
 
 const cleanups: string[] = [];
 
@@ -571,7 +587,7 @@ describe("conceptual review adjudication", () => {
     const accepted = JSON.stringify(adjudication);
     Object.freeze(adjudication);
     const premise = systemicPremiseToken({ conceptual_review_adjudication: adjudication });
-    const run = runSynthesisExecutor({
+    const run = renderArchivedDesignReport({
       design_assessment: {
         generated_at: "now",
         findings: [],
@@ -580,7 +596,7 @@ describe("conceptual review adjudication", () => {
         conceptual_findings: submission.findings,
       },
       conceptual_review_adjudication: adjudication,
-    }, undefined, { auditRead: null });
+    });
 
     expect(JSON.stringify(run.updated.conceptual_review_adjudication)).toBe(accepted);
     expect(systemicPremiseToken(run.updated)).toBe(premise);
@@ -610,10 +626,7 @@ describe("conceptual review adjudication", () => {
     );
 
     const reloaded = JSON.parse(JSON.stringify(run.updated)) as ArtifactBundle;
-    const narrativeRun = runSynthesisNarrativeExecutor(reloaded, {
-      themes: [],
-      executive_summary: "Canonical attribution survives artifact reload.",
-    }, { auditRead: null });
+    const narrativeRun = renderArchivedNarrative(reloaded, "Canonical attribution survives artifact reload.");
     expect(narrativeRun.updated.audit_report).toContain(`### ${canonicalId}`);
     expect(narrativeRun.updated.audit_report).toContain(
       `targets ${canonicalId}.`,
@@ -649,7 +662,7 @@ describe("conceptual review adjudication", () => {
       submission,
       generatedAt: "now",
     });
-    const run = runSynthesisExecutor({
+    const run = renderArchivedDesignReport({
       design_assessment: {
         generated_at: "now",
         findings: [],
@@ -658,7 +671,7 @@ describe("conceptual review adjudication", () => {
         conceptual_findings: submission.findings,
       },
       conceptual_review_adjudication: adjudication,
-    }, undefined, { auditRead: null });
+    });
 
     const canonicalId = run.updated.audit_findings?.findings[0]?.id;
     const reportAttribution = canonicalizeConceptualAttributionIds(run.updated.audit_findings!, adjudication);
@@ -738,9 +751,9 @@ describe("conceptual review adjudication", () => {
       conceptual_reviewed: true,
       conceptual_findings: submission.findings,
     };
-    const synthesized = runSynthesisExecutor({
+    const synthesized = renderArchivedDesignReport({
       design_assessment: designAssessment,
-    }, undefined, { auditRead: null });
+    });
     const legacyAdjudication = buildConceptualReviewAdjudication({
       manifest,
       perspectiveFindings,
@@ -754,10 +767,7 @@ describe("conceptual review adjudication", () => {
       }),
     ) as ArtifactBundle;
 
-    const migrated = runSynthesisNarrativeExecutor(persisted, {
-      themes: [],
-      executive_summary: "Resume a pre-fix persisted bundle.",
-    }, { auditRead: null });
+    const migrated = renderArchivedNarrative(persisted, "Resume a pre-fix persisted bundle.");
     const canonicalId = migrated.updated.audit_findings?.findings[0]?.id;
     expect(migrated.updated.audit_report).toContain(`### ${canonicalId}`);
     expect(migrated.updated.audit_report).toContain(`targets ${canonicalId}.`);
@@ -838,7 +848,7 @@ describe("conceptual review adjudication", () => {
       submission: edgeSubmission,
       generatedAt: "now",
     });
-    const run = runSynthesisExecutor({
+    const run = renderArchivedDesignReport({
       design_assessment: {
         generated_at: "now",
         findings: [],
@@ -847,7 +857,7 @@ describe("conceptual review adjudication", () => {
         conceptual_findings: edgeSubmission.findings,
       },
       conceptual_review_adjudication: adjudication,
-    }, undefined, { auditRead: null });
+    });
 
     const contributors =
       canonicalizeConceptualAttributionIds(run.updated.audit_findings!, adjudication)
@@ -870,7 +880,7 @@ describe("conceptual review adjudication", () => {
 
   it("leaves adjudication unchanged when canonicalization cannot resolve every target", () => {
     const submission = validSubmission();
-    const synthesized = runSynthesisExecutor({
+    const synthesized = renderArchivedDesignReport({
       design_assessment: {
         generated_at: "now",
         findings: [],
@@ -878,7 +888,7 @@ describe("conceptual review adjudication", () => {
         conceptual_reviewed: true,
         conceptual_findings: submission.findings,
       },
-    }, undefined, { auditRead: null });
+    });
     const adjudication = buildConceptualReviewAdjudication({
       manifest,
       perspectiveFindings,

@@ -18,23 +18,11 @@ const {
   applyNarrative,
   renderAuditReportMarkdown,
 } = await import("../../src/audit/reporting/synthesis.js");
-const {
-  runSynthesisExecutor: runSynthesisExecutorRaw,
-  runSynthesisNarrativeExecutor: runSynthesisNarrativeExecutorRaw,
-} = await import("../../src/audit/orchestrator/synthesisExecutors.js");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
 ) => buildAuditReportModelRaw(params);
-const runSynthesisExecutor = (
-  bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
-  results?: Parameters<typeof runSynthesisExecutorRaw>[1],
-) => runSynthesisExecutorRaw(bundle, results, { auditRead: null });
-const runSynthesisNarrativeExecutor = (
-  bundle: Parameters<typeof runSynthesisNarrativeExecutorRaw>[0],
-  narrative?: Parameters<typeof runSynthesisNarrativeExecutorRaw>[1],
-) => runSynthesisNarrativeExecutorRaw(bundle, narrative, { auditRead: null });
 
 
 function syntheticResults(): AuditResult[] {
@@ -179,77 +167,15 @@ test("narrative-enriched report renders themes, summary, top risks (JSON↔markd
   expect(markdown).toMatch(/- Findings: SEC-[0-9a-f]+, COR-[0-9a-f]+/);
 });
 
-test("runSynthesisExecutor emits canonical findings and renders the report", () => {
-  const results = syntheticResults();
-  const run = runSynthesisExecutor({ audit_results: results }, results);
-
-  expect(run.artifacts_written.includes("audit-findings.json")).toBeTruthy();
-  expect(run.artifacts_written.includes("audit-report.md")).toBeTruthy();
-  expect(run.updated.audit_findings).toBeTruthy();
-  expect(run.updated.audit_findings!.summary.finding_count).toBe(2);
-  expect(run.updated.audit_findings!.themes).toBe(undefined);
-  expect(run.updated.audit_report).toMatch(/# Audit Report/);
-  expect(run.updated.audit_report).not.toMatch(/## Themes/);
-  assertMatchesJsonSchema(null, run.updated.audit_findings, "executorFindings");
-});
-
-test("runSynthesisNarrativeExecutor omits cleanly without a narrative", () => {
-  const results = syntheticResults();
-  const synth = runSynthesisExecutor({ audit_results: results }, results).updated;
-
-  const run = runSynthesisNarrativeExecutor(synth, undefined);
-  expect(run.artifacts_written).toEqual(["synthesis-narrative.json"]);
-  expect(run.updated.synthesis_narrative!.status).toBe("omitted");
-  expect(run.updated.synthesis_narrative!.theme_count).toBe(0);
-  // Deterministic report is unchanged.
-  expect(run.updated.audit_report).not.toMatch(/## Themes/);
-  expect(run.updated.audit_findings!.themes).toBe(undefined);
-});
-
-test("runSynthesisNarrativeExecutor omits narrative and writes base findings when audit_findings is absent (needsBaseWrite=true)", () => {
-  const results = syntheticResults();
-  // Bundle has audit_results but NO audit_findings → needsBaseWrite is true
-  const bundle = { audit_results: results };
-
-  const run = runSynthesisNarrativeExecutor(bundle, undefined);
-
-  // Both artifacts must be written because needsBaseWrite is true
-  expect(run.artifacts_written).toEqual(["audit-findings.json", "synthesis-narrative.json"]);
-  // Findings are built from scratch
-  expect(run.updated.audit_findings).toBeTruthy();
-  expect(run.updated.audit_findings!.summary.finding_count).toBe(2);
-  // No narrative was applied — themes should be absent
-  expect(run.updated.audit_findings!.themes).toBe(undefined);
-  // Narrative record reflects omitted status
-  expect(run.updated.synthesis_narrative!.status).toBe("omitted");
-});
-
-test("runSynthesisNarrativeExecutor applies a provider narrative", () => {
-  const results = syntheticResults();
-  const synth = runSynthesisExecutor({ audit_results: results }, results).updated;
-
-  const run = runSynthesisNarrativeExecutor(synth, syntheticNarrative(synth.audit_findings!));
-  expect(run.artifacts_written.includes("audit-findings.json")).toBeTruthy();
-  expect(run.artifacts_written.includes("audit-report.md")).toBeTruthy();
-  expect(run.artifacts_written.includes("synthesis-narrative.json")).toBeTruthy();
-  expect(run.updated.synthesis_narrative!.status).toBe("applied");
-  expect(run.updated.synthesis_narrative!.theme_count).toBe(1);
-  expect(run.updated.synthesis_narrative!.top_risk_count).toBe(2);
-  expect(run.updated.audit_findings!.themes!.length).toBe(1);
-  expect(run.updated.audit_report).toMatch(/## Themes/);
-  assertMatchesJsonSchema(null, run.updated.audit_findings, "appliedFindings");
-});
-
 test("forced narrative refuses an archival result without a current question cycle", async () => {
-  const results = syntheticResults();
-  const synth = runSynthesisExecutor({ audit_results: results }, results).updated;
-  await expect(advanceAudit(synth, {
+  const auditFindings = baseReport();
+  await expect(advanceAudit({ audit_findings: auditFindings }, {
     preferredExecutor: "synthesis_narrative_executor",
-    narrativeResults: syntheticNarrative(synth.audit_findings!),
+    narrativeResults: syntheticNarrative(auditFindings),
   })).rejects.toThrow("Question review must reach report-ready state before synthesis");
 });
 
-test("advanceAudit applies a narrative to the current question report without altering evidence", async () => {
+test("advanceAudit omits or applies a narrative without altering current question evidence", async () => {
   const { plan, auditFindings } = buildSampleAuditBundle([SAMPLE_REPORT_FINDING]);
   const review = auditFindings.question_review;
   const dependenciesByQuestion = new Map(review.accepted.map(answer => [
@@ -257,12 +183,17 @@ test("advanceAudit applies a narrative to the current question report without al
   ]));
   const before = structuredClone(auditFindings);
   const findingId = auditFindings.findings[0]!.id;
-  const advanced = await advanceAudit({
+  const bundle = {
     review_plan: plan, audit_findings: auditFindings,
     question_cycle: { pending: [], evidence: review.evidence,
       dependenciesByQuestion, answers: review.accepted, adjudications: review.adjudications,
       consolidations: review.consolidations },
-  }, {
+  };
+  const omitted = await advanceAudit(bundle, { preferredExecutor: "synthesis_narrative_executor" });
+  expect(omitted.updated_bundle.synthesis_narrative?.status).toBe("omitted");
+  expect(omitted.updated_bundle.audit_findings).toEqual(before);
+
+  const advanced = await advanceAudit(bundle, {
     preferredExecutor: "synthesis_narrative_executor",
     narrativeResults: {
       themes: [{ theme_id: "T-1", title: "Queue counting", root_cause: "Only ready entries are counted.",

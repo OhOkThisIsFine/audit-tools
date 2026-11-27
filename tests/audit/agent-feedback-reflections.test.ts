@@ -18,7 +18,6 @@ const { loadArtifactBundle, writeCoreArtifacts, getArtifactValue, hasCurrentQues
   await import("../../src/audit/io/artifacts.js");
 const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.js");
 const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
-const { runSynthesisExecutor } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
 const { renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.js");
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
@@ -70,11 +69,11 @@ test("capability preflight reflections render as detailed audit limitations", ()
     ambiguities: ["Coverage of call relationships could not be established."],
     suggestions: ["Run a structural-capability-enabled host before claiming comprehensive coverage."],
   };
-  const run = runSynthesisExecutor({ coverage_matrix: { files: [] }, agent_reflections: [REFLECTION, preflight] }, undefined, { auditRead: null });
-  expect(run.updated.audit_report).toMatch(/## Audit Limitations/);
-  expect(run.updated.audit_report).toMatch(/No structural graph tool was available/);
-  expect(run.updated.audit_report).toMatch(/## Process Feedback[\s\S]*packet path was stale/);
-  expect((run.updated.audit_report?.match(/## Audit Limitations/g) ?? []).length).toBe(1);
+  const markdown = renderAuditReportMarkdown({ summary: { finding_count: 0, work_block_count: 0, severity_breakdown: {}, audited_file_count: 0, excluded_file_count: 0, runtime_validation_status_breakdown: {} }, findings: [], work_blocks: [], work_block_seams: [] }, { reflections: [REFLECTION, preflight] });
+  expect(markdown).toMatch(/## Audit Limitations/);
+  expect(markdown).toMatch(/No structural graph tool was available/);
+  expect(markdown).toMatch(/## Process Feedback[\s\S]*packet path was stale/);
+  expect((markdown?.match(/## Audit Limitations/g) ?? []).length).toBe(1);
 });
 
 test("audit limitations precede process feedback when drift is present", () => {
@@ -86,21 +85,6 @@ test("audit limitations precede process feedback when drift is present", () => {
   expect(report.indexOf("## Audit Limitations")).toBeLessThan(report.indexOf("## Process Feedback"));
   expect(report).toMatch(/## Audit Limitations[\s\S]*missing graph/);
   expect(report).toMatch(/## Process Feedback[\s\S]*Submission drift/);
-});
-
-test("synthesis renders Process Feedback from bundle reflections; machine contract carries none", () => {
-  const run = runSynthesisExecutor(
-    { coverage_matrix: { files: [] }, agent_reflections: [REFLECTION] },
-    undefined,
-    { auditRead: null },
-  );
-  expect(run.updated.audit_report).toMatch(/## Process Feedback/);
-  expect(run.updated.audit_report).toMatch(/packet path was stale/);
-  // audit-findings.json is the machine contract — reflections are render-only.
-  expect(!JSON.stringify(run.updated.audit_findings).includes("packet path was stale"), "reflections must not leak into audit-findings.json").toBeTruthy();
-
-  const without = runSynthesisExecutor({ coverage_matrix: { files: [] } }, undefined, { auditRead: null });
-  expect(without.updated.audit_report).not.toMatch(/## Process Feedback/);
 });
 
 test("changed reflections re-stale audit-report.md exactly once; unchanged reflections never churn", () => {

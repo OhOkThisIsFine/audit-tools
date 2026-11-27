@@ -8,7 +8,6 @@ import {
   writeCoreArtifacts,
   type ArtifactBundle,
 } from "../../src/audit/io/artifacts.js";
-import { runResultIngestionExecutor } from "../../src/audit/orchestrator/ingestionExecutors.js";
 import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
 import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import {
@@ -18,6 +17,7 @@ import {
   type TaskAffinityGraph,
 } from "../../src/audit/orchestrator/taskAffinityGraph.js";
 import type { AuditTask } from "../../src/audit/types.js";
+import { canonicalizeAuditTasks } from "../../src/shared/affinityArtifacts.js";
 import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { stableStringify } from "../../src/shared/stableStringify.js";
 
@@ -160,20 +160,6 @@ function expectCanonicalGraph(graph: TaskAffinityGraph): void {
   expect(graph.edges).toEqual([...graph.edges].sort(compareEdges));
 }
 
-function requireTasks(bundle: ArtifactBundle): AuditTask[] {
-  expect(bundle.audit_tasks).toBeDefined();
-  return bundle.audit_tasks ?? [];
-}
-
-function requireGraph(bundle: ArtifactBundle): TaskAffinityGraph {
-  expect(bundle.task_affinity_graph).toBeDefined();
-  return bundle.task_affinity_graph ?? {
-    schema_version: "task-affinity-graph/v1",
-    nodes: [],
-    edges: [],
-  };
-}
-
 async function persistedAffinityFiles(bundle: ArtifactBundle): Promise<{
   readonly files: string[];
 }> {
@@ -240,6 +226,10 @@ describe("stable task-affinity artifacts", () => {
     );
     expectCanonicalGraph(forwardGraph);
     expectCanonicalGraph(reverseGraph);
+    expectCanonicalTasks(canonicalizeAuditTasks(forward));
+    expect(canonicalizeAuditTasks(reverse)).toEqual(canonicalizeAuditTasks(forward));
+    expect(hashArtifactValue("audit_tasks.json", reverse)).toBe(hashArtifactValue("audit_tasks.json", forward));
+    expect(hashArtifactValue("task_affinity_graph.json", reverseGraph)).toBe(hashArtifactValue("task_affinity_graph.json", forwardGraph));
     expect(stableStringify(forward)).toBe(forwardBefore);
     expect(stableStringify(reverse)).toBe(reverseBefore);
 
@@ -303,68 +293,14 @@ describe("stable task-affinity artifacts", () => {
     }
   });
 
-  it("canonicalizes archival ingestion permutations without writing retired task artifacts", async () => {
-    const forward = deepFreeze(makeTasks(false));
-    const reverse = deepFreeze(makeTasks(true));
-    const forwardBefore = stableStringify(forward);
-    const reverseBefore = stableStringify(reverse);
-    const forwardGraph = buildTaskAffinityGraph(forward);
-    const reverseGraph = buildTaskAffinityGraph(reverse);
-
-    const forwardResult = runResultIngestionExecutor(
-      {
-        coverage_matrix: { files: [] },
-        audit_tasks: forward,
-        task_affinity_graph: forwardGraph,
-      },
-      [],
-    );
-    const reverseResult = runResultIngestionExecutor(
-      {
-        coverage_matrix: { files: [] },
-        audit_tasks: reverse,
-        task_affinity_graph: reverseGraph,
-      },
-      [],
-    );
-    const forwardTasks = requireTasks(forwardResult.updated);
-    const reverseTasks = requireTasks(reverseResult.updated);
-    const persistedForwardGraph = requireGraph(forwardResult.updated);
-    const persistedReverseGraph = requireGraph(reverseResult.updated);
-
-    expectCanonicalTasks(forwardTasks);
-    expectCanonicalTasks(reverseTasks);
-    expectCanonicalGraph(persistedForwardGraph);
-    expectCanonicalGraph(persistedReverseGraph);
-    expect(stableStringify(reverseTasks)).toBe(stableStringify(forwardTasks));
-    expect(stableStringify(persistedReverseGraph)).toBe(
-      stableStringify(persistedForwardGraph),
-    );
-    expect(hashArtifactValue("audit_tasks.json", reverse)).toBe(
-      hashArtifactValue("audit_tasks.json", forward),
-    );
-    expect(hashArtifactValue("task_affinity_graph.json", reverseGraph)).toBe(
-      hashArtifactValue("task_affinity_graph.json", forwardGraph),
-    );
-    expect(stableStringify(forward)).toBe(forwardBefore);
-    expect(stableStringify(reverse)).toBe(reverseBefore);
-
-    for (const source of forward) {
-      const persisted = forwardTasks.find(
-        (candidate) => candidate.task_id === source.task_id,
-      );
-      expect(persisted).not.toBe(source);
-      expect(persisted?.file_paths).not.toBe(source.file_paths);
-      expect(persisted?.line_ranges).not.toBe(source.line_ranges);
-      expect(persisted?.tags).not.toBe(source.tags);
-      expect(persisted?.inputs).not.toBe(source.inputs);
-      expect(persisted?.file_line_counts).not.toBe(source.file_line_counts);
-    }
-
-    for (const result of [forwardResult, reverseResult]) {
-      expect((await persistedAffinityFiles(result.updated)).files).not.toContain("audit_tasks.json");
-      expect((await persistedAffinityFiles(result.updated)).files).not.toContain("task_affinity_graph.json");
-    }
+  it("does not write retired task artifacts from archive fields", async () => {
+    const tasks = deepFreeze(makeTasks(false));
+    const { files } = await persistedAffinityFiles({
+      audit_tasks: tasks,
+      task_affinity_graph: buildTaskAffinityGraph(tasks),
+    });
+    expect(files).not.toContain("audit_tasks.json");
+    expect(files).not.toContain("task_affinity_graph.json");
   });
 
   it("persists the same question plan for reordered frozen source artifacts", async () => {
