@@ -43,16 +43,21 @@ test("an admitted review is replayable but is not silently replaced", async () =
   assert.deepEqual(accepted.record.submission,submission);
 });
 
-test("Codebase Memory runtime cache stays out of a Windows audit's shared temp ancestry", async () => {
+test("Codebase Memory runtime cache stays out of a Windows audit's shared temp ancestry", async t => {
   const { reviewerCbmCacheDirectory } = await load("audit/io/reviewerCbmCache.js");
   const { homedir, tmpdir } = await import("node:os");
-  const run = join(tmpdir(), "audit-cbm-layout-test");
-  const cache = reviewerCbmCacheDirectory(run);
-  assert.equal(cache, reviewerCbmCacheDirectory(join(run, "graph-index", "..")));
-  assert.notEqual(cache, reviewerCbmCacheDirectory(run + "-other"));
+  const { mkdir, mkdtemp, rm } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "audit-cbm-layout-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const run = join(root, "audit"), other = join(root, "other");
+  await Promise.all([mkdir(run), mkdir(other)]);
+  const cache = await reviewerCbmCacheDirectory(run);
+  assert.equal(cache, await reviewerCbmCacheDirectory(join(run, "graph-index", "..")));
+  assert.notEqual(cache, await reviewerCbmCacheDirectory(other));
   if (process.platform === "win32") {
     assert.ok(cache.startsWith(join(homedir(), ".audit-tools", "review-cbm") + "\\"));
     assert.ok(!cache.startsWith(run + "\\"));
+    await assert.rejects(reviewerCbmCacheDirectory(join(root, "missing")), { code: "ENOENT" });
   } else {
     assert.equal(cache, join(run, "review-cbm"));
   }

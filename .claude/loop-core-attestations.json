@@ -359,6 +359,22 @@
         "src/audit/orchestrator/testSuiteSubjects.ts": "e81188f86846ebdbcb5e2d7504954bf14fda5695"
       }
     },
+    "3db4c50113d35f3d": {
+      "reviewed_by": "fix_graph",
+      "attester_class": "agent",
+      "checked": "Independently reviewed Windows cache isolation at canonical identity, scoped cleanup and retry on error, unchanged Linux path and native fallback; Windows live graph and full package tests passed.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "67ca579551a27c7de34795b00f7cd7a0075b7c2e",
+        "ran_at": "2026-11-27T22:19:04.249Z"
+      },
+      "attested_at": "2026-11-27T22:19:07.701Z",
+      "vouches": {
+        "src/audit/io/runSnapshot.ts": "a4291c03068114b3a5f99f1be5c0aab1826eff3f"
+      }
+    },
     "3e7d0736a83209a4": {
       "reviewed_by": "dot (inherited loop changes) + implement_planner (exact shared context patch)",
       "attester_class": "agent",
@@ -573,22 +589,6 @@
       "attested_at": "2026-11-27T20:47:00.001Z",
       "vouches": {
         "src/audit/orchestrator/localCommands.ts": "e206cb67a4ea1be84299739069e66e74ffdcbf14"
-      }
-    },
-    "6e602a027f50ded0": {
-      "reviewed_by": "OpenAI Dot with independent review agents",
-      "attester_class": "agent",
-      "checked": "Independent review traced raw byte proof to each Git pin generation and checked publication order and both readers. CRLF, retry refusal, dirty and staged restore, and stale pre-repin manifest cases passed. Fixture consolidation preserves exact coverage and both branches.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "b292d4d108effbab635e5fba256304a24e138f7d",
-        "ran_at": "2026-11-26T20:25:37.447Z"
-      },
-      "attested_at": "2026-11-26T20:25:37.505Z",
-      "vouches": {
-        "src/audit/io/runSnapshot.ts": "226521dd28faa3c3876f206426ea58d19e59b5ca"
       }
     },
     "74f5fdb4c95e9366": {
@@ -1135,7 +1135,7 @@
       "review": "aef2aac1e2d57f15"
     },
     "src/audit/io/runSnapshot.ts": {
-      "review": "6e602a027f50ded0"
+      "review": "3db4c50113d35f3d"
     },
     "src/audit/orchestrator/acquisitionExecutor.ts": {
       "review": "d9632808536dd1ea"

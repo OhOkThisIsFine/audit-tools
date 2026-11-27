@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/reviewer-codebase-memory.test.ts
+// sites-pinned: tests/review-evidence.test.mjs
 import { access, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
@@ -18,7 +18,7 @@ export const ReviewerCbmSchema = z.strictObject({
   key: z.string().refine(isSha256), engine: z.literal(ENGINE), build: z.string().refine(isSha256).optional(), version: z.string().optional(),
 });
 export type ReviewerCbm = z.infer<typeof ReviewerCbmSchema>;
-const cacheDirectory = (graphIndex: string, key: string) => join(reviewerCbmCacheDirectory(join(dirname(graphIndex), "..")), key);
+const cacheDirectory = async (graphIndex: string, key: string) => join(await reviewerCbmCacheDirectory(join(dirname(graphIndex), "..")), key);
 
 function executable(): string | null {
   const configured = process.env.AUDIT_TOOLS_CBM_BIN;
@@ -74,7 +74,8 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
   const identity = { engine: ENGINE, build, files };
   const key = hashContent(stableStringify(identity));
   const meta = ReviewerCbmSchema.parse({ key, engine: ENGINE, build });
-  const cache = reviewerCbmCacheDirectory(runDir);
+  await mkdir(runDir, { recursive: true });
+  const cache = await reviewerCbmCacheDirectory(runDir);
   const final = join(cache, key);
   const ready = async () => ReviewerCbmSchema.parse(JSON.parse(await readFile(join(final, MANIFEST), "utf8"))).key === key;
   try { if (await ready()) return meta; } catch (error) { if (!isFileMissingError(error)) throw error; }
@@ -169,7 +170,7 @@ async function queryPage(binary: string, home: string, q: Query) {
 export async function queryReviewerCbm(index: string, meta: ReviewerCbm, allowed: ReadonlySet<string>, q: Query) {
   const binary = executable();
   if (!binary) throw new Error("Codebase Memory is not configured on this host. Use native file links or rebuild the indexed graph on this host.");
-  const home = cacheDirectory(index, meta.key);
+  const home = await cacheDirectory(index, meta.key);
   try {
     await access(join(home, MANIFEST));
   } catch (error) {
