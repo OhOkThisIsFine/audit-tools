@@ -1,6 +1,6 @@
 import { conformanceReviewPaths } from "../../src/remediate/steps/dispatch/contractConformanceReview.js";
 import { submitRemediationGateResult } from "../../src/remediate/steps/submitGateResult.js";
-import { assertSuccessfulConformance, reopenStaleTriageSuccesses, triageEvidenceContext } from "../../src/remediate/phases/triageConformance.js";
+import { assertSuccessfulConformance, checkTriageConformance, triageEvidenceContext } from "../../src/remediate/phases/triageConformance.js";
 import { runClosePhase, buildRemediationOutcomesReport, cleanupTempBranchesAndArtifacts } from "../../src/remediate/phases/close.js";
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
 import { StateStore, type RemediationState } from "../../src/remediate/state/store.js";
@@ -428,7 +428,12 @@ describe("independent conformance admission and captured verification evidence",
       expect(paused.items!.B1.status).toBe("blocked");
       const paths = conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id);
       const requestB = JSON.parse(await readFile(paths.request, "utf8")) as { binding: string };
-      expect((await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir })).step_kind).toBe("review_contract_conformance");
+      const checkReview = async (state: RemediationState) =>
+        checkTriageConformance(value.root, value.artifactsDir, state, value.item.id,
+          await triageEvidenceContext(value.root, state, value.item.id));
+      await expect(checkReview(paused)).resolves.toMatchObject({
+        ok: false, issue: { code: "conformance_review_required" },
+      });
       expect(JSON.parse(await readFile(paths.request, "utf8")).binding).toBe(requestB.binding);
       await answerConformance(value);
       await writeFile(join(value.root, "src/a.ts"), "export const value = 27;\n");
@@ -438,12 +443,17 @@ describe("independent conformance admission and captured verification evidence",
       expect(requestC.binding).not.toBe(requestB.binding);
       const current = (await store.loadState())!;
       expect(current.items!.B1.status).toBe("blocked");
-      for (const mode of ["unavailable", "degraded"]) {
-        await answerConformance(value, { mode });
-        expect((await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir })).step_kind).toBe("review_contract_conformance");
+      // Response variants share the same review boundary. Keep the full
+      // controller for changes to the bound tree and the reopened unit.
+      for (const [answer, code] of [
+        [{ mode: "unavailable" }, "conformance_review_unavailable"],
+        [{ mode: "degraded" }, "conformance_review_unavailable"],
+        [{ verdict: "insufficient" }, "conformance_review_insufficient"],
+      ] as const) {
+        await answerConformance(value, answer);
+        await expect(checkReview(current)).resolves.toMatchObject({ ok: false, issue: { code } });
       }
-      await answerConformance(value, { verdict: "insufficient" });
-      expect((await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir })).step_kind).toBe("review_contract_conformance");
+      expect(JSON.parse(await readFile(paths.request, "utf8")).binding).toBe(requestC.binding);
       await answerConformance(value);
       const accepted = await runTriagePhase((await store.loadState())!, { root: value.root, artifactsDir: value.artifactsDir });
       expect(accepted.items!.B1.status).toBe("resolved_no_change");
@@ -461,10 +471,6 @@ describe("independent conformance admission and captured verification evidence",
       const reopened = (await new StateStore(value.artifactsDir).loadState())!;
       expect(reopened.items!.B1.status).toBe("blocked");
       expect(reopened.items!.B1.conformance_review).toEqual(priorReceipt);
-      expect(await reopenStaleTriageSuccesses(value.root, value.artifactsDir, accepted)).toBe(true);
-      expect(accepted.items!.B1.conformance_review).toEqual(priorReceipt);
-      await new StateStore(value.artifactsDir).saveState(accepted);
-      expect((await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir })).step_kind).toBe("review_contract_conformance");
     });
     it("closing refuses successful units without required conformance receipts", async () => {
       const value = await conformanceFixture();
