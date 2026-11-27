@@ -706,8 +706,8 @@ test("F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw", () => {
   expect(stale.has("artifact_metadata.json"), "the manifest artifact itself is never marked stale by the gate").toBe(false);
 });
 
-// F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json upstream
-// edges. The declarative reference (spec/audit/dependency-map.md) and the
+// F1 inv-6 [CP-NODE-7]: generated dependency map literal parity incl. git_history.json upstream
+// edges. The declarative reference (spec/audit/dependency-map.generated.md) and the
 // canonical TS table (ARTIFACT_DEPENDS_ON_MAP) must agree LITERALLY over the
 // transcribed edge set — neither may carry an edge the other omits. The .md is
 // authored in the dependents view (`### <upstream>` → `Downstream:` bullet
@@ -717,13 +717,13 @@ test("F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw", () => {
 // in the TS table matches the .md, and (b) every .md upstream that lists
 // git_history.json downstream is exactly that TS upstream set. Any divergence
 // (a dropped or extra edge on either side) fails.
-test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json upstream edges", async () => {
+test("F1 inv-6 [CP-NODE-7]: generated dependency map literal parity incl. git_history.json upstream edges", async () => {
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const { dirname, join } = await import("node:path");
 
   const here = dirname(fileURLToPath(import.meta.url));
-  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const mdPath = join(here, "../../spec/audit/dependency-map.generated.md");
   const md = readFileSync(mdPath, "utf8");
 
   // Parse the declarative map: each `| \`<artifact>\` | \`dep\`, \`dep\`, ... |`
@@ -767,12 +767,12 @@ test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json ups
 
   // (b) Literal parity, .md ⟺ TS, over the git_history.json edge set: every TS
   // upstream is reflected in the .md and vice versa (no dropped/extra edge).
-  expect(mdGitHistoryUpstreams, "dependency-map.md and ARTIFACT_DEPENDS_ON_MAP must agree literally on git_history.json's upstream edges").toEqual(tsGitHistoryUpstreams);
+  expect(mdGitHistoryUpstreams, "dependency-map.generated.md and ARTIFACT_DEPENDS_ON_MAP must agree literally on git_history.json's upstream edges").toEqual(tsGitHistoryUpstreams);
 
   // And the .md's git_history.json row actually carries BOTH upstreams (guards
   // a regression that drops one edge while leaving the other).
   for (const upstream of tsGitHistoryUpstreams) {
-    expect(mdDependsOn["git_history.json"]?.has(upstream), `dependency-map.md must list ${upstream} as a git_history.json dependency`).toBeTruthy();
+    expect(mdDependsOn["git_history.json"]?.has(upstream), `dependency-map.generated.md must list ${upstream} as a git_history.json dependency`).toBeTruthy();
   }
 });
 
@@ -909,7 +909,7 @@ test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into
   expect(runIdEarly, "run-id-bearing provenance stamp must not leak into a narrative element's per-element hash").toBe(runIdLate);
 });
 
-test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.ts AND dependency-map.md", async () => {
+test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.ts AND dependency-map.generated.md", async () => {
   // F1 inv-9 atomic co-commit guard (CCU-git-history-registration, CE-001): F1's
   // dep-map-registration half and F6's git_history.json writer+declaration half
   // are ONE scheduler-enforced co-commit unit — neither may land independently.
@@ -934,21 +934,21 @@ test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.
   // backticked artifact token. Parse for the literal `git_history.json` bullet so
   // a prose mention alone does not satisfy the guard.
   const here = dirname(fileURLToPath(import.meta.url));
-  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const mdPath = join(here, "../../spec/audit/dependency-map.generated.md");
   const md = readFileSync(mdPath, "utf8");
   const mdHasGitHistory = md
     .split(/\r?\n/)
     .some((line) => /`git_history\.json`/.test(line));
-  expect(mdHasGitHistory, "git_history.json MUST be registered in spec/audit/dependency-map.md (co-commit with the TS table)").toBeTruthy();
+  expect(mdHasGitHistory, "git_history.json MUST be registered in spec/audit/dependency-map.generated.md (co-commit with the TS table)").toBeTruthy();
 
   // (c) Atomicity: BOTH sides present together — the co-commit unit landed whole.
   expect(Object.prototype.hasOwnProperty.call(
       ARTIFACT_DEPENDS_ON_MAP,
       "git_history.json",
-    ) && mdHasGitHistory, "F1+F6 co-commit unit requires git_history.json in BOTH dependencyMap.ts and dependency-map.md — neither half may land alone").toBeTruthy();
+    ) && mdHasGitHistory, "F1+F6 co-commit unit requires git_history.json in BOTH dependencyMap.ts and dependency-map.generated.md — neither half may land alone").toBeTruthy();
 });
 
-test("F1 fail-7 [CP-NODE-18 r2]: git_history.json never half-registered (present in dependencyMap.ts iff present in dependency-map.md)", async () => {
+test("F1 fail-7 [CP-NODE-18 r2]: git_history.json never half-registered (present in dependencyMap.ts iff present in dependency-map.generated.md)", async () => {
   // F1 fail-7 (CCU-git-history-registration): landing F1's dep-map registration
   // without F6's producer (or vice versa) in a separate commit yields a
   // half-registered DAG node. The single scheduler-enforced co-commit unit
@@ -968,13 +968,13 @@ test("F1 fail-7 [CP-NODE-18 r2]: git_history.json never half-registered (present
   );
 
   const here = dirname(fileURLToPath(import.meta.url));
-  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const mdPath = join(here, "../../spec/audit/dependency-map.generated.md");
   const md = readFileSync(mdPath, "utf8");
   const presentInMd = md
     .split(/\r?\n/)
     .some((line) => /`git_history\.json`/.test(line));
 
-  expect(presentInTs, `git_history.json must be co-registered: present in dependencyMap.ts (${presentInTs}) iff present in dependency-map.md (${presentInMd}) — a mismatch is a half-registered DAG node from a non-atomic commit`).toBe(presentInMd);
+  expect(presentInTs, `git_history.json must be co-registered: present in dependencyMap.ts (${presentInTs}) iff present in dependency-map.generated.md (${presentInMd}) — a mismatch is a half-registered DAG node from a non-atomic commit`).toBe(presentInMd);
 });
 
 test("F1 fail-9 [CP-NODE-20 r2]: per-element verdicts are order-canonicalized => key-order-independent stable hash", async () => {

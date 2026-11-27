@@ -85,7 +85,7 @@ test("F6 inv-1: gitHistory extractor imports no F5 analyzer/adapter seam", async
 
 // F6 inv-7: F6 is the authoritative source for git_history.json's upstream-dep
 // declaration — exactly {repo_manifest, file_disposition}. F1 only transcribes
-// it into ARTIFACT_DEPENDS_ON_MAP / dependency-map.md (CCU-git-history-registration).
+// it into ARTIFACT_DEPENDS_ON_MAP / dependency-map.generated.md (CCU-git-history-registration).
 test("F6 inv-7: git_history.json declares upstream deps exactly {repo_manifest, file_disposition}", () => {
   expect([...(ARTIFACT_DEPENDS_ON_MAP["git_history.json"] ?? [])].sort()).toEqual(["file_disposition.json", "repo_manifest.json"]);
 });
@@ -722,7 +722,7 @@ test("F6 fail-10 [CP-NODE-95]: git_history.json upstream-dep set matches F1 regi
     "..",
     "spec",
     "audit",
-    "dependency-map.md",
+    "dependency-map.generated.md",
   );
   const spec = await readFile(specPath, "utf8");
   const rowPattern = /^\|\s*`git_history\.json`\s*\|\s*(.+?)\s*\|$/m;
