@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { assertSuccessfulConformance, refreshReplannedHostConformance } from "../dist/remediate/phases/triageConformance.js";
@@ -115,38 +115,55 @@ test("closeout requests fresh independent conformance after a context-only repla
 });
 
 test("closeout only refreshes an exact independently conformed overlap", async t => {
+  const fixturesDir = await mkdtemp(join(tmpdir(), "audit-closeout-overlap-"));
+  t.after(() => rm(fixturesDir, { recursive: true, force: true }));
+  const scoped = "target/source.txt";
+  const runGit = (root, ...args) => {
+    const result = spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  const writeCommit = async (root, value) => {
+    await writeFile(join(root, scoped), value);
+    runGit(root, "add", "--", scoped);
+    runGit(root, "commit", "-qm", value);
+  };
+  const template = join(fixturesDir, "template");
+  await mkdir(join(template, "target"), { recursive: true });
+  runGit(template, "init", "--template=", "-q");
+  runGit(template, "config", "user.email", "fixture@example.invalid");
+  runGit(template, "config", "user.name", "Fixture");
+  runGit(template, "config", "commit.gpgsign", "false");
+  await writeCommit(template, "baseline");
+  const baseline = runGit(template, "rev-parse", "HEAD");
+  await writeCommit(template, "original reviewed fix");
+  const oldLanded = runGit(template, "rev-parse", "HEAD");
+  const oldBranch = runGit(template, "branch", "--show-current");
+  runGit(template, "switch", "-q", "-c", "later-writer");
+  await writeCommit(template, "independently reviewed duplicate scope");
+  const sharedWriter = runGit(template, "rev-parse", "HEAD");
+  runGit(template, "switch", "-q", oldBranch);
+
   for (const scenario of ["fast-forward chain", "second parent", "original off mainline", "unreviewed writer", "incorrect recorded paths", "ungranted overlap",
     "different merge result", "different first-parent preimage", "reviewed first-parent preimage mismatch",
     "later unreviewed edit", "unstaged", "staged", "untracked"]) await t.test(scenario, async t => {
-    const root = await mkdtemp(join(tmpdir(), "audit-closeout-overlap-"));
+    const root = join(fixturesDir, scenario);
     t.after(() => rm(root, { recursive: true, force: true }));
+    // Copy the worktree and its entire private .git, not a linked worktree.
+    // Branch, index, objects and the regenerated per-path reviews stay isolated.
+    await cp(template, root, { recursive: true });
     const artifactsDir = join(root, ".audit-tools");
-    const scoped = "target/source.txt";
     const source = join(root, scoped);
     const runId = "overlap-fixture";
     const revision = "a".repeat(64);
-    const git = (...args) => {
-      const result = spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
-      assert.equal(result.status, 0, result.stderr);
-      return result.stdout.trim();
-    };
-    git("init", "--template=", "-q");
-    git("config", "user.email", "fixture@example.invalid");
-    git("config", "user.name", "Fixture");
-    git("config", "commit.gpgsign", "false");
-    await mkdir(join(root, "target"));
+    const git = (...args) => runGit(root, ...args);
     const commit = async value => {
-      await writeFile(source, value);
-      git("add", "--", scoped);
-      git("commit", "-qm", value);
+      await writeCommit(root, value);
       return git("rev-parse", "HEAD");
     };
-    await commit("baseline");
-    const oldBranch = git("branch", "--show-current");
-    if (scenario === "original off mainline") git("switch", "-q", "-c", "original-writer");
-    const oldLanded = await commit("original reviewed fix");
     if (scenario === "original off mainline") {
-      git("switch", "-q", oldBranch);
+      git("branch", "original-writer", oldLanded);
+      git("switch", "-q", "-C", oldBranch, baseline);
       await writeFile(join(root, "baseline-context.txt"), "unrelated initial first parent");
       git("add", "baseline-context.txt");
       git("commit", "-qm", "initial mainline context");
@@ -191,8 +208,8 @@ test("closeout only refreshes an exact independently conformed overlap", async t
     const oldRequest = await prior.request();
     const differentPreimage = scenario === "different first-parent preimage" || scenario === "reviewed first-parent preimage mismatch";
     const merge = scenario === "second parent" || scenario === "different merge result" || differentPreimage;
-    if (merge) git("switch", "-q", "-c", "later-writer");
-    const reviewed = await commit("independently reviewed duplicate scope");
+    if (!merge && scenario !== "original off mainline") git("merge", "--ff-only", "-q", "later-writer");
+    const reviewed = scenario === "original off mainline" ? await commit("independently reviewed duplicate scope") : sharedWriter;
     await seed("UNIT-writer", reviewed, [scenario === "ungranted overlap" ? "other.txt" : scoped],
       scenario === "incorrect recorded paths" ? [scoped, "ghost.txt"] : [scoped],
       scenario !== "unreviewed writer");
@@ -203,7 +220,6 @@ test("closeout only refreshes an exact independently conformed overlap", async t
       writers.push({ id: "UNIT-next", before: reviewed, after: later });
     }
     if (merge) {
-      git("switch", "-q", oldBranch);
       if (differentPreimage) {
         const intervening = await commit("different first-parent scope preimage");
         if (scenario === "reviewed first-parent preimage mismatch") await seed("UNIT-first-parent", intervening, [scoped], [scoped]);
@@ -228,7 +244,7 @@ test("closeout only refreshes an exact independently conformed overlap", async t
         assert.equal(git("rev-parse", "HEAD:" + scoped), git("rev-parse", reviewed + ":" + scoped));
       }
     }
-    if (scenario === "later unreviewed edit") await commit("unexplained final path");
+    if (scenario === "later unreviewed edit") await writeCommit(root, "unexplained final path");
     if (scenario === "unstaged" || scenario === "staged") await writeFile(source, "dirty overlap");
     if (scenario === "staged") git("add", "--", scoped);
     if (scenario === "untracked") await writeFile(join(root, "target/extra.txt"), "dirty directory grant");
