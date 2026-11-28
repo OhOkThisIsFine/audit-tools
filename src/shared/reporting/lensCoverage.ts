@@ -108,11 +108,9 @@ export function deriveLensCoverage(params: {
  * so a subset that drops every finding of one lens would throw at the remediate
  * intake that requests it.
  *
- * Whether a lens was EXERCISED is read PER ENTRY, from the outcome the parent
- * map already recorded — an entry that was `findings` or `clean` was exercised,
- * and filtering findings out of a subset cannot un-exercise it. Re-deciding it
- * globally would turn a lens whose only finding the subset dropped into
- * `not_run`, which claims the run never looked.
+ * The parent outcome is the evidence for what ran. If all of a lens's findings
+ * were removed, `findings` becomes `clean` because the lens was exercised.
+ * Other zero-count outcomes still describe the parent run and are preserved.
  */
 export function reprojectLensCoverage(
   coverage: readonly LensCoverageEntry[],
@@ -124,7 +122,7 @@ export function reprojectLensCoverage(
     return {
       ...entry,
       findings_count: findingsCount,
-      outcome: lensOutcome(findingsCount, entry.outcome !== "not_run"),
+      outcome: findingsCount > 0 ? "findings" : entry.outcome === "findings" ? "clean" : entry.outcome,
     };
   });
 }
