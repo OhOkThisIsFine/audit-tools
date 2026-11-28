@@ -58,6 +58,7 @@ import { buildReviewerGraph } from "../reviewGraphCommand.js";
 import {
   acceptQuestionReview,
   projectQuestionReview,
+  QuestionSourceValidationError,
   validateQuestionSource,
   type AuditQuestionBinding,
 } from "./questionReviewAcceptance.js";
@@ -527,24 +528,32 @@ export async function submitAuditQuestionResult(params: QuestionBoundary & { ass
       await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, answers: [...ledger.answers, accepted.record] });
     }
     return accepted;
+  }).catch((error: unknown) => {
+    if (error instanceof QuestionSourceValidationError) throw new Error(questionResultCorrection(error));
+    throw error;
   });
 }
 
 /** Raw fallback errors may quote submitted text, paths, or schema values. */
-function questionResultCorrection(reason: string): string {
-  return "Bound answer rejected: " + questionSemanticGuidance(reason);
+function questionResultCorrection(error: unknown): string {
+  return "Bound answer rejected: " + questionSemanticGuidance(error);
 }
 
-function questionSemanticGuidance(reason: string): string {
+function questionSemanticGuidance(error: unknown): string {
+  if (error instanceof QuestionSourceValidationError) {
+    const { failure } = error;
+    if (failure.kind === "source_scope") {
+      return "Source reference outside scope. Check the current assignment's authorized_scope include/exclude lists and frozen source inventory; remove the reference or use an admitted source.";
+    }
+    const { lineCount } = failure;
+    const bounds = lineCount === 0 ? "The issued file has 0 lines, so there is no valid numbered span."
+      : `Use 1-based bounds 1–${lineCount} (issued line count: ${lineCount}), with end_line at or after start_line.`;
+    return "Invalid source citation span. Check start_line and end_line against the current frozen evidence. " + bounds;
+  }
+  const reason = errorMessage(error);
   if (reason === "Result assignment differs from its destination" ||
       reason === "Review submission does not match the current issued assignment, question revision and snapshot") {
     return "Binding mismatch. Copy the assignment, question, revision, and snapshot IDs from the current workload.";
-  }
-  if (reason.startsWith("Source is outside this assignment:")) {
-    return "Source is outside the assignment. Use only source admitted in the current binding.";
-  }
-  if (reason.startsWith("Source span is outside the issued file:")) {
-    return "Source lines are outside the issued file. Check the span against the frozen source.";
   }
   if (reason.startsWith("Evidence was not issued for this assignment:") ||
       reason.startsWith("Observation links unavailable or unissued evidence:")) {
@@ -622,7 +631,7 @@ export async function ingestAuditQuestionResults(params: QuestionBoundary, curre
         const decision = acceptQuestionReview(answers, hydrateQuestionBinding(workload, item.binding), submission, new Date().toISOString());
         if (decision.kind === "accepted") answers.push(decision.record);
       } catch (error) {
-        reject(questionResultCorrection(errorMessage(error)));
+        reject(questionResultCorrection(error));
       }
     }
     const accepted_count = answers.length - ledger.answers.length;
