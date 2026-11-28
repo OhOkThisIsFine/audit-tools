@@ -1,20 +1,26 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { contentSha256 as hash, hashContent } from "../dist/shared/index.js";
+import { contentSha256 as hash, currentPromptPath, currentStepPath, FileLockOwnershipLostError, hashContent, runWithBlockedStepBackstop } from "../dist/shared/index.js";
 import {
   executionPlanPaths, ingestExecutionPlan, readCanonicalPlan, readExecutionIntent,
 } from "../dist/remediate/contractPipeline/executionPlan.js";
 import {
   buildStructuredAuditSourceManifest, intakePaths, INTAKE_SUMMARY_SCHEMA_VERSION,
 } from "../dist/remediate/intake.js";
-import { StateStore } from "../dist/remediate/state/store.js";
-import { closingActionCompleted } from "../dist/remediate/phases/close.js";
+import { PHASE_LOCK_FILENAME, StateStore } from "../dist/remediate/state/store.js";
+import { closingActionCompleted, runClosePhase } from "../dist/remediate/phases/close.js";
 import { decideNextStep } from "../dist/remediate/steps/nextStep.js";
+
+import { runCloseAcceptance } from "../dist/remediate/phases/closeAcceptance.js";
+import { finalGateOutcomePath, finalGateRecordPath, writeFinalGateVerdict, finalGateVerdictPath } from "../dist/remediate/steps/finalGate.js";
+import { processAgentId } from "../dist/shared/io/stepContractWriter.js";
+import { presentReportStep } from "../dist/remediate/steps/frictionCloseout.js";
 
 const entry = fileURLToPath(new URL("../dist/remediate/index.js", import.meta.url));
 const put = (path, value) => writeFile(path, JSON.stringify(value));
@@ -464,5 +470,116 @@ test("the real structured intent checkpoint explains source authority with and w
     assert.match(prompt, /findings define the eligible work.*narrative is context, not a separate implementation request/);
     assert.match(prompt, /`free_form_intent` to clarify or narrow.*cannot add unrelated write scope/);
     assert.match(prompt, /work outside those findings that the user explicitly requests.*`--guidance <text>`/);
+  });
+});
+
+test("close acceptance fences subsequent local gate launches and red evidence independently", async t => {
+  for (const loss of ["none", "runner", "red"]) await t.test(loss, async t => {
+    const f = await fixture(t);
+    await reviewedClosing(f, "none");
+    const state = await f.store.loadState();
+    await put(join(f.root, "package.json"), { name: "close-fixture", scripts: {
+      build: "node --version", lint: "node --version",
+    } });
+    const commands = [];
+    const outcome = finalGateOutcomePath(f.artifactsDir);
+    const red = finalGateRecordPath(f.artifactsDir);
+    const verdict = finalGateVerdictPath(f.artifactsDir);
+    const lost = new Error("synthetic close ownership lost");
+    await writeFile(red, "earlier red evidence");
+    await writeFile(verdict, "earlier verdict evidence");
+    await writeFile(outcome, "earlier outcome");
+    const assertOwnership = async () => {
+      if (loss === "runner" && commands.length) throw lost;
+      if (loss === "red" && (await readFile(outcome, "utf8")) !== "earlier outcome") throw lost;
+    };
+    const verification = runCloseAcceptance({
+      state, assertOwnership,
+      options: { root: f.root, artifactsDir: f.artifactsDir, finalGateRunner: async argv => {
+        commands.push(argv.join(" "));
+        await Promise.resolve();
+        return { status: argv.includes("lint") ? 8 : 0, stderr: "synthetic verdict" };
+      } },
+      runCombined: () => assert.fail("no combined suite in this fixture"),
+    });
+    if (loss === "none") {
+      const result = await verification;
+      assert.equal(result.gate.passed, false);
+      assert.equal(JSON.parse(await readFile(red, "utf8")).exit_code, 8);
+      // A close does not cache its floor. Guard the shared verdict writer if used.
+      await writeFinalGateVerdict(f.artifactsDir, { scope: "fixture", tree: null, passed: false,
+        scoped_out: false, outcome: "executed", results: result.gate.results }, assertOwnership);
+      assert.equal(JSON.parse(await readFile(verdict, "utf8")).passed, false);
+    } else {
+      await assert.rejects(verification, error => error === lost);
+      await assert.rejects(() => writeFinalGateVerdict(f.artifactsDir, { scope: "fixture", tree: null,
+        passed: false, scoped_out: false, outcome: "executed", results: [] }, assertOwnership), error => error === lost);
+      assert.equal(await readFile(red, "utf8"), "earlier red evidence");
+      assert.equal(await readFile(verdict, "utf8"), "earlier verdict evidence");
+    }
+    assert.deepEqual(commands, loss === "runner" ? ["npm run build"] : ["npm run build", "npm run lint"]);
+    const outcomeText = await readFile(outcome, "utf8");
+    if (loss === "runner") assert.equal(outcomeText, "earlier outcome");
+    else assert.equal(JSON.parse(outcomeText).passed, false);
+  });
+});
+
+test("fully green close publishes before cleanup; a fenced terminal pointer leaves recovery intact", async t => {
+  for (const lose of [false, true]) await t.test(lose ? "lost before terminal pointer" : "fully green", async t => {
+    const f = await fixture(t);
+    const { root, artifactsDir, store } = f;
+    await reviewedClosing(f, "none");
+    const friction = join(artifactsDir, "friction", "fixture.json");
+    await mkdir(join(artifactsDir, "friction"));
+    await writeFile(friction, "{}");
+    const receipt = join(artifactsDir, "remediation-closing-result.json");
+    const lock = join(artifactsDir, PHASE_LOCK_FILENAME);
+    const report = join(root, ".audit-tools", "remediation-report.md");
+    let published;
+    let fallbackPublished = false;
+    const agentId = processAgentId();
+    const lost = new FileLockOwnershipLostError(lock);
+    const continuation = runWithBlockedStepBackstop(() => store.withActiveOperator(async assertOwnership => {
+      const state = await store.loadState();
+      return runClosePhase(state, {
+        root, artifactsDir, skipFinalGate: true, assertOwnership,
+        publishReport: async (complete, assertCurrent) => {
+          assert.equal((await store.loadState()).status, "complete");
+          assert.equal(existsSync(report), true);
+          assert.equal(existsSync(friction), true);
+          assert.equal(existsSync(lock), true);
+          assert.ok(JSON.parse(await readFile(receipt, "utf8")).pending_report);
+          published = await presentReportStep(root, artifactsDir, complete, async () => {
+            await assertCurrent();
+            if (lose && existsSync(currentPromptPath(artifactsDir, agentId))) throw lost;
+          });
+          assert.equal(existsSync(lock), true);
+        },
+      });
+    }), async () => { fallbackPublished = true; });
+    if (lose) await assert.rejects(continuation, error => error === lost);
+    else assert.equal((await continuation).status, "complete");
+    assert.equal(fallbackPublished, false);
+    assert.equal(existsSync(lock), false);
+    assert.ok((await readFile(report, "utf8")).length);
+    assert.equal((await store.loadState()).status, "complete");
+    assert.equal(existsSync(friction), lose);
+    assert.equal(Boolean(JSON.parse(await readFile(receipt, "utf8")).pending_report), lose);
+    if (lose) {
+      assert.equal(existsSync(currentStepPath(artifactsDir)), false);
+      assert.equal(existsSync(currentStepPath(artifactsDir, agentId)), false);
+      assert.equal(published, undefined);
+      const recovered = await decideNextStep({ root, artifactsDir, skipFinalGate: true });
+      assert.equal(recovered.step_kind, "present_report");
+      assert.equal(existsSync(friction), false);
+      assert.equal(existsSync(lock), false);
+    } else {
+      assert.equal(published.step_kind, "present_report");
+      assert.equal(JSON.parse(await readFile(published.artifact_paths.current_step, "utf8")).step_kind, "present_report");
+      assert.match(await readFile(published.prompt_path, "utf8"), /Present Remediation Report/);
+      assert.equal(JSON.parse(await readFile(currentStepPath(artifactsDir), "utf8")).step_kind, "present_report");
+      assert.match(await readFile(currentPromptPath(artifactsDir), "utf8"), /Present Remediation Report/);
+      assert.equal(await readFile(join(root, ".audit-tools", "remediation-friction-fixture.json"), "utf8"), "{}");
+    }
   });
 });

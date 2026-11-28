@@ -120,6 +120,7 @@ export async function verifyLandingGates(params: {
   timeoutMs: number;
   overrides?: LandingGateVerifyOverrides;
   recheckNativeGuard?: () => Promise<boolean>;
+  assertOwnership?: () => Promise<void>;
 }): Promise<LandingGateVerifyOutcome> {
   const { root, timeoutMs } = params;
   const run = params.overrides?.run ?? runAdmittedProjectLandingGateCommand;
@@ -140,6 +141,7 @@ export async function verifyLandingGates(params: {
     }
     // Do not cross arbitrary scripts or lifecycle hooks on the way to the alias.
     if (reuse && !nativePriorLandingCheck(root, command)) reuse = undefined;
+    await params.assertOwnership?.();
     const outcome = await run(command.split(" "), root, { timeoutMs });
     const passed =
       outcome.admitted && outcome.exit_code === 0 && !outcome.timed_out && !outcome.spawn_error;

@@ -138,8 +138,9 @@ export async function runCloseAcceptance(params: {
   options: OrchestratorOptions;
   runCombined: () => Promise<CombinedTestResult>;
   runLogger?: RunLogger;
+  assertOwnership?: () => Promise<void>;
 }): Promise<{ gate?: ToolOwnedFinalGateResult; combinedTest?: CombinedTestResult; recheckNativeGuard?: () => Promise<boolean> }> {
-  const { state, options, runCombined, runLogger } = params;
+  const { state, options, runCombined, runLogger, assertOwnership } = params;
   admitRemediationDirtyBaseline(state);
   const scope = "all-terminal final gate";
   const disabledReason = finalGateDisabledReason(options) ??
@@ -148,7 +149,7 @@ export async function runCloseAcceptance(params: {
   if (disabledReason !== null) {
     await recordFinalGateOutcome({
       artifactsDir: options.artifactsDir, state, scope, gateKey: "tool_owned_final_gate", logPhase: "close", runLogger,
-      outcome: "disabled", passed: false, commandsRun: 0, reason: disabledReason,
+      assertOwnership, outcome: "disabled", passed: false, commandsRun: 0, reason: disabledReason,
     });
     return {};
   }
@@ -164,6 +165,7 @@ export async function runCloseAcceptance(params: {
   runLogger?.event({ phase: "close", kind: "executor_start", obligation: state.status, note: "tool_owned_final_gate" });
   const gate = await runToolOwnedFinalGate(options.root, {
     runner: options.finalGateRunner,
+    assertOwnership,
     testCommand: state.plan?.test_command_source !== "project_facts" ? combinedArgv : undefined,
     ...(nativeContext ? { nativeCloseUnit: async () => {
       const root = options.root;
@@ -217,12 +219,12 @@ export async function runCloseAcceptance(params: {
   const commandsRun = gate.results.filter(result => result.ran !== false).length;
   await recordFinalGateOutcome({
     artifactsDir: options.artifactsDir, state, scope, gateKey: "tool_owned_final_gate", logPhase: "close", runLogger,
-    outcome: gate.outcome, passed: gate.passed, commandsRun,
+    assertOwnership, outcome: gate.outcome, passed: gate.passed, commandsRun,
     durationMs: Date.now() - startedAt,
     ...(gate.scoped_out ? { reason: "no executable verification command declared; operator command required" } : {}),
   });
   if (!gate.passed) {
-    await writeFinalGateRedRecord(options.artifactsDir, scope, gate.results.find(result => !result.passed), { root: options.root, state });
+    await writeFinalGateRedRecord(options.artifactsDir, scope, gate.results.find(result => !result.passed), { root: options.root, state }, assertOwnership);
   }
   return { gate, ...(combinedTest ? { combinedTest } : {}), ...(recheckNativeGuard ? { recheckNativeGuard } : {}) };
 }

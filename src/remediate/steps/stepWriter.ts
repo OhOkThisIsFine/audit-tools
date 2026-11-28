@@ -22,6 +22,7 @@ export interface WriteStepInput {
   stopCondition: string;
   artifactPaths?: Record<string, string>;
   access?: RemediationStep["access"];
+  assertOwnership?: () => Promise<void>;
 }
 
 /**
@@ -44,6 +45,7 @@ export async function writeCurrentStep({
   stopCondition,
   artifactPaths = {},
   access,
+  assertOwnership,
 }: WriteStepInput): Promise<RemediationStep> {
   return writeStepContract<RemediationStep, RemediationStepKind, string>({
     contractVersion: REMEDIATION_STEP_CONTRACT_VERSION,
@@ -58,6 +60,7 @@ export async function writeCurrentStep({
     artifactPaths,
     extraFields: access ? { access } : undefined,
     trimPromptStart: true,
+    assertOwnership,
   });
 }
 

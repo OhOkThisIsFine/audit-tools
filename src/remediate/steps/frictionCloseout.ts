@@ -10,9 +10,11 @@ export async function presentReportStep(
   root: string,
   artifactsDir: string,
   state: RemediationState | null,
+  assertOwnership?: () => Promise<void>,
 ): Promise<RemediationStep> {
   const reportPath = join(dirname(artifactsDir), "remediation-report.md");
   return writeCurrentStep({
+    assertOwnership,
     stepKind: "present_report",
     status: "complete",
     runId: stateRunId(state),
