@@ -137,3 +137,53 @@ test("failed calibration remains open until a concrete retry or a documented rec
     ...answer, decisions: [{ ...row, recovery: { disposition: "exhausted", detail: "Checked both the env tool bin and the tool cache." } }],
   }, request));
 });
+
+test("native analyzer admission retains only frozen rows, including on calibration retry", async t => {
+  const { root, executable, localRules } = await fixture(t);
+  await writeFile(join(root, "excluded.js"), "const ignored = true;");
+  const { validateArtifactBundle } = await import("../dist/audit/validation/artifacts.js");
+  const manifest = { repository: "fixture", generated_at: "2026-01-01", files: [{ path: "one.js" }] };
+  const fixtureRow = (path) => ({ path, check_id: "fixture-rule", start: { line: 1 }, extra: { message: "synthetic finding", severity: "WARNING" } });
+  let rows = [fixtureRow("one.js"), fixtureRow("excluded.js")];
+  const options = {
+    enabled: true, latestReleases: true, analyzers: skippedOthers,
+    existingRuntimes: { semgrep: { executable, localRules } },
+    consentToken: { value: "fixture", tools: ["semgrep"], existingOnlyTools: ["semgrep"] },
+    fetch: async () => { assert.fail("No network"); },
+    run: async (argv) => argv[1] === "--version" ? result("1.186.0") :
+      result(JSON.stringify({ results: rows, errors: [], paths: { scanned: ["one.js", "excluded.js"], skipped: [] } })),
+  };
+  const acquired = await runExternalAnalyzerAcquisitionExecutor({ repo_manifest: manifest }, root, options);
+  const report = acquired.updated.external_analyzer_results.find(x => x.tool === "semgrep");
+  assert.deepEqual(report.results.map(x => x.path), ["one.js"]);
+  assert.equal(report.results[0].rule, "fixture-rule");
+  assert.match(report.results[0].provenance?.snippet_hash, /^[a-f0-9]{16}$/);
+  assert.deepEqual(validateArtifactBundle(acquired.updated), []);
+  assert.match(acquired.progress_summary, /contributing 1 finding.*Omitted 1 finding.*frozen manifest scope/);
+  const toolStatus = bundle => ExternalAnalyzerAcquisitionMarkerSchema.parse(bundle.external_analyzer_acquisition)
+    .tool_statuses.find(row => row.tool === "semgrep");
+  const status = toolStatus(acquired.updated);
+  assert.equal(status.status, "findings");
+  assert.equal(status.scope_omitted_rows, 1);
+  assert.equal(status.dropped_rows, undefined);
+  assert.deepEqual(status.reported_coverage.scanned, ["excluded.js", "one.js"]);
+
+  rows = [fixtureRow("excluded.js")];
+  const retry = await runExternalAnalyzerAcquisitionExecutor(acquired.updated, root, options, ["semgrep"]);
+  assert.deepEqual(retry.updated.external_analyzer_results.find(x => x.tool === "semgrep").results, report.results);
+  assert.match(retry.progress_summary, /contributing 0 finding.*Omitted 1 finding/);
+  assert.deepEqual(validateArtifactBundle(retry.updated), []);
+  const calibration = analyzerCalibrationRequest(retry.updated, null);
+  assert.equal(calibration.tools.find(row => row.tool === "semgrep").incomplete, false);
+  assert.ok(currentAnalyzerCalibration({
+    input_sha256: calibration.input_sha256,
+    decisions: [{ tool: "semgrep", action: "accept", reason: "Intentional scope filter", coverage: "Fixture" }],
+    unresolved: [],
+  }, calibration));
+
+  rows = [fixtureRow("excluded.js"), null];
+  const degraded = await runExternalAnalyzerAcquisitionExecutor({ repo_manifest: manifest }, root, options);
+  assert.equal(toolStatus(degraded.updated).dropped_rows, 1);
+  assert.equal(toolStatus(degraded.updated).scope_omitted_rows, 1);
+  assert.equal(analyzerCalibrationRequest(degraded.updated, null).tools.find(x => x.tool === "semgrep").incomplete, true);
+});

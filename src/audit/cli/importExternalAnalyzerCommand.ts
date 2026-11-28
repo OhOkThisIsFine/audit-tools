@@ -32,6 +32,7 @@ export async function cmdImportExternalAnalyzer(argv: string[]): Promise<void> {
         tool: externalAnalyzerResults.tool,
         received_count: externalAnalyzerResults.results.length,
         selected_executor: result.selected_executor,
+        progress_summary: result.progress_summary,
       },
       null,
       2,
