@@ -136,6 +136,7 @@ function captureWorktreeTrees(root, includeBumpAgnosticTree) {
       ...(options.input === undefined ? {} : { input: options.input }),
       env: { ...process.env, GIT_INDEX_FILE: indexFile },
     });
+  let exact = null;
   try {
     if (git(['read-tree', 'HEAD']).status !== 0) return null;
     if (git(['add', '-A']).status !== 0) return null;
@@ -143,28 +144,38 @@ function captureWorktreeTrees(root, includeBumpAgnosticTree) {
     if (written.status !== 0) return null;
     const tree = (written.stdout ?? '').trim();
     if (!isTreeId(tree)) return null;
-    if (!includeBumpAgnosticTree) return { tree, bumpAgnosticTree: null };
+    exact = { tree, bumpAgnosticTree: null };
+    if (!includeBumpAgnosticTree) return exact;
 
     // Mask the bump files IN the index, then write the tree again. Read the
     // blob back from the INDEX (not the worktree) so the masking sees the same
     // byte stream git just hashed, whatever line-ending normalisation applied.
     for (const relPath of RELEASE_BUMP_FILES) {
+      const entry = git(['ls-files', '--stage', '-z', '--', relPath]);
+      if (entry.status !== 0) return exact;
+      if (entry.stdout === '') continue; // Optional input absent from the index.
+      const indexed = /^([0-7]{6}) [0-9a-f]+ 0\t[^\0]+\0$/u.exec(entry.stdout ?? '');
+      if (!indexed) return exact;
+      const [, mode] = indexed;
       const blob = git(['cat-file', '-p', `:${relPath}`]);
-      if (blob.status !== 0) continue;
+      if (blob.status !== 0) return exact;
+      if (mode !== '100644' && mode !== '100755') continue; // Not a regular release file.
       const original = blob.stdout ?? '';
       const masked = maskReleaseVersionValues(relPath, original);
       if (masked === original) continue;
       const hashed = git(['hash-object', '-w', '--stdin'], { input: masked });
       const objectId = (hashed.stdout ?? '').trim();
-      if (hashed.status !== 0 || !isTreeId(objectId)) continue;
-      git(['update-index', '--cacheinfo', `100644,${objectId},${relPath}`]);
+      if (hashed.status !== 0 || !isTreeId(objectId)) return exact;
+      const updated = git(['update-index', '--cacheinfo', `${mode},${objectId},${relPath}`]);
+      if (updated.status !== 0) return exact;
     }
     const maskedWritten = git(['write-tree']);
+    if (maskedWritten.status !== 0) return exact;
     const bumpAgnosticTree = (maskedWritten.stdout ?? '').trim();
 
     return { tree, bumpAgnosticTree: isTreeId(bumpAgnosticTree) ? bumpAgnosticTree : null };
   } catch {
-    return null;
+    return exact;
   } finally {
     try {
       rmSync(indexFile, { force: true });
