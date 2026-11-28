@@ -19,8 +19,9 @@
 // caller's buildRecord), no model choice.
 //
 // ── THE ONE RETRY, and the line it is drawn on ───────────────────────────────
-// The driver retries at most once per item. Transport exceptions are retryable;
-// completed malformed replies may opt into the SAME budget via retryRecordError
+// The driver retries at most once per item. Lanes throw for retryable
+// transport failures and return `executionUnknown` if a job may already be
+// running. Completed malformed replies may opt into the SAME budget via retryRecordError
 // (triage parse/shape errors, owner decision 2026-09-24). Terminal lane failures,
 // timeouts and valid negative answers do not opt in. The driver owns the bound;
 // the caller identifies only its domain's malformed reply errors.
@@ -32,7 +33,7 @@
 // COVERAGE STAMP IS A PERSISTED CONTRACT. `<out>-coverage.json` carries these
 // exact field names: model, started_at,
 // finished_at, aborted, total_entries, prior_classified, attempted,
-// classified, classified_total, errored, retried (+ caller counters via
+// classified, classified_total, errored, retried, unresolved_execution (+ caller counters via
 // `stampInit`). `classified` is triage-flavored but renaming a persisted field
 // is not a rename — keep the names.
 // [[renaming-a-persisted-field-is-not-a-rename]]
@@ -63,6 +64,8 @@ export class LanePreflightError extends Error {
 /** The text a row or stamp records for a caught failure. */
 const errText = (err) => String(/** @type {any} */ (err).message || err);
 
+const hasUnknownExecution = (rec) => rec?.execution_unknown === true && Boolean(rec.error);
+
 /** A lane result's raw reply as text, whatever the lane put there. */
 const rawText = (laneResult) =>
   typeof laneResult?.raw === 'string' ? laneResult.raw : String(laneResult?.raw ?? '');
@@ -77,7 +80,7 @@ const rawText = (laneResult) =>
  *   row was about when the lane never produced a record.
  * @param {string} opts.outPath JSONL output; exactly one record appended per
  *   item. The coverage stamp lands beside it (`coverageStampPath`).
- * @param {(item: any) => Promise<{raw: string, finishReason?: string}>} opts.callLane
+ * @param {(item: any) => Promise<{raw: string, finishReason?: string, executionUnknown?: { error: string, jobId?: string, checkout?: string }}>} opts.callLane
  *   ONE call for ONE item. May throw (transport death → one driver retry, then
  *   an error row); must never retry internally — which rung answers belongs to
  *   the lane.
@@ -141,13 +144,11 @@ export async function dispatchBoundedItems({
     }
   };
 
-  // Resume: completed ids are read back from the JSONL and skipped, so a
-  // killed run continues rather than restarting. Errored rows are DROPPED and
-  // their items re-queued: an id in `done` means a verdict exists, never that
-  // an attempt happened. (The old behaviour added errored ids too, so a re-run
-  // retried nothing and exited 0 — a false green.) Kept rows pass through
-  // `reviveRecord` so the rewritten file reflects the tree as of THIS run.
-  const currentIds = new Set(items.map((item) => item.id));
+  // Resume skips classified and unknown-execution IDs. Only the former
+  // count as prior classifications. Ordinary errors are dropped and retried;
+  // unknown executions require reconciliation, not another dispatch.
+  // Queue each resume identity once even if identical input occurs twice.
+  const currentItems = new Map(items.map((item) => [item.id, item]));
   const done = new Set();
   const kept = [];
   if (fs.existsSync(outPath)) {
@@ -155,7 +156,13 @@ export async function dispatchBoundedItems({
       if (!l.trim()) continue;
       let rec;
       try { rec = JSON.parse(l); } catch { continue; }
-      if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string' || rec.error || done.has(rec.id)) continue;
+      if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string' || done.has(rec.id)) continue;
+      if (hasUnknownExecution(rec)) {
+        kept.push(rec);
+        done.add(rec.id);
+        continue;
+      }
+      if (rec.error) continue;
       // A failed normalization must not erase the accepted durable source or
       // mark its id complete. Finish every revival before rewriting anything.
       const revived = reviveRecord ? reviveRecord(rec) : rec;
@@ -174,18 +181,21 @@ export async function dispatchBoundedItems({
     }
   }
 
-  const currentKept = kept.filter((rec) => currentIds.has(rec.id));
-  const queue = items.filter((e) => !done.has(e.id));
+  const currentKept = kept.filter((rec) => currentItems.has(rec.id));
+  const priorUnknown = currentKept.filter(hasUnknownExecution).length;
+  const priorClassified = currentKept.length - priorUnknown;
+  const queue = [...currentItems.values()].filter((e) => !done.has(e.id));
   const stamp = {
     ...stampSeed,
     started_at: new Date().toISOString(),
     finished_at: null,
     aborted: null,
-    total_entries: items.length,
-    prior_classified: currentKept.length,
+    total_entries: currentItems.size,
+    prior_classified: priorClassified,
     attempted: 0,
     classified: 0,
-    classified_total: currentKept.length,
+    classified_total: priorClassified,
+    unresolved_execution: priorUnknown,
     errored: 0,
     // Driver-owned, like `attempted`/`errored`, and declared in the literal so
     // the read-verbatim contract names it from the first write: the sweep
@@ -195,7 +205,7 @@ export async function dispatchBoundedItems({
     retried: 0,
     ...stampInit,
   };
-  if (stampExtra) for (const rec of currentKept) stampExtra(stamp, rec);
+  if (stampExtra) for (const rec of currentKept) if (!rec.error) stampExtra(stamp, rec);
   stampSafe(stamp);
 
   // Revival and stamps still run on a no-op; only pending work needs a lane.
@@ -248,6 +258,21 @@ export async function dispatchBoundedItems({
         if (round === 2) return { laneResult: null, failures, record: errorRow(e, new Error(failures.join(' | retry: '))) };
         continue;
       }
+      // Don't let logging, parsing, or the record-retry callback turn an
+      // accepted but unacknowledged fire into a second lane call.
+      const unknown = laneResult?.executionUnknown;
+      if (unknown) {
+        return {
+          laneResult,
+          failures,
+          record: {
+            ...errorRow(e, new Error(unknown.error)),
+            execution_unknown: true,
+            job_id: unknown.jobId,
+            checkout: unknown.checkout,
+          },
+        };
+      }
       try {
         const raw = rawText(laneResult);
         // Log before parsing; preserve both malformed and replacement replies.
@@ -281,6 +306,7 @@ export async function dispatchBoundedItems({
       fs.appendFileSync(outPath, JSON.stringify(rec) + '\n');
       stamp.attempted += 1;
       if (failures.length > 0) stamp.retried += 1;
+      if (hasUnknownExecution(rec)) stamp.unresolved_execution += 1;
       if (rec.error) stamp.errored += 1;
       else stamp.classified += 1;
       // Cumulative, because the per-pass `classified` reads as near-total

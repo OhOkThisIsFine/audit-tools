@@ -461,6 +461,8 @@ export function triageRecordCallbacks({ root = ROOT } = {}) {
       try { record = buildTriageRecord(entry, raw); } catch (error) {
         throw new MalformedTriageReply(/** @type {any} */ (error).message, { cause: error });
       }
+      // The lane driver owns this persisted resume marker, not the answer.
+      delete record.execution_unknown;
       return finishTriageRecord(record, { root, lane });
     },
   };
@@ -687,7 +689,15 @@ export async function main({
         // A terminal failure is returned, not thrown, so the driver records
         // the output size beside it — the truncation diagnostic (P28:
         // near-zero = dialect death, large-but-truncated = a cap to raise).
-        return { raw: r.raw, finishReason: r.status, lane: r.lane, error: r.error };
+        return {
+          raw: r.raw,
+          finishReason: r.status,
+          lane: r.lane,
+          error: r.error,
+          ...(r.status === 'unknown' && {
+            executionUnknown: { error: r.error ?? 'execution outcome unknown', jobId: r.jobId, checkout: r.checkout },
+          }),
+        };
       },
       ...triageRecordCallbacks({ root }),
       onProgress: (e, rec) => {
@@ -712,7 +722,8 @@ export async function main({
 
   process.stderr.write(
     `leg-2 coverage: ${stamp.classified_total} classified total (${stamp.classified} this pass) / ` +
-      `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable / ` +
+      `${stamp.errored} errored / ${stamp.unresolved_execution} unresolved execution(s) / ` +
+      `${stamp.probes_unusable} probes-unusable / ` +
       `${stamp.unprobed} unprobed of ` +
       `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ` +
       `${stamp.retried} retr(y/ies) — ` +

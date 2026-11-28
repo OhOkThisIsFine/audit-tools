@@ -144,12 +144,13 @@ export const ConceptualCandidateDispositionSchema = z
  * shape was refused on one path and stamped `grounded` on another.
  *
  * `verification_status`,
- * `severity_downgraded_from`, `evidence_lane` and `lead_lineage` are omitted for
+ * `severity_downgraded_from`, `evidence_lane`, `lead_lineage` and
+ * `question_review_sources` are omitted for
  * the same reason `WorkerFindingSchema` omits `grounding`: each is derived or
  * STAMPED by the tool at ingest — the first from the per-candidate claims, the
  * second from the severity bar synthesis applies, the third from the lane the
  * finding arrived on, the fourth by the deterministic producer that emitted the
- * lead — so a supplied value would bypass the derivation and be
+ * lead, and the fifth from question-review provenance — so a supplied value would bypass the derivation and be
  * un-cross-checkable. For `evidence_lane` the stakes are the bar itself:
  * synthesis reads it to decide whether a `critical` was ever asked for an
  * `evidence` array, so a host-supplied lane is a finding that excuses ITSELF
@@ -162,13 +163,15 @@ export const ConceptualCandidateDispositionSchema = z
  * `refuseSuppliedToolVerdict` NAMES all of them, because a silently dropped
  * field teaches the host nothing.
  */
-export const SubmittedDesignFindingSchema = FindingSchema.omit({
+const TOOL_OWNED_FINDING_FIELDS = {
   verification_status: true,
   severity_downgraded_from: true,
   evidence_lane: true,
   lead_lineage: true,
   question_review_sources: true,
-});
+} as const;
+
+export const SubmittedDesignFindingSchema = FindingSchema.omit(TOOL_OWNED_FINDING_FIELDS);
 
 export const ConceptualFinalFindingShareSchema = z
   .object({
@@ -274,23 +277,38 @@ export function deriveConceptualVerificationStatus(
   }));
 }
 
+class InvalidConceptualPerspectiveResult extends Error {}
+
 export function parseConceptualPerspectiveFindings(value: unknown): Finding[] {
-  const envelope = z
-    .union([
-      z.array(SubmittedDesignFindingSchema),
-      z
-        .object({
-          findings: z.array(SubmittedDesignFindingSchema),
-        })
-        .passthrough(),
-    ])
-    .safeParse(value);
-  if (!envelope.success) {
-    throw envelope.error;
+  const items = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.findings)
+      ? value.findings
+      : undefined;
+  if (!items) {
+    throw new InvalidConceptualPerspectiveResult("expected a findings array or an object with a findings array");
   }
-  return Array.isArray(envelope.data)
-    ? envelope.data
-    : envelope.data.findings;
+  const supplied = suppliedToolVerdictIssue(items);
+  if (supplied !== null) throw new InvalidConceptualPerspectiveResult(supplied);
+
+  const parsed = z.array(SubmittedDesignFindingSchema).safeParse(items);
+  if (!parsed.success) {
+    // Zod messages may quote the invalid input, e.g. an enum value. Report
+    // the schema location and diagnostic code, not the submitted value.
+    const issue = parsed.error.issues[0]!;
+    throw new InvalidConceptualPerspectiveResult(
+      `findings${issue.path.map(part => typeof part === "number" ? `[${part}]` : `.${String(part)}`).join("")}: ${issue.code}; fix the field against the findings schema`,
+    );
+  }
+  return parsed.data;
+}
+
+/** Safe operator feedback for invalid content, rather than bytes or raw parser errors. */
+export function conceptualPerspectiveMalformedReason(error: unknown): string | undefined {
+  if (error instanceof InvalidConceptualPerspectiveResult) return error.message;
+  if (error instanceof z.ZodError) return "expected a valid review envelope bound to the current lane and inputs";
+  if (isJsonParseError(error)) return "result file is not valid JSON";
+  return undefined;
 }
 
 /** Invalid content at current manifest paths; never an infrastructure read failure. */
@@ -324,11 +342,12 @@ export async function loadConceptualPerspectiveFindings(
       out.set(contributor.contributor_id, parseConceptualPerspectiveFindings(value));
     } catch (error) {
       // Do not turn an unreadable or missing file into a malformed submission.
-      if (!(error instanceof z.ZodError) && !isJsonParseError(error)) throw error;
+      const reason = conceptualPerspectiveMalformedReason(error);
+      if (reason === undefined) throw error;
       failures.push({
         lane: contributor.lane_id,
         path: contributor.result_path,
-        reason: `conceptual perspective result ${contributor.result_path} is not a valid findings array/envelope: ${error.message}`,
+        reason: `conceptual perspective result ${contributor.result_path} is malformed: ${reason}`,
       });
     }
   }
@@ -339,19 +358,6 @@ export async function loadConceptualPerspectiveFindings(
 function fail(message: string): never {
   throw new Error(`invalid conceptual adjudication: ${message}`);
 }
-
-/**
- * The TOOL-owned findings verdicts, named as data so this refusal and the
- * schema's `omit` list cannot drift: a verdict added to one and not the other
- * would be either silently stripped (if omitted from the schema only) or
- * silently ACCEPTED (if refused here only, on a schema that carries it).
- */
-const TOOL_OWNED_FINDING_VERDICTS = [
-  "verification_status",
-  "evidence_lane",
-  "lead_lineage",
-  "question_review_sources",
-] as const;
 
 /**
  * The judge's own door into the finding contract. `ConceptualJudgeSubmissionSchema`
@@ -384,7 +390,7 @@ export function suppliedToolVerdictIssue(submission: unknown): string | null {
   // Two submission shapes reach this check, because every design-review door
   // now parses its items with `SubmittedDesignFindingSchema`: the judge's
   // `{round_id, findings, …}` object, and the bare findings array the contract,
-  // shallow-conceptual and perspective doors carry. Both strip the same three
+  // shallow-conceptual and perspective doors carry. Both strip the same tool-owned
   // fields at the parse, so both must be told which one they supplied.
   const findings = Array.isArray(submission)
     ? submission
@@ -394,7 +400,7 @@ export function suppliedToolVerdictIssue(submission: unknown): string | null {
   if (findings === null) return null;
   for (const [index, finding] of findings.entries()) {
     if (!isRecord(finding)) continue;
-    for (const verdict of TOOL_OWNED_FINDING_VERDICTS) {
+    for (const verdict of Object.keys(TOOL_OWNED_FINDING_FIELDS)) {
       if (verdict in finding) {
         return `findings[${index}].${verdict}: ${verdict} is derived at ingest and must not be supplied`;
       }

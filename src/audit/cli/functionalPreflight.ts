@@ -32,6 +32,27 @@ export const FunctionalPreflightSchema = z.object({
 
 export const functionalPreflightPath = (artifactsDir: string): string => join(artifactsDir, "functional-preflight.json");
 
+/** Read the current operator report without creating consent or recording feedback. */
+export async function readFunctionalPreflight(artifactsDir: string, runId: string, canonicalRoot: string) {
+  try {
+    const raw = await readOptionalJsonFile<unknown>(functionalPreflightPath(artifactsDir));
+    if (raw === undefined) return { state: "pending" as const, summary: "No functional capability evidence has been recorded for this audit." };
+    const parsed = FunctionalPreflightSchema.safeParse(raw);
+    if (!parsed.success) return {
+      state: "pending" as const,
+      summary: `Correct the preflight report: ${parsed.error.issues.map(issue => issue.message).join("; ")}`,
+    };
+    if (parsed.data.run_id !== runId || toPromptPathToken(parsed.data.repository_root) !== canonicalRoot) {
+      return { state: "pending" as const, summary: "The preflight report belongs to another run or repository. Check this run again." };
+    }
+    if (parsed.data.decision === "stop") return { state: "stopped" as const, summary: "The operator stopped this audit because required capabilities are unavailable. Do not continue without a new operator decision." };
+    return { state: "accepted" as const, report: parsed.data };
+  } catch (error) {
+    if (!isJsonParseError(error)) throw error;
+    return { state: "pending" as const, summary: "The functional preflight report is not valid JSON. Rewrite it using the published preflight contract." };
+  }
+}
+
 /** One run-bound functional declaration; never a provider or installed-tool inventory. */
 export async function functionalPreflightStep(
   root: string, artifactsDir: string,
@@ -43,38 +64,23 @@ export async function functionalPreflightStep(
     const canonicalRoot = toPromptPathToken(await realpath(root));
     const run = await readRunConsentUnlocked(root, artifactsDir);
     const reportPath = functionalPreflightPath(artifactsDir);
-    let problem = "No functional capability evidence has been recorded for this audit.";
-    let stopped = false;
-    try {
-      const raw = await readOptionalJsonFile<unknown>(reportPath);
-      if (raw !== undefined) {
-        const parsed = FunctionalPreflightSchema.safeParse(raw);
-        if (!parsed.success) problem = `Correct the preflight report: ${parsed.error.issues.map(issue => issue.message).join("; ")}`;
-        else if (parsed.data.run_id !== run.run_id || toPromptPathToken(parsed.data.repository_root) !== canonicalRoot) {
-          problem = "The preflight report belongs to another run or repository. Check this run again.";
-        } else if (parsed.data.decision === "stop") {
-          problem = "The operator stopped this audit because required capabilities are unavailable. Do not continue without a new operator decision.";
-          stopped = true;
-        } else {
-          if (parsed.data.decision === "degraded") {
-            const reflection = AgentReflectionSchema.parse({
-              task_id: "audit-capability-preflight", instruction_clarity: "clear", severity: "high",
-              tool_friction: [parsed.data.limitation],
-              ambiguities: ["The operator approved a degraded, non-comprehensive audit."],
-            });
-            const feedbackPath = join(artifactsDir, AGENT_FEEDBACK_FILENAME);
-            const prior = await readOptionalTextFile(feedbackPath) ?? "";
-            const line = JSON.stringify(reflection);
-            // Preserve every other line, including malformed feedback; never silently repair another writer's data.
-            if (!prior.split(/\r?\n/).includes(line)) await writeTextFile(feedbackPath, prior + (prior && !prior.endsWith("\n") ? "\n" : "") + line + "\n");
-          }
-          return undefined;
-        }
+    const observation = await readFunctionalPreflight(artifactsDir, run.run_id, canonicalRoot);
+    if (observation.state === "accepted") {
+      if (observation.report.decision === "degraded") {
+        const reflection = AgentReflectionSchema.parse({
+          task_id: "audit-capability-preflight", instruction_clarity: "clear", severity: "high",
+          tool_friction: [observation.report.limitation],
+          ambiguities: ["The operator approved a degraded, non-comprehensive audit."],
+        });
+        const feedbackPath = join(artifactsDir, AGENT_FEEDBACK_FILENAME);
+        const prior = await readOptionalTextFile(feedbackPath) ?? "";
+        const line = JSON.stringify(reflection);
+        // Preserve every other line, including malformed feedback; never silently repair another writer's data.
+        if (!prior.split(/\r?\n/).includes(line)) await writeTextFile(feedbackPath, prior + (prior && !prior.endsWith("\n") ? "\n" : "") + line + "\n");
       }
-    } catch (error) {
-      if (!isJsonParseError(error)) throw error;
-      problem = "The functional preflight report is not valid JSON. Rewrite it using the shape below.";
+      return undefined;
     }
+    const problem = observation.summary;
     const next = nextStepCommand(root, artifactsDir);
     const example = {
       contract_version: "audit-functional-preflight/v1", run_id: run.run_id, repository_root: canonicalRoot,
@@ -84,7 +90,7 @@ export async function functionalPreflightStep(
     };
     return {
       artifactsDir, repoRoot: root, runId: run.run_id, stepKind: "functional_preflight",
-      status: stopped ? "blocked" : "ready", allowedCommands: [next],
+      status: observation.state === "stopped" ? "blocked" : "ready", allowedCommands: [next],
       artifactPaths: { functional_preflight: reportPath },
       access: { read_paths: [root], write_paths: [reportPath] },
       progress: { summary: problem },

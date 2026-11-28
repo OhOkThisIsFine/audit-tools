@@ -34,7 +34,12 @@ import {
   type SubmissionIssue,
 } from "audit-tools/shared";
 import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
-import { ConceptualJudgeSubmissionSchema, suppliedToolVerdictIssue } from "../types/conceptualAdjudication.js";
+import {
+  ConceptualJudgeSubmissionSchema,
+  conceptualPerspectiveMalformedReason,
+  parseConceptualPerspectiveFindings,
+  suppliedToolVerdictIssue,
+} from "../types/conceptualAdjudication.js";
 import {
   CONCEPTUAL_PERSPECTIVE_LANE_PREFIX,
   SYSTEMIC_CHALLENGE_LANE_PREFIX,
@@ -303,11 +308,20 @@ export function laneSubmissionValidator(
     return conceptualIssue;
   }
 
-  if (
-    lane === GATE_LANES.design_review_contract ||
-    lane === GATE_LANES.edge_reasoning ||
-    lane.startsWith(CONCEPTUAL_PERSPECTIVE_LANE_PREFIX)
-  ) {
+  if (lane.startsWith(CONCEPTUAL_PERSPECTIVE_LANE_PREFIX)) {
+    return (value) => {
+      try {
+        parseConceptualPerspectiveFindings(value);
+        return null;
+      } catch (error) {
+        const message = conceptualPerspectiveMalformedReason(error);
+        if (message === undefined) throw error;
+        return { code: "submission_contract_invalid", message };
+      }
+    };
+  }
+
+  if (lane === GATE_LANES.design_review_contract || lane === GATE_LANES.edge_reasoning) {
     return arrayIssue;
   }
 
