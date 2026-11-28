@@ -503,6 +503,7 @@ const NATIVE_PRIOR_LANDING_SCRIPTS: Record<string, string> = {
   "check:deadcode": "knip --no-config-hints",
   "check:depgraph": "depcruise --config .dependency-cruiser.cjs src",
   "check:invariant-glossary": "node scripts/check-invariant-glossary.mjs",
+  "check:lint": "eslint .",
 };
 const declaresWithoutHooks = (scripts: Record<string, unknown>, name: string, body: string) =>
   scripts[name] === body && !Object.hasOwn(scripts, "pre" + name) && !Object.hasOwn(scripts, "post" + name);
