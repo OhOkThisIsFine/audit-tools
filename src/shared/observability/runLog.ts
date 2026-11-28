@@ -66,16 +66,17 @@ export class RunLogger {
   /** Append one event line. Atomic per line (O_APPEND); swallows all errors. */
   event(event: RunLogEvent): void {
     if (!this.enabled || this.path.length === 0) return;
-    let line: string;
     try {
-      line = JSON.stringify({ ts: new Date(this.now()).toISOString(), ...event }) + "\n";
-    } catch {
-      // Non-serializable payload: log a minimal marker instead of throwing.
-      line = JSON.stringify({ ts: new Date(this.now()).toISOString(), kind: event.kind, note: "unserializable_event" }) + "\n";
-    }
-    try {
+      const ts = new Date(this.now()).toISOString();
+      let line: string;
+      try {
+        line = JSON.stringify({ ts, ...event });
+      } catch {
+        // Non-serializable payload: log a minimal marker with the same timestamp.
+        line = JSON.stringify({ ts, kind: event.kind, note: "unserializable_event" });
+      }
       mkdirSync(dirname(this.path), { recursive: true });
-      appendFileSync(this.path, line, "utf8");
+      appendFileSync(this.path, line + "\n", "utf8");
     } catch {
       // Observability must never break a run.
     }
