@@ -207,7 +207,7 @@ export function executionPlanIssues(root: string, source: PlanSource, plan: Exec
   for (const unit of plan.units) {
     validatePaths(unit.read_paths,`Unit ${unit.id} read scope`); validatePaths(unit.allowed_files,`Unit ${unit.id} write scope`);
     if (source.question_report && !source.request && unit.allowed_files.length && !unit.source_finding_ids.length) {
-      issues.push(`Unit ${unit.id} has write scope without an approved confirmed finding.`);
+      issues.push(`Unit ${unit.id} has write scope without an approved confirmed finding. In this structured-report-only run, keep write units tied to the findings they actually address. To pursue separate design work, have the operator restate the desired change in their own words and explicitly start a new run: \`remediate-code next-step --input <report-path> --guidance "<operator's requested change>"\` (or use \`--guidance-file <path>\` for a separate operator-provided document). Keep the findings as provenance and obtain the operator's approval of the separate execution scope. Report suggestions alone do not authorize writes.`);
     }
     if(source.intent){
       const checkpoint={...source.intent,confirmed_at:"bound"};

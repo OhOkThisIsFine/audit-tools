@@ -2722,6 +2722,11 @@ async function buildConfirmIntentStep(ctx: {
   // artifact instead of detecting again.
   await writeProjectFacts(artifactsDir, facts);
   const closingSection = renderClosingActionSection(facts);
+  const sourceAuthority = [
+    "If this run uses only a structured audit report, its findings define the eligible work. The report narrative is context, not a separate implementation request.",
+    "Use `free_form_intent` to clarify or narrow that work; it cannot add unrelated write scope.",
+    "For design or implementation work outside those findings that the user explicitly requests, start a run with `--guidance <text>` (or `--guidance-file <path>` for an existing document), alongside `--input` if you also want to include the findings.",
+  ].join(" ");
   // A confirmed checkpoint whose closing_action is not in the vocabulary
   // re-enters this step by name — a refusal, never a silent default.
   const rawChoice: unknown =
@@ -2758,6 +2763,8 @@ ${refusal}# Confirm Remediation Scope and Intent
 The tool built the following proposal from the intake summary. Review each section
 and adjust where needed, then confirm by writing the final \`intent_checkpoint.json\`.
 
+${sourceAuthority}
+
 ## Proposed Scope
 
 ${summary.scope_summary}
@@ -2789,7 +2796,7 @@ To confirm, write the final checkpoint to:
   "confirmed_by": "host",
   "scope_summary": ${JSON.stringify(summary.scope_summary)},
   "intent_summary": ${JSON.stringify(summary.intent_summary)},
-  "free_form_intent": "<optional: additional guidance>",
+  "free_form_intent": "<optional: clarify or narrow the existing scope>",
   "filters": ${JSON.stringify(summary.filters, null, 2)},
   "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],
   "must_not_touch": [],
@@ -2816,6 +2823,8 @@ ${refusal}# Confirm Remediation Scope and Intent
 Please review the intake summary at \`.audit-tools/remediation/intake/intake-summary.json\` (and the audit report, if this run consumes one).
 
 Confirm or refine the remediation scope and intent by writing a valid \`intent_checkpoint.json\` artifact under \`.audit-tools/remediation/\`.
+
+${sourceAuthority}
 
 Only \`scope_summary\` and \`intent_summary\` are required; add the optional fields to narrow what gets remediated:
 
@@ -2902,6 +2911,8 @@ export interface PreIntakeSnapshot {
   resumeAck: { choice?: string } | undefined;
   /** A pending result bound to this run is a continuation, not a fresh entry. */
   boundSubmissionReturned?: boolean;
+  /** The emitted closing command continues the current run, subject to close-phase approval checks. */
+  closingContinuation?: boolean;
   /**
    * The state as loaded at advance-entry (post-forceReplan, pre-intake). The
    * resume/conflict/leftover-report gates are about a *pre-existing* run, so they
@@ -3019,6 +3030,7 @@ export function buildPreIntakeObligations(
         if (
           inputResolution.supplied ||
           snapshot.boundSubmissionReturned === true ||
+          snapshot.closingContinuation ||
           entryState == null ||
           entryState.status === "complete" ||
           entryState.status === "pending"
@@ -3620,9 +3632,10 @@ async function advanceUnderPhaseLock(deps: {
     }
     return emitUnresolvedClosingStep(root, artifactsDir, state, unresolved);
   }
-  const bareRequest = options.input === undefined && options.severity === undefined && options.findingIds === undefined &&
+  const noOtherRequest = options.severity === undefined && options.findingIds === undefined &&
     options.guidanceFile === undefined && options.guidanceText === undefined && options.verificationCommand === undefined &&
-    options.guidanceFileSupplied !== true && options.forceReplan !== true && options.planOnly !== true && options.finalizeClosing !== true;
+    options.guidanceFileSupplied !== true && options.forceReplan !== true && options.planOnly !== true;
+  const bareRequest = options.input === undefined && noOtherRequest && options.finalizeClosing !== true;
   const reportOnlyRequest = state?.status === "complete" && bareRequest;
   // Only a potential complete/report-only request may inspect plan freshness
   // before baseline admission. No authority write can precede this fence.
@@ -3631,6 +3644,10 @@ async function advanceUnderPhaseLock(deps: {
   const pendingPlanSubmission = existsSync(executionPlanPaths(artifactsDir).submission);
   const revisionMismatch = Boolean(currentCanonical && currentCanonical.revision_sha256 !== state?.plan?.review_revision_sha256);
   const unchangedPlan = !pendingPlanSubmission && !revisionMismatch;
+  // Bind the flag to a run that was already closing on entry. Do not carry
+  // approval into a new closing phase, a revised plan, or a combined request.
+  const finalizeCurrentClosing = state?.status === "closing" && unchangedPlan &&
+    noOtherRequest && inputValues(options.input).length === 0 && options.finalizeClosing === true;
   // sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
   if (state && reportOnlyRequest && unchangedPlan) {
     await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
@@ -3756,6 +3773,8 @@ async function advanceUnderPhaseLock(deps: {
     hashContent(await readFile(recordedSelection.source_path, "utf8")) !== recordedSelection.source_hash);
   const inputSelectionChanged = selectedSourceChanged ||
     (requestedSelection !== undefined && JSON.stringify(requestedSelection) !== JSON.stringify(recordedSelection?.criteria));
+  const closingContinuation = finalizeCurrentClosing && !inputSelectionChanged &&
+    (resumeAck === undefined || resumeAck.choice === "resume");
   const suppliedInputUnchanged = !inputSelectionChanged && suppliedInputMatchesRun(
     inputResolution, sourceManifest,
     boundSource?.sources.map(source => source.path).filter(path => resolve(path) !== resolve(ip.brief)),
@@ -3768,7 +3787,7 @@ async function advanceUnderPhaseLock(deps: {
   const ctx: RemediateCtx = {
     root,
     artifactsDir,
-    options: { ...options, planOnly: control?.plan_only === true },
+    options: { ...options, planOnly: control?.plan_only === true, finalizeClosing: closingContinuation },
     runLogger,
     store,
     assertPhaseOwnership,
@@ -3779,6 +3798,7 @@ async function advanceUnderPhaseLock(deps: {
     existingCheckpoint,
     rejectedCheckpointFields: checkpointRead?.rejected ?? [],
     resumeAck,
+    closingContinuation,
     boundSubmissionReturned: !inputResolution.supplied && resumeAck === undefined && (
       (pendingWaveSimplification(state) !== undefined && existsSync(waveResponsePath(artifactsDir, pendingWaveSimplification(state)!))) ||
       (state?.host_handoff !== undefined && await hasBoundRemediationSubmission({

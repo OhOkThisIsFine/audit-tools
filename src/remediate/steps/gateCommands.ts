@@ -490,6 +490,54 @@ export function toolOwnedFinalGateCommands(root: string, testCommand?: string[])
   ];
 }
 
+// This table names one repository-owned decomposition, not an npm wrapper parser.
+const CONTRACT_CLOSE_SCRIPTS = {
+  prebuild: "node scripts/shared/guard-no-suite-running.mjs",
+  build: "node scripts/shared/clean-dist.mjs && tsc -p tsconfig.json",
+  check: "tsc -p tsconfig.json --noEmit",
+  "check:tests": "node scripts/shared/run-contract-tests.mjs --check",
+  test: "npm run build && npm run test:built",
+  "test:built": "node scripts/shared/run-contract-tests.mjs",
+} as const;
+const NATIVE_PRIOR_LANDING_SCRIPTS: Record<string, string> = {
+  "check:deadcode": "knip --no-config-hints",
+  "check:depgraph": "depcruise --config .dependency-cruiser.cjs src",
+  "check:invariant-glossary": "node scripts/check-invariant-glossary.mjs",
+};
+const declaresWithoutHooks = (scripts: Record<string, unknown>, name: string, body: string) =>
+  scripts[name] === body && !Object.hasOwn(scripts, "pre" + name) && !Object.hasOwn(scripts, "post" + name);
+
+function closePackageScripts(root: string): Record<string, unknown> | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    if (pkg.name !== "audit-tools" || pkg.workspaces !== undefined ||
+        !pkg.scripts || Array.isArray(pkg.scripts) || typeof pkg.scripts !== "object") return;
+    return pkg.scripts;
+  } catch {
+    return undefined;
+  }
+}
+
+export function nativeCloseContractScripts(root: string): boolean {
+  const scripts = closePackageScripts(root);
+  return Boolean(scripts && isAuditToolsMonorepo(root) &&
+    Object.entries(CONTRACT_CLOSE_SCRIPTS).every(([name, body]) =>
+      name === "build" || name === "prebuild" ? scripts[name] === body : declaresWithoutHooks(scripts, name, body)) &&
+    !Object.hasOwn(scripts, "postbuild"));
+}
+
+export function nativeGuardAlias(root: string): boolean {
+  const scripts = closePackageScripts(root);
+  return Boolean(scripts && declaresWithoutHooks(scripts, "verify:guards", "npm run test:built"));
+}
+
+export function nativePriorLandingCheck(root: string, command: string): boolean {
+  const name = command.slice("npm run ".length);
+  const scripts = closePackageScripts(root);
+  return Boolean(command === "npm run " + name && scripts && Object.hasOwn(NATIVE_PRIOR_LANDING_SCRIPTS, name) &&
+    declaresWithoutHooks(scripts, name, NATIVE_PRIOR_LANDING_SCRIPTS[name]!));
+}
+
 /** Cache identity includes declarations even when the worktree probe cannot see ignored files. */
 export function finalGateBinding(root: string, testCommand?: string[]): string {
   const canonicalRoot = realpathSync(root);

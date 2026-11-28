@@ -8,6 +8,41 @@ import { hashContent } from "./primitives.mjs";
 import { worktreeTrees } from "./worktree-tree.mjs";
 import { writeSuiteGreenStamp } from "./suiteGreenStamp.mjs";
 
+/** @param {string} tap */
+function reportFailedTestNames(tap) {
+  const maxNames = 8;
+  const names = new Set();
+  let diagnosticIndent = null;
+  for (const line of tap.split(/\r?\n/)) {
+    if (diagnosticIndent !== null) {
+      if (line.trimEnd() === `${diagnosticIndent}...`) diagnosticIndent = null;
+      continue;
+    }
+    const diagnostic = /^( +)---\s*$/.exec(line);
+    if (diagnostic) {
+      diagnosticIndent = diagnostic[1];
+      continue;
+    }
+    const failed = /^ *not ok \d+ - (.+)$/.exec(line);
+    if (!failed || / # (?:SKIP|TODO)\b/i.test(failed[1])) continue;
+    // Only TAP titles, never diagnostic bodies. Redact recognizable filenames
+    // and stop at paths or labeled payloads that may contain spaces.
+    const name = failed[1]
+      .replace(/\b(?:api[ _-]?key|authorization|cookie|credentials?|password|passwd|secrets?|tokens?)\s*[:=].*$/i, "[redacted]")
+      .replace(/(^|\s)\S*[/\\=].*$/, "$1[redacted]")
+      .replace(/(?<![\p{L}\p{N}_.-])[\p{L}\p{N}_-][\p{L}\p{N}_.-]*\.[a-z][a-z\d]{0,11}\b/giu, "[redacted]")
+      .replace(/[\p{Cc}\p{Cf}]/gu, " ").trim();
+    if (!name) continue;
+    const bounded = name.length > 140 ? `${name.slice(0, 140)}…` : name;
+    if (names.size === maxNames && !names.has(bounded)) {
+      names.add("(additional failing tests omitted)");
+      break;
+    }
+    names.add(bounded);
+  }
+  if (names.size) process.stderr.write(`Failing contract tests:\n  ${[...names].join("\n  ")}\n`);
+}
+
 const root = join(import.meta.dirname, "../..");
 const files = readdirSync(join(root, "tests")).filter(name => name.endsWith(".test.mjs")).sort();
 if (!files.length) throw new Error("No contract test files found");
@@ -34,7 +69,10 @@ try {
     cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], windowsHide: true, timeout: 120_000,
   });
   process.stdout.write(result.stdout ?? "");
-  if (result.status !== 0) throw result.error ?? new Error(`Contract tests exited ${result.status ?? result.signal}`);
+  if (result.status !== 0) {
+    reportFailedTestNames(result.stdout ?? "");
+    throw result.error ?? new Error(`Contract tests exited ${result.status ?? result.signal}`);
+  }
   const summary = result.stdout?.match(/\n# tests (\d+)\r?\n# suites \d+\r?\n# pass (\d+)\r?\n# fail 0\r?\n# cancelled 0\r?\n# skipped 0\r?\n# todo 0\r?\n# duration_ms [\d.]+\s*$/);
   const passed = Number(summary?.[2]);
   if (!(passed >= paths.length && passed === Number(summary?.[1]))) {
