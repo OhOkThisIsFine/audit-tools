@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
 const runner = "scripts/shared/run-contract-tests.mjs";
 
-function runFixture(t, body) {
+function createFixture(t, body) {
   const root = mkdtempSync(join(tmpdir(), "audit-contract-summary-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const path of [runner, "scripts/shared/primitives.mjs", "scripts/shared/worktree-tree.mjs",
@@ -27,8 +27,28 @@ function runFixture(t, body) {
   assert.equal(commit.status, 0, commit.stderr);
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
-  return spawnSync(process.execPath, [runner], { ...options, env });
+  const stampPath = join(root, ".claude/hooks/.state/suite-green/latest.json");
+  return {
+    stampPath,
+    run: ({ childOverride, args = [] } = {}) => {
+      // Override only the suite child. The real runner still checks the Git
+      // tree, handles its holder and must decide whether to write a stamp.
+      const setup = childOverride ? ["--import", `data:text/javascript;base64,${Buffer.from(`
+        import childProcess from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        const spawn = childProcess.spawnSync;
+        childProcess.spawnSync = (file, args, options) =>
+          file === process.execPath && args[0] === '--test'
+            ? (${childOverride})
+            : spawn(file, args, options);
+        syncBuiltinESMExports();
+      `).toString("base64")}`] : [];
+      return spawnSync(process.execPath, [...setup, runner, ...args], { ...options, env });
+    },
+  };
 }
+
+const runFixture = (t, body) => createFixture(t, body).run();
 
 test("an early failure stays named in the retained gate stderr after a long passing TAP tail", t => {
   const result = runFixture(t, `
@@ -80,4 +100,46 @@ test("a green run retains its TAP output without claiming failures", t => {
   assert.match(result.stdout, /^ok 1 - green identity/m);
   assert.match(result.stdout, /^# fail 0/m);
   assert.equal(result.stderr, "");
+});
+
+test("suite child timeout is infrastructure red, followed by a stamp on an unchanged full rerun", t => {
+  const fixture = createFixture(t, "test('green identity', () => {});");
+  const timedOut = fixture.run({ childOverride: `{
+    status: null, signal: 'SIGTERM',
+    error: Object.assign(new Error('synthetic spawnSync failure'), { code: 'ETIMEDOUT' }),
+    stdout: 'TAP version 13\\nnot ok 1 - incomplete result\\n'
+  }` });
+  assert.equal(timedOut.status, 1, timedOut.stderr);
+  assert.match(timedOut.stdout, /incomplete result/);
+  assert.match(timedOut.stderr, /Contract suite timed out \(ETIMEDOUT\) after 120s/);
+  assert.match(timedOut.stderr, /Rerun npm run test:built unfiltered on the same unchanged checkout/);
+  assert.doesNotMatch(timedOut.stderr, /Failing contract tests|synthetic spawnSync failure|incomplete result/);
+  assert.equal(existsSync(fixture.stampPath), false);
+
+  const green = fixture.run();
+  assert.equal(green.status, 0, green.stderr);
+  const stamp = JSON.parse(readFileSync(fixture.stampPath, "utf8"));
+  assert.match(stamp.tree, /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
+  assert.equal(stamp.run_evidence.tree_before, stamp.tree);
+  assert.equal(stamp.run_evidence.tree_after, stamp.tree);
+  assert.deepEqual(stamp.run_evidence.vitest_args, []);
+});
+
+test("partial TAP, filter args and a completed assertion failure cannot stamp green", t => {
+  const fixture = createFixture(t, "test('assertion red', () => { throw new Error('hidden'); });");
+  const partial = fixture.run({ childOverride: `{ status: 0, stdout: 'TAP version 13\\nok 1 - partial\\n' }` });
+  assert.equal(partial.status, 1, partial.stderr);
+  assert.match(partial.stderr, /Missing or incomplete Node test summary/);
+  assert.equal(existsSync(fixture.stampPath), false);
+
+  const filtered = fixture.run({ args: ["--test-name-pattern=assertion"] });
+  assert.equal(filtered.status, 1, filtered.stderr);
+  assert.match(filtered.stderr, /does not support filters/);
+  assert.equal(existsSync(fixture.stampPath), false);
+
+  const red = fixture.run();
+  assert.equal(red.status, 1, red.stderr);
+  assert.match(red.stderr, /Failing contract tests:\r?\n  assertion red/);
+  assert.doesNotMatch(red.stderr, /timed out|hidden/);
+  assert.equal(existsSync(fixture.stampPath), false);
 });

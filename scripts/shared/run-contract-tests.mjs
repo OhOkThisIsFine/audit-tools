@@ -65,13 +65,18 @@ writeFileSync(holder, JSON.stringify({ pid: process.pid, startedAt: new Date().t
 try {
   const before = worktreeTrees(root)?.tree ?? null;
   if (!before) throw new Error("Could not bind tests to a Git worktree tree");
+  const timeoutMs = 120_000;
   const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", ...paths], {
-    cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], windowsHide: true, timeout: 120_000,
+    cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], windowsHide: true, timeout: timeoutMs,
   });
   process.stdout.write(result.stdout ?? "");
+  if (result.error?.code === "ETIMEDOUT") {
+    throw new Error(`Contract suite timed out (ETIMEDOUT) after ${timeoutMs / 1000}s; no green stamp written. Rerun npm run test:built unfiltered on the same unchanged checkout when the machine is ready.`);
+  }
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     reportFailedTestNames(result.stdout ?? "");
-    throw result.error ?? new Error(`Contract tests exited ${result.status ?? result.signal}`);
+    throw new Error(`Contract tests exited ${result.status ?? result.signal}`);
   }
   const summary = result.stdout?.match(/\n# tests (\d+)\r?\n# suites \d+\r?\n# pass (\d+)\r?\n# fail 0\r?\n# cancelled 0\r?\n# skipped 0\r?\n# todo 0\r?\n# duration_ms [\d.]+\s*$/);
   const passed = Number(summary?.[2]);
