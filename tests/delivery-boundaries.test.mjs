@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -38,7 +38,26 @@ test("the npm tarball contains both commands and its own canonical audit prompt"
   // Use already-installed dependencies, never install or fetch during this smoke.
   // The shipped wrapper, built code and prompt themselves come from the tarball.
   const dependencies = join(packaged,"node_modules");
-  await symlink(await realpath(join(checkout,"node_modules")),dependencies,process.platform==="win32"?"junction":"dir");
+  const installed = await realpath(join(checkout,"node_modules"));
+  let linked = false;
+  try {
+    await symlink(installed,dependencies,process.platform==="win32"?"junction":"dir");
+    linked = true;
+  } catch (error) {
+    if (process.platform !== "win32" || !["EPERM", "EACCES"].includes(error.code)) throw error;
+    // A restricted Windows fixture may forbid junction creation. Copy only
+    // top-level runtime packages; cp includes any dependencies nested in them.
+    const { packages } = JSON.parse(await readFile(join(checkout, "package-lock.json"), "utf8"));
+    for (const [path, { dev, optional }] of Object.entries(packages)) {
+      const match = /^node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(path);
+      if (dev || !match) continue;
+      try {
+        await cp(join(installed, match[1]), join(dependencies, match[1]), { recursive: true, dereference: true });
+      } catch (error) {
+        if (!optional || error.code !== "ENOENT") throw error;
+      }
+    }
+  }
   try {
     const prompt = await runTrackedAsync([process.execPath,join(packaged,"audit-code.mjs"),"prompt-path"],{cwd:root,timeout:10000});
     assert.equal(prompt.status,0,prompt.stderr);
@@ -47,7 +66,7 @@ test("the npm tarball contains both commands and its own canonical audit prompt"
     assert.ok(sub && sub !== ".." && !sub.startsWith(".."+sep) && !isAbsolute(sub));
     assert.ok((await readFile(target,"utf8")).includes("audit-code"));
   } finally {
-    await unlink(dependencies);
+    if (linked) await unlink(dependencies);
   }
 });
 
