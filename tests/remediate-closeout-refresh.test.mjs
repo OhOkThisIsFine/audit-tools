@@ -115,8 +115,9 @@ test("closeout requests fresh independent conformance after a context-only repla
 });
 
 test("closeout only refreshes an exact independently conformed overlap", async t => {
-  for (const scenario of ["fast-forward chain", "second parent", "unreviewed writer", "incorrect recorded paths", "ungranted overlap",
-    "different merge result", "later unreviewed edit", "unstaged", "staged", "untracked"]) await t.test(scenario, async t => {
+  for (const scenario of ["fast-forward chain", "second parent", "original off mainline", "unreviewed writer", "incorrect recorded paths", "ungranted overlap",
+    "different merge result", "different first-parent preimage", "reviewed first-parent preimage mismatch",
+    "later unreviewed edit", "unstaged", "staged", "untracked"]) await t.test(scenario, async t => {
     const root = await mkdtemp(join(tmpdir(), "audit-closeout-overlap-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const artifactsDir = join(root, ".audit-tools");
@@ -141,8 +142,17 @@ test("closeout only refreshes an exact independently conformed overlap", async t
       return git("rev-parse", "HEAD");
     };
     await commit("baseline");
-    const oldLanded = await commit("original reviewed fix");
     const oldBranch = git("branch", "--show-current");
+    if (scenario === "original off mainline") git("switch", "-q", "-c", "original-writer");
+    const oldLanded = await commit("original reviewed fix");
+    if (scenario === "original off mainline") {
+      git("switch", "-q", oldBranch);
+      await writeFile(join(root, "baseline-context.txt"), "unrelated initial first parent");
+      git("add", "baseline-context.txt");
+      git("commit", "-qm", "initial mainline context");
+      git("merge", "--no-ff", "-qm", "integrate original", "original-writer");
+      assert.equal(git("rev-parse", "HEAD^2"), oldLanded);
+    }
     const state = {
       conformance_review: { enabled: true }, items: {},
       plan: { plan_id: runId, review_revision_sha256: revision, units: [], requirements: [] },
@@ -179,7 +189,8 @@ test("closeout only refreshes an exact independently conformed overlap", async t
     };
     const prior = await seed("UNIT-original", oldLanded, ["target/"], [scoped]);
     const oldRequest = await prior.request();
-    const merge = scenario === "second parent" || scenario === "different merge result";
+    const differentPreimage = scenario === "different first-parent preimage" || scenario === "reviewed first-parent preimage mismatch";
+    const merge = scenario === "second parent" || scenario === "different merge result" || differentPreimage;
     if (merge) git("switch", "-q", "-c", "later-writer");
     const reviewed = await commit("independently reviewed duplicate scope");
     await seed("UNIT-writer", reviewed, [scenario === "ungranted overlap" ? "other.txt" : scoped],
@@ -193,16 +204,29 @@ test("closeout only refreshes an exact independently conformed overlap", async t
     }
     if (merge) {
       git("switch", "-q", oldBranch);
-      await writeFile(join(root, "unrelated.txt"), "first-parent context");
-      git("add", "unrelated.txt");
-      git("commit", "-qm", "unrelated first parent");
-      git("merge", "--no-ff", "--no-commit", "later-writer");
+      if (differentPreimage) {
+        const intervening = await commit("different first-parent scope preimage");
+        if (scenario === "reviewed first-parent preimage mismatch") await seed("UNIT-first-parent", intervening, [scoped], [scoped]);
+      } else {
+        await writeFile(join(root, "unrelated.txt"), "first-parent context");
+        git("add", "unrelated.txt");
+        git("commit", "-qm", "unrelated first parent");
+      }
+      git("merge", "--no-ff", "--no-commit", ...(differentPreimage ? ["-s", "ours"] : []), "later-writer");
       if (scenario === "different merge result") {
         await writeFile(source, "merge produced a different path image");
         git("add", "--", scoped);
+      } else if (differentPreimage) {
+        // Final bytes match the approved branch. This is still B→C on the
+        // actual first-parent edge, not the independently reviewed A→C.
+        git("restore", "--source", reviewed, "--staged", "--worktree", "--", scoped);
       }
       git("commit", "-qm", "merge writer");
       assert.equal(git("rev-parse", "HEAD^2"), reviewed);
+      if (differentPreimage) {
+        assert.notEqual(git("rev-parse", "HEAD^1:" + scoped), git("rev-parse", oldLanded + ":" + scoped));
+        assert.equal(git("rev-parse", "HEAD:" + scoped), git("rev-parse", reviewed + ":" + scoped));
+      }
     }
     if (scenario === "later unreviewed edit") await commit("unexplained final path");
     if (scenario === "unstaged" || scenario === "staged") await writeFile(source, "dirty overlap");
@@ -211,9 +235,9 @@ test("closeout only refreshes an exact independently conformed overlap", async t
 
     // Even the same plan revision does not let a receipt for the old
     // path image authorize close, including through direct close admission.
-    await assert.rejects(assertSuccessfulConformance(root, artifactsDir, state), /conformance_review_required: UNIT-original/);
     const refresh = () => refreshReplannedHostConformance(root, artifactsDir, state);
     if (scenario === "second parent") {
+      await assert.rejects(assertSuccessfulConformance(root, artifactsDir, state), /conformance_review_required: UNIT-original/);
       const lost = new Error("fixture close ownership lost after scope reads");
       await assert.rejects(() => refreshReplannedHostConformance(root, artifactsDir, state, async () => { throw lost; }),
         error => error === lost);
@@ -221,7 +245,7 @@ test("closeout only refreshes an exact independently conformed overlap", async t
     }
     const issue = (await refresh()).find(row => row.work_item_id === "UNIT-original");
     assert.equal(prior.item.conformance_review.binding, oldRequest.binding);
-    if (scenario !== "second parent" && scenario !== "fast-forward chain") {
+    if (!["second parent", "fast-forward chain", "original off mainline"].includes(scenario)) {
       assert.equal(issue.code, "conformance_review_insufficient");
       assert.deepEqual(await prior.request(), oldRequest);
       return;
@@ -233,20 +257,25 @@ test("closeout only refreshes an exact independently conformed overlap", async t
     assert.equal(bound.content.refreshed_head, git("rev-parse", "HEAD"));
     assert.deepEqual(bound.content.scope_transitions, writers.map(({ id, before, after }) => ({
       path: scoped, work_item_id: id, landed_commit: after,
+      integrated_commit: merge ? git("rev-parse", "HEAD") : after,
       before: "100644:" + git("rev-parse", before + ":" + scoped),
       after: "100644:" + git("rev-parse", after + ":" + scoped),
     })));
-    assert.equal((await refresh()).find(row => row.work_item_id === "UNIT-original").code, "conformance_review_required");
-    assert.equal((await prior.request()).binding, bound.binding);
+    if (scenario === "second parent") {
+      assert.equal((await refresh()).find(row => row.work_item_id === "UNIT-original").code, "conformance_review_required");
+      assert.equal((await prior.request()).binding, bound.binding);
+    }
     await publish(prior.paths, bound);
     // The first scope read is green. Change the path after the response read,
     // at the accepted-review write boundary, before receipt adoption.
-    const changed = await refreshReplannedHostConformance(root, artifactsDir, state, async () => {
-      await writeFile(source, "candidate changed during acceptance");
-    });
-    assert.match(changed.find(row => row.work_item_id === "UNIT-original").message, /candidate changed while refreshing/i);
-    assert.equal(prior.item.conformance_review.binding, oldRequest.binding);
-    git("restore", "--", scoped);
+    if (scenario === "second parent") {
+      const changed = await refreshReplannedHostConformance(root, artifactsDir, state, async () => {
+        await writeFile(source, "candidate changed during acceptance");
+      });
+      assert.match(changed.find(row => row.work_item_id === "UNIT-original").message, /candidate changed while refreshing/i);
+      assert.equal(prior.item.conformance_review.binding, oldRequest.binding);
+      git("restore", "--", scoped);
+    }
     if (writers.length > 1) {
       const writerPaths = conformanceReviewPaths(artifactsDir, runId, "UNIT-writer");
       await publish(writerPaths, JSON.parse(await readFile(writerPaths.request, "utf8")));

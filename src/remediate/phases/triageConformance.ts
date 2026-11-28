@@ -106,11 +106,11 @@ export async function writeTriageObservation(artifactsDir: string, runId: string
 const fullCommit = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 const diffFlags = ["--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "--no-color", "--no-relative"];
 type ScopeChange = { path: string; before: string; after: string };
-type ScopeTransition = ScopeChange & { work_item_id: string; landed_commit: string };
+type ScopeTransition = ScopeChange & { work_item_id: string; landed_commit: string; integrated_commit: string };
 
 function closeoutScope(root: string, artifactsDir: string, state: RemediationState, head: string) {
   const git = (...args: string[]) => runTrackedAsync(["git", "--no-replace-objects", ...args], { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS });
-  const ancestor = async (before: string, after: string) => (await git("merge-base", "--is-ancestor", before, after)).status === 0;
+  const ancestry = async (before: string, after: string) => (await git("merge-base", "--is-ancestor", before, after)).status;
   const changes = async (before: string, after: string, scoped: string[] = []): Promise<ScopeChange[] | undefined> => {
     const raw = await git("diff", ...diffFlags, "--raw", "-z", "--no-renames", "--no-abbrev", before, after, "--", ...scoped);
     const fields = raw.stdout.split("\0");
@@ -127,27 +127,53 @@ function closeoutScope(root: string, artifactsDir: string, state: RemediationSta
 
   return async (landed: string, grants: readonly string[]): Promise<ScopeTransition[] | undefined> => {
     const scoped = grants.map(path => ":(literal)" + path);
-    if (!fullCommit.test(landed) || !scoped.length || !await ancestor(landed, head)) return;
+    if (!fullCommit.test(landed) || !scoped.length || await ancestry(landed, head) !== 0) return;
     // Cleanliness is independent of provenance: a reviewed commit never
     // excuses a staged, unstaged or untracked change in the original grant.
     if ((await git("diff", ...diffFlags, "--quiet", head, "--", ...scoped)).status !== 0 ||
         (await git("diff", ...diffFlags, "--quiet", "--cached", head, "--", ...scoped)).status !== 0) return;
     const untracked = await git("ls-files", "--others", "--exclude-standard", "-z", "--", ...scoped);
     if (untracked.status !== 0 || untracked.stdout !== "") return;
-    const net = await changes(landed, head, scoped);
-    if (!net) return;
-    if (!net.length) return [];
+    if (landed === head) return [];
 
-    const byPath = new Map(net.map(({ path }) => [path, [] as ScopeTransition[]]));
+    // Walk the actual integration edges. Comparing only landed...HEAD
+    // can hide A→B on the first parent when a merge installs a reviewed
+    // branch's A→C blob over B, changing a preimage the reviewer did not see.
+    const history = await git("log", "--format=%H %P", "--first-parent", "--reverse",
+      "--ancestry-path=" + landed, landed + ".." + head);
+    if (history.status !== 0 || !history.stdout.trim()) return;
+    const edges = history.stdout.trim().split(/\r?\n/u).map(row => row.trim().split(" "));
     const plan = state.plan!;
-    for (const unit of plan.units) {
+    const proof: ScopeTransition[] = [];
+    let previous = landed;
+    for (const [position, [integrated, first, ...others]] of edges.entries()) {
+      if (!integrated || !first || ![integrated, first, ...others].every(id => fullCommit.test(id))) return;
+      if (first !== previous) {
+        // For an off-mainline landing, begin at its first containing merge
+        // only if that merge preserved the exact scoped landing image.
+        if (position !== 0 || others.length !== 1 || await ancestry(landed, first) !== 1 ||
+            await ancestry(landed, others[0]!) !== 0 || (await changes(landed, integrated, scoped))?.length !== 0) return;
+        previous = integrated;
+        continue;
+      }
+      previous = integrated;
+      const applied = await changes(first, integrated, scoped);
+      if (!applied) return;
+      if (!applied.length) continue;
+      // A content-changing merge must introduce one exact reviewed writer,
+      // not an octopus or an unreviewed aggregate from a topic branch.
+      const second = others[0];
+      if (others.length > 1 || (second && await ancestry(second, first) !== 1)) return;
+      const writer = second ?? integrated;
+      if (await ancestry(landed, writer) !== 0 || await ancestry(writer, head) !== 0) return;
+      const candidates = plan.units.filter(unit => state.items?.[unit.id]?.host_landed_commit === writer);
+      const unit = candidates[0];
+      if (candidates.length !== 1 || !unit) return;
       const item = state.items?.[unit.id];
-      const writer = item?.host_landed_commit;
       const receipt = item?.conformance_review;
-      if (item?.status !== "resolved" || !writer || writer === landed || !fullCommit.test(writer) ||
+      if (item?.status !== "resolved" ||
           receipt?.review.mode !== "independent" || !/^[a-f0-9]{64}$/u.test(receipt.binding) ||
-          !item.host_landed_files?.some(path => byPath.has(path)) ||
-          !await ancestor(landed, writer) || !await ancestor(writer, head)) continue;
+          !item.host_landed_files?.length) return;
       const subjectPath = join(conformanceSubjectsDir(artifactsDir), receipt.binding);
       const archived = await readOptionalJsonFile<{ binding: string; content: Record<string, unknown> }>(subjectPath + ".json");
       const content = archived?.content;
@@ -157,38 +183,24 @@ function closeoutScope(root: string, artifactsDir: string, state: RemediationSta
           result?.landed_commit !== writer || stableStringify(content.unit) !== stableStringify(unit) ||
           stableStringify(content.obligation_ids) !== stableStringify(unit.requirement_ids) ||
           stableStringify(content.requirements) !== stableStringify(plan.requirements.filter(req => unit.requirement_ids.includes(req.id))) ||
-          stableStringify(content.accepted_counterexamples) !== stableStringify((plan.review_counterexamples ?? []).filter(example => unit.addresses_counterexample_ids.includes(example.id)))) continue;
+          stableStringify(content.accepted_counterexamples) !== stableStringify((plan.review_counterexamples ?? []).filter(example => unit.addresses_counterexample_ids.includes(example.id)))) return;
       const response = parseConformanceResponse(await readOptionalJsonFile<unknown>(subjectPath + ".review.json"), receipt.binding);
       if (!response || response.declaration.mode !== "independent" || response.verdict !== "pass" ||
-          !conformanceObligationsMatch(response, unit.requirement_ids) || response.obligations.some(row => row.verdict !== "satisfied")) continue;
+          !conformanceObligationsMatch(response, unit.requirement_ids) || response.obligations.some(row => row.verdict !== "satisfied")) return;
       const parent = await git("rev-list", "--parents", "-n", "1", writer);
       const [commit, base, extra] = parent.stdout.trim().split(" ");
-      if (parent.status !== 0 || commit !== writer || !base || extra || !fullCommit.test(base)) continue;
+      if (parent.status !== 0 || commit !== writer || !base || extra || !fullCommit.test(base)) return;
       const actual = await changes(base, writer);
       if (!actual || stableStringify(uniqueSorted(actual.map(change => change.path))) !== stableStringify(uniqueSorted(item.host_landed_files)) ||
-          actual.some(({ path }) => !unit.allowed_files.some(grant => grant.endsWith("/") ? path.startsWith(grant) : grant === path))) continue;
-      for (const change of actual) byPath.get(change.path)?.push({ ...change, work_item_id: unit.id, landed_commit: writer });
-    }
-
-    const proof: ScopeTransition[] = [];
-    for (const change of net.sort((a, b) => compareCodeUnits(a.path, b.path))) {
-      const pending = byPath.get(change.path)!;
-      let value = change.before;
-      let predecessor = landed;
-      // A second-parent writer is valid only when HEAD keeps its reviewed
-      // postimage (including mode), not an unreviewed merge resolution.
-      while (pending.length) {
-        const next = pending.filter(candidate => candidate.before === value);
-        const transition = next[0];
-        if (next.length !== 1 || !transition || !await ancestor(predecessor, transition.landed_commit)) return;
-        value = transition.after;
-        predecessor = transition.landed_commit;
-        proof.push(transition);
-        pending.splice(pending.indexOf(transition), 1);
+          actual.some(({ path }) => !unit.allowed_files.some(grant => grant.endsWith("/") ? path.startsWith(grant) : grant === path))) return;
+      const writerPaths = new Map(actual.map(change => [change.path, change]));
+      for (const change of applied.sort((a, b) => compareCodeUnits(a.path, b.path))) {
+        const reviewed = writerPaths.get(change.path);
+        if (reviewed?.before !== change.before || reviewed.after !== change.after) return;
+        proof.push({ ...change, work_item_id: unit.id, landed_commit: writer, integrated_commit: integrated });
       }
-      if (value !== change.after) return;
     }
-    return proof;
+    return previous === head ? proof : undefined;
   };
 }
 
