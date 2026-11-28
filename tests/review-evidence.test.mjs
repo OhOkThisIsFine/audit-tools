@@ -1,10 +1,155 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import test from "node:test";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const checkout = resolve(process.env.AUDIT_TOOLS_TRIAL_CHECKOUT ?? process.cwd());
 const load = file => import(pathToFileURL(join(checkout,"dist",file)).href);
+
+// Substitute synthetic obligations at the engine input, leaving the real
+// drain budget, core commit, handoff and public CLI writers in the loop.
+async function resumeFixture(t, mode) {
+  const root = await mkdtemp(join(tmpdir(), "audit-resume-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const artifactsDir = join(root, ".audit-tools", "audit");
+  await mkdir(artifactsDir, { recursive: true });
+  await writeFile(join(artifactsDir, "audit_state.json"), '{"status":"active","obligations":[]}');
+  const { version } = JSON.parse(await readFile(join(checkout, "package.json"), "utf8"));
+  const commandModule = pathToFileURL(join(checkout, "dist/audit/cli/nextStepCommand.js")).href;
+  const dataUrl = code => "data:text/javascript;base64," + Buffer.from(code).toString("base64");
+  const shared = dataUrl(`
+    export * from ${JSON.stringify(pathToFileURL(join(checkout, "dist/shared/index.js")).href)};
+    import { advance as run } from ${JSON.stringify(pathToFileURL(join(checkout, "dist/shared/index.js")).href)};
+    export function advance(_engine, state, ctx, opts) {
+      const mode = ${JSON.stringify(mode)};
+      const id = "synthetic";
+      const engine = { priority: [id], obligations: [{
+        id,
+        derive: s => mode === "cycle" || (mode === "pace" &&
+          Number(s.audit_report?.slice("Committed ".length) ?? 0) <= opts.maxExecutions)
+          ? "missing" : "satisfied",
+        execute: async s => ({ kind: "transition", state: mode === "cycle" ? s : {
+          ...s, audit_report: "Committed " + (Number(s.audit_report?.slice("Committed ".length) ?? 0) + 1),
+        } }),
+      }] };
+      return run(engine, state, ctx, mode === "cycle" ? { ...opts, stateSignature: () => "still spinning" } : opts);
+    }
+  `);
+  const hook = dataUrl(`
+    export function resolve(specifier, context, next) {
+      return specifier === "audit-tools/shared" && context.parentURL?.endsWith("/audit/cli/nextStepHelpers.js")
+        ? { url: ${JSON.stringify(shared)}, shortCircuit: true }
+        : next(specifier, context);
+    }
+  `);
+  const script = `
+    import { register } from "node:module";
+    register(${JSON.stringify(hook)}, import.meta.url);
+    const { cmdNextStep } = await import(${JSON.stringify(commandModule)});
+    await cmdNextStep(["node", "audit-code", "next-step", "--root", ${JSON.stringify(root)}]);
+  `;
+  const run = () => JSON.parse(execFileSync(process.execPath, ["--input-type=module", "--eval", script], {
+    cwd: checkout, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, AUDIT_CODE_INVOCATION: JSON.stringify(["audit-code", "--expected-version", version]) },
+  }));
+  const preflight = run();
+  assert.equal(preflight.step_kind, "functional_preflight");
+  const consent = JSON.parse(await readFile(join(artifactsDir, "run-consent.json"), "utf8"));
+  await writeFile(preflight.artifact_paths.functional_preflight, JSON.stringify({
+    contract_version: "audit-functional-preflight/v1",
+    run_id: preflight.run_id, repository_root: consent.repository_root,
+    source_inspection: { available: true, evidence: "Synthetic source fixture." },
+    relationship_inspection: { available: true, evidence: "Synthetic relationship fixture." },
+    decision: "ready",
+  }));
+  const handoff = async () => JSON.parse(await readFile(join(artifactsDir, "operator-handoff.json"), "utf8"));
+  const prompt = async step => {
+    const current = JSON.parse(await readFile(step.artifact_paths.current_step, "utf8"));
+    assert.deepEqual(current, step);
+    const body = await readFile(join(artifactsDir, "steps", "current-prompt.md"), "utf8");
+    assert.equal(await readFile(step.prompt_path, "utf8"), body);
+    return body;
+  };
+  return { root, artifactsDir, run, handoff, prompt };
+}
+
+test("legacy report delivery stays pending on promotion failure and completes only after repair", async t => {
+  const { root, artifactsDir, run, handoff, prompt } = await resumeFixture(t, "terminal");
+  const working = join(artifactsDir, "audit-report.md");
+  const stable = join(root, ".audit-tools", "audit-report.md");
+  const ended = join(artifactsDir, "run-ended.json");
+  await writeFile(working, "Legacy report awaiting delivery.");
+  await writeFile(join(artifactsDir, "audit_state.json"), '{"status":"complete","obligations":[]}');
+  await mkdir(stable); // A file cannot be promoted over a directory.
+
+  const pending = run();
+  assert.equal(pending.step_kind, "resume", pending.progress?.summary);
+  assert.equal(pending.status, "ready");
+  assert.equal(pending.artifact_paths.final_report, undefined);
+  assert.equal(await readFile(pending.artifact_paths.working_report, "utf8"), "Legacy report awaiting delivery.");
+  const paused = await handoff();
+  assert.equal(paused.disposition, "paused");
+  assert.notEqual(paused.status, "complete");
+  assert.deepEqual(pending.allowed_commands, paused.suggested_commands);
+  const pendingPrompt = await prompt(pending);
+  assert.match(pendingPrompt, /delivery pending/);
+  assert.match(pendingPrompt, /After repair, run:/);
+  assert.ok(pendingPrompt.includes(pending.artifact_paths.working_report));
+  assert.ok(pendingPrompt.includes(paused.suggested_commands[0]));
+  await assert.rejects(stat(ended), { code: "ENOENT" });
+
+  await rm(stable, { recursive: true });
+  const delivered = run();
+  assert.equal(delivered.step_kind, "present_report");
+  assert.equal(delivered.status, "complete");
+  assert.equal(await readFile(delivered.artifact_paths.final_report, "utf8"), "Legacy report awaiting delivery.");
+  assert.ok((await stat(ended)).isFile());
+});
+
+test("the real pacing cap exposes a bound continuation and the next fold resumes committed work", async t => {
+  const { root, artifactsDir, run, handoff, prompt } = await resumeFixture(t, "pace");
+  const { MAX_DRAIN_STEPS } = await load("audit/orchestrator/advance.js");
+  const working = join(artifactsDir, "audit-report.md");
+  const paused = run();
+  assert.equal(paused.step_kind, "resume", paused.progress?.summary);
+  assert.equal(paused.status, "ready");
+  assert.equal(await readFile(working, "utf8"), `Committed ${MAX_DRAIN_STEPS}`);
+  const record = await handoff();
+  assert.equal(record.disposition, "paused");
+  assert.equal(record.suggested_commands.length, 1);
+  assert.deepEqual(paused.allowed_commands, record.suggested_commands);
+  const pausedPrompt = await prompt(paused);
+  assert.ok(pausedPrompt.includes(record.suggested_commands[0]));
+  assert.match(pausedPrompt, /Resume now by running/);
+  assert.doesNotMatch(pausedPrompt, /stop|before starting the next step/i);
+  await assert.rejects(stat(join(root, ".audit-tools", "audit-report.md")), { code: "ENOENT" });
+
+  const delivered = run();
+  assert.equal(delivered.step_kind, "present_report");
+  assert.equal(await readFile(delivered.artifact_paths.final_report, "utf8"), `Committed ${MAX_DRAIN_STEPS + 1}`);
+});
+
+test("true nonconvergence and stale question-report custody still tell prompt-only loaders to stop", async t => {
+  const cycle = await resumeFixture(t, "cycle");
+  const blocked = cycle.run();
+  assert.equal(blocked.step_kind, "blocked", blocked.progress?.summary);
+  assert.deepEqual(blocked.allowed_commands, []);
+  assert.match(await cycle.prompt(blocked), /Report this blocker verbatim and stop:[\s\S]*re-selecting/);
+  assert.equal((await cycle.handoff()).disposition, "blocked");
+
+  const question = await resumeFixture(t, "terminal");
+  const { ensureQuestionReviewRunIdUnlocked } = await load("audit/cli/questionReviewSession.js");
+  await ensureQuestionReviewRunIdUnlocked(question.artifactsDir);
+  await writeFile(join(question.artifactsDir, "audit-report.md"), "Unverified question report.");
+  const refused = question.run();
+  assert.equal(refused.step_kind, "blocked");
+  assert.deepEqual(refused.allowed_commands, []);
+  assert.match(await question.prompt(refused), /Report this blocker verbatim and stop:[\s\S]*custody records/);
+  await assert.rejects(stat(join(question.artifactsDir, "run-ended.json")), { code: "ENOENT" });
+});
 
 test("confirmation leads with one decision and a neutral checkpoint preserves applicable lenses and approved depth", async () => {
   const { renderConfirmIntentPrompt } = await load("audit/cli/confirmIntentStep.js");

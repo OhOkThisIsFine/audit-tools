@@ -305,9 +305,19 @@ export function requireSourceRoot(params: Pick<NextStepParams, "sourceRoot">): s
   return params.sourceRoot;
 }
 
+type ResumeStepResult = {
+  kind: "resume";
+  state: AuditState;
+  bundle: ArtifactBundle;
+  reason: string;
+  command: string;
+  workingReportPath?: string;
+};
+
 export type TerminalStepResult =
   | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
-  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
+  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
+  | ResumeStepResult;
 
 /**
  * A guard's in-fold verdict that the fold must END at a terminal — carried out
@@ -360,8 +370,7 @@ export type NextStepResult = (
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
   | { kind: "critical_flow_fallback"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
-  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
+  | TerminalStepResult
 ) &
   /**
    * Advisories an EARLIER fold iteration carried, rendered as prompt lines.
@@ -458,6 +467,21 @@ async function removeCompletedHostScratch(artifactsDir: string): Promise<void> {
   }
 }
 
+async function resumeStep(
+  { root, artifactsDir }: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+  reason: string,
+  workingReportPath?: string,
+): Promise<ResumeStepResult> {
+  const command = nextStepCommand(root, artifactsDir);
+  await writeHandoffOnly({
+    root, artifactsDir, bundle, audit_state: state,
+    progress_summary: reason, stop: { kind: "paused", command },
+  });
+  return { kind: "resume", state, bundle, reason, command, workingReportPath };
+}
+
 /**
  * Build the terminal step for a deterministic fold that has stopped advancing
  * (no actionable obligation, or a cycle guard fired). A rendered report is the
@@ -502,10 +526,16 @@ export async function buildTerminalStep(
       await hasWorkingQuestionReportMarker(params.artifactsDir);
     return { questionRun, finalReportPath: await promoteCompletedReport(params.root, params.artifactsDir) };
   });
-  if (questionRun && finalReportPath === auditReportPath(params.artifactsDir)) {
-    const reason = "The current question report and its custody records could not be verified and promoted. Restore the matching question plan, accepted answers and report or resolve the reported archive issue, then run next-step again. The working audit was kept.";
-    await persist(reason, "blocked", true);
-    return { kind: "blocked", state, bundle, reason };
+  if (finalReportPath === auditReportPath(params.artifactsDir)) {
+    if (questionRun) {
+      const reason = "The current question report and its custody records could not be verified and promoted. Restore the matching question plan, accepted answers and report or resolve the reported archive issue, then run next-step again. The working audit was kept.";
+      await persist(reason, "blocked", true);
+      return { kind: "blocked", state, bundle, reason };
+    }
+    const reason = "Final report delivery is pending. Resolve the reported promotion or archive issue before retrying. The working audit was kept.";
+    // Synthesis is complete internally; delivery is not. Keep the persisted
+    // audit state for retry, but do not publish a completed handoff.
+    return resumeStep(params, bundle, { ...state, status: "active" }, reason, finalReportPath);
   }
   try {
     await persist(state.status === "complete" ? "Audit report is ready." : `Audit report already rendered; ending run. ${blockedReason}`, "complete");
@@ -3397,15 +3427,7 @@ async function runDeterministicFold(
     const reason =
       `Pacing cap: this call spent its ${MAX_DRAIN_STEPS}-execution budget and paused. ` +
       "Nothing is wrong — the fold's work is committed; re-run next-step to resume.";
-    await writeHandoffOnly({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      bundle,
-      audit_state: state,
-      progress_summary: reason,
-      stop: { kind: "paused", command: nextStepCommand(params.root, params.artifactsDir) },
-    });
-    return { kind: "blocked", state, bundle, reason };
+    return resumeStep(params, bundle, state, reason);
   }
 
   // The engine stamps the limit that fired on the result (`stoppedBound`), so

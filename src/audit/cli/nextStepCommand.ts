@@ -690,7 +690,9 @@ async function withAnalyzerRecovery(
   params: Parameters<typeof writeCurrentStep>[0],
   { result, sourceRoot, artifactsDir }: NextStepEmitContext,
 ): Promise<typeof params> {
-  if (params.status !== "ready" || params.stepKind === "analyzer_calibration") return params;
+  // Resuming a committed fold or retrying delivery is not analyzer dispatch.
+  if (params.status !== "ready" || params.stepKind === "analyzer_calibration" ||
+      params.stepKind === "resume") return params;
   const summary = analyzerCoverageSummary(result.bundle);
   if (!summary) return params;
   const receipt = await readOptionalJsonFile<unknown>(join(artifactsDir, "analyzer-calibration.json"));
@@ -746,6 +748,37 @@ const emitBlocked = emissionRow<"blocked">(
     // The SAME operator-handoff blocked contract the pre-dispatch config
     // failure emits — built from the one home, never re-typed here.
     return blockedStepPlan(operatorHandoffBlock(root, artifactsDir, result.reason));
+  },
+);
+
+const emitResume = emissionRow<"resume">(
+  async ({ root, artifactsDir }, { reason, command, workingReportPath }) => {
+    const instruction = workingReportPath ? "After repair, run:" : "Resume now by running:";
+    return currentStepPlan({
+      artifactsDir,
+      stepKind: "resume",
+      status: "ready",
+      runId: null,
+      allowedCommands: [command],
+      stopCondition: "Follow the new step returned by the continuation.",
+      repoRoot: root,
+      artifactPaths: {
+        operator_handoff: join(artifactsDir, "operator-handoff.json"),
+        ...(workingReportPath ? { working_report: workingReportPath } : {}),
+      },
+      progress: { summary: reason },
+      prompt: [
+        workingReportPath ? "# Final report delivery pending" : "# Resume audit",
+        reason,
+        ...(workingReportPath ? [
+          "Read the working report at " + toPromptPathToken(workingReportPath) + ". It is not the final deliverable.",
+          "Check the promotion diagnostics from next-step and repair the destination or archive issue without altering the working report.",
+        ] : []),
+        instruction,
+        command,
+        "Read and follow only the new step prompt returned by that command.",
+      ].join("\n\n"),
+    });
   },
 );
 
@@ -2010,6 +2043,7 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
     currentStepPlan(questionDispatchParams(ctx, result))),
   complete: emitComplete,
   blocked: emitBlocked,
+  resume: emitResume,
   design_review_parallel: emitDesignReviewParallel,
   design_review_contract: emitDesignReviewContract,
   design_review_conceptual: emitDesignReviewConceptual,
