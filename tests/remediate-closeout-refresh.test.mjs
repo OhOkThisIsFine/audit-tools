@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { assertSuccessfulConformance, refreshReplannedHostConformance } from "../dist/remediate/phases/triageConformance.js";
@@ -60,8 +60,12 @@ test("closeout requests fresh independent conformance after a context-only repla
   const item = { status: "resolved", host_landed_commit: landed, conformance_review: accepted.receipt };
   const state = {
     conformance_review: { enabled: true }, items: { [itemId]: item },
-    plan: { plan_id: runId, review_revision_sha256: current, units: [unit], requirements: [requirement] },
+    plan: { plan_id: runId, review_revision_sha256: prior, units: [unit], requirements: [requirement] },
   };
+  assert.deepEqual(await refreshReplannedHostConformance(root, artifactsDir, state), []);
+  await assertSuccessfulConformance(root, artifactsDir, state);
+  assert.equal((await request()).binding, old.binding);
+  state.plan.review_revision_sha256 = current;
   await assert.rejects(assertSuccessfulConformance(root, artifactsDir, state), /conformance_review_required/);
   const missing = await refreshReplannedHostConformance(root, artifactsDir, state);
   assert.equal(missing[0].code, "conformance_review_required");
@@ -108,4 +112,147 @@ test("closeout requests fresh independent conformance after a context-only repla
   await writeFile(source, "case fixed\n");
   assert.equal((await refreshReplannedHostConformance(root, artifactsDir, state))[0].code, "conformance_review_insufficient");
   assert.equal(item.conformance_review.binding, advanced.binding);
+});
+
+test("closeout only refreshes an exact independently conformed overlap", async t => {
+  for (const scenario of ["fast-forward chain", "second parent", "unreviewed writer", "incorrect recorded paths", "ungranted overlap",
+    "different merge result", "later unreviewed edit", "unstaged", "staged", "untracked"]) await t.test(scenario, async t => {
+    const root = await mkdtemp(join(tmpdir(), "audit-closeout-overlap-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const artifactsDir = join(root, ".audit-tools");
+    const scoped = "target/source.txt";
+    const source = join(root, scoped);
+    const runId = "overlap-fixture";
+    const revision = "a".repeat(64);
+    const git = (...args) => {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    git("init", "--template=", "-q");
+    git("config", "user.email", "fixture@example.invalid");
+    git("config", "user.name", "Fixture");
+    git("config", "commit.gpgsign", "false");
+    await mkdir(join(root, "target"));
+    const commit = async value => {
+      await writeFile(source, value);
+      git("add", "--", scoped);
+      git("commit", "-qm", value);
+      return git("rev-parse", "HEAD");
+    };
+    await commit("baseline");
+    const oldLanded = await commit("original reviewed fix");
+    const oldBranch = git("branch", "--show-current");
+    const state = {
+      conformance_review: { enabled: true }, items: {},
+      plan: { plan_id: runId, review_revision_sha256: revision, units: [], requirements: [] },
+    };
+    const publish = async (paths, req) => {
+      const response = req.response_template;
+      response.declaration.reason = "Independent synthetic fixture context.";
+      response.summary = "Verified the fixture candidate.";
+      response.obligations[0].evidence = ["Fixture exact commit and path."];
+      await writeFile(paths.response, JSON.stringify(response));
+    };
+    const seed = async (id, landed, allowed, actual, independentlyReviewed = true) => {
+      const requirement = { id: "REQ-" + id, description: "Require " + id };
+      const unit = { id, allowed_files: allowed, requirement_ids: [requirement.id], addresses_counterexample_ids: [] };
+      state.plan.units.push(unit);
+      state.plan.requirements.push(requirement);
+      const paths = conformanceReviewPaths(artifactsDir, runId, id);
+      const request = () => readFile(paths.request, "utf8").then(JSON.parse);
+      const check = () => checkConformanceSubject({
+        artifactsDir, runId, itemId: id, obligationIds: [requirement.id], evidenceInstruction: "Fixture.",
+        content: { repository_root: root, run_id: runId, work_item_id: id, result: { landed_commit: landed },
+          unit, requirements: [requirement], review_revision_sha256: revision, obligation_ids: [requirement.id], accepted_counterexamples: [] },
+      });
+      const item = { status: "resolved", host_landed_commit: landed, host_landed_files: actual };
+      state.items[id] = item;
+      if (independentlyReviewed) {
+        assert.equal((await check()).ok, false);
+        await publish(paths, await request());
+        const accepted = await check();
+        assert.equal(accepted.ok, true);
+        item.conformance_review = accepted.receipt;
+      }
+      return { item, request, paths };
+    };
+    const prior = await seed("UNIT-original", oldLanded, ["target/"], [scoped]);
+    const oldRequest = await prior.request();
+    const merge = scenario === "second parent" || scenario === "different merge result";
+    if (merge) git("switch", "-q", "-c", "later-writer");
+    const reviewed = await commit("independently reviewed duplicate scope");
+    await seed("UNIT-writer", reviewed, [scenario === "ungranted overlap" ? "other.txt" : scoped],
+      scenario === "incorrect recorded paths" ? [scoped, "ghost.txt"] : [scoped],
+      scenario !== "unreviewed writer");
+    const writers = [{ id: "UNIT-writer", before: oldLanded, after: reviewed }];
+    if (scenario === "fast-forward chain") {
+      const later = await commit("second independently reviewed path transition");
+      await seed("UNIT-next", later, [scoped], [scoped]);
+      writers.push({ id: "UNIT-next", before: reviewed, after: later });
+    }
+    if (merge) {
+      git("switch", "-q", oldBranch);
+      await writeFile(join(root, "unrelated.txt"), "first-parent context");
+      git("add", "unrelated.txt");
+      git("commit", "-qm", "unrelated first parent");
+      git("merge", "--no-ff", "--no-commit", "later-writer");
+      if (scenario === "different merge result") {
+        await writeFile(source, "merge produced a different path image");
+        git("add", "--", scoped);
+      }
+      git("commit", "-qm", "merge writer");
+      assert.equal(git("rev-parse", "HEAD^2"), reviewed);
+    }
+    if (scenario === "later unreviewed edit") await commit("unexplained final path");
+    if (scenario === "unstaged" || scenario === "staged") await writeFile(source, "dirty overlap");
+    if (scenario === "staged") git("add", "--", scoped);
+    if (scenario === "untracked") await writeFile(join(root, "target/extra.txt"), "dirty directory grant");
+
+    // Even the same plan revision does not let a receipt for the old
+    // path image authorize close, including through direct close admission.
+    await assert.rejects(assertSuccessfulConformance(root, artifactsDir, state), /conformance_review_required: UNIT-original/);
+    const refresh = () => refreshReplannedHostConformance(root, artifactsDir, state);
+    if (scenario === "second parent") {
+      const lost = new Error("fixture close ownership lost after scope reads");
+      await assert.rejects(() => refreshReplannedHostConformance(root, artifactsDir, state, async () => { throw lost; }),
+        error => error === lost);
+      assert.deepEqual(await prior.request(), oldRequest);
+    }
+    const issue = (await refresh()).find(row => row.work_item_id === "UNIT-original");
+    assert.equal(prior.item.conformance_review.binding, oldRequest.binding);
+    if (scenario !== "second parent" && scenario !== "fast-forward chain") {
+      assert.equal(issue.code, "conformance_review_insufficient");
+      assert.deepEqual(await prior.request(), oldRequest);
+      return;
+    }
+    assert.equal(issue.code, "conformance_review_required");
+    const bound = await prior.request();
+    assert.notEqual(bound.binding, oldRequest.binding);
+    assert.equal(bound.content.review_revision_sha256, revision);
+    assert.equal(bound.content.refreshed_head, git("rev-parse", "HEAD"));
+    assert.deepEqual(bound.content.scope_transitions, writers.map(({ id, before, after }) => ({
+      path: scoped, work_item_id: id, landed_commit: after,
+      before: "100644:" + git("rev-parse", before + ":" + scoped),
+      after: "100644:" + git("rev-parse", after + ":" + scoped),
+    })));
+    assert.equal((await refresh()).find(row => row.work_item_id === "UNIT-original").code, "conformance_review_required");
+    assert.equal((await prior.request()).binding, bound.binding);
+    await publish(prior.paths, bound);
+    // The first scope read is green. Change the path after the response read,
+    // at the accepted-review write boundary, before receipt adoption.
+    const changed = await refreshReplannedHostConformance(root, artifactsDir, state, async () => {
+      await writeFile(source, "candidate changed during acceptance");
+    });
+    assert.match(changed.find(row => row.work_item_id === "UNIT-original").message, /candidate changed while refreshing/i);
+    assert.equal(prior.item.conformance_review.binding, oldRequest.binding);
+    git("restore", "--", scoped);
+    if (writers.length > 1) {
+      const writerPaths = conformanceReviewPaths(artifactsDir, runId, "UNIT-writer");
+      await publish(writerPaths, JSON.parse(await readFile(writerPaths.request, "utf8")));
+    }
+    assert.deepEqual(await refresh(), []);
+    assert.equal(prior.item.conformance_review.binding, bound.binding);
+    await assertSuccessfulConformance(root, artifactsDir, state);
+  });
 });
