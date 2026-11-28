@@ -68,7 +68,8 @@ export async function probeScopeIndexKey(
     .map((path) => normalizeRepoPath(path))
     .filter((path) => tracked.has(path))
     .sort();
-  return hashContent(trackedCandidates.join("\n"));
+  // Frame literal newlines in paths. Old digests refresh once via manifest content.
+  return hashContent(JSON.stringify(trackedCandidates));
 }
 
 /**
@@ -112,7 +113,7 @@ export async function probeScopeIndexKeyCached(
   root: string,
   candidatePaths: readonly string[],
 ): Promise<string | null> {
-  const key = `${root}\0${candidatePaths.join("\n")}`;
+  const key = JSON.stringify([root, candidatePaths]);
   if (memo && memo.key === key) return memo.value ?? null;
   const value = await probeScopeIndexKey(root, candidatePaths);
   if (memo) {
