@@ -3,7 +3,7 @@ import { stableStringify } from "audit-tools/shared";
 import { errorMessage } from "../../shared/io/json.js";
 import { ExecutableChangePlanSchema } from "../../shared/types/executionPlan.js";
 import type { RemediationState } from "../state/store.js";
-import { executionPlanRevision, readApprovedExecutionPlan } from "./executionPlan.js";
+import { executionPlanRevision, readApprovedExecutionPlan, readPendingReplan } from "./executionPlan.js";
 
 /** A recoverable authority failure; it never invalidates or deletes accepted evidence. */
 export class RemediationPlanAuthorityError extends Error {
@@ -16,6 +16,19 @@ export class RemediationPlanAuthorityError extends Error {
 
 /** The immutable reviewed record, not a runtime-supplied digest, grants work and closing. */
 export async function assertApprovedRuntimePlan(artifactsDir: string, state: RemediationState) {
+  let pending: Awaited<ReturnType<typeof readPendingReplan>>;
+  try { pending = await readPendingReplan(artifactsDir); }
+  catch (error) {
+    throw new RemediationPlanAuthorityError(`The pending replan marker cannot be verified: ${errorMessage(error)}`);
+  }
+  if (pending) throw new RemediationPlanAuthorityError(
+    "A same-source replacement is pending. Resume revision and approval before dispatch, acceptance or closing.",
+  );
+  return verifyPersistedRuntimePlan(artifactsDir, state);
+}
+
+/** Exact readback for next-step's activation recovery; this does not grant execution. */
+export async function verifyPersistedRuntimePlan(artifactsDir: string, state: RemediationState) {
   try {
     const approved = await readApprovedExecutionPlan(artifactsDir);
     const plan = state.plan;

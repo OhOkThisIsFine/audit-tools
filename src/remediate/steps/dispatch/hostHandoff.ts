@@ -12,7 +12,7 @@ import { readIntentCheckpoint } from "../../../shared/types/intentCheckpoint.js"
 import { checkContractConformance, conformanceIssue, conformanceReviewPaths, type ConformanceReviewCheck } from "./contractConformanceReview.js";
 import type { ExecutionUnit, ExecutionRequirement } from "../../../shared/types/executionPlan.js";
 import { executionPlanReferenceIssues } from "../../../shared/types/executionPlan.js";
-import { executionPlanContextIssues } from "../../contractPipeline/executionPlan.js";
+import { acceptedExecutionContext, executionPlanContextIssues } from "../../contractPipeline/executionPlan.js";
 import { assertApprovedRuntimePlan as assertCurrentPlanAuthority, RemediationPlanAuthorityError } from "../../contractPipeline/runtimePlanAuthority.js";
 // sites-pinned: tests/remediate/host-handoff-corroboration.test.ts, tests/remediate/host-handoff-corroboration-required-test-runner.test.ts, tests/remediate/host-handoff.test.ts
 //   host-handoff-corroboration-required-test-runner: the bounded required-test failure message.
@@ -1457,16 +1457,7 @@ export async function prepareRemediationHostHandoff(params: {
 
   const existingRecord = state.host_handoff;
   if (!existingRecord) {
-    const accepted = state.plan.units.flatMap(unit => {
-      const item = state.items[unit.id];
-      return item?.host_landed_commit ? [{ allowed_files: [...unit.allowed_files], landed_commit: item.host_landed_commit }] : [];
-    });
-    for (const wave of state.wave_simplifications ?? []) {
-      if (wave.response?.disposition === "applied" && wave.applied_files) accepted.push({
-        landed_commit: wave.response.commit, allowed_files: wave.applied_files,
-      });
-    }
-    const contextIssues = await executionPlanContextIssues(paths.root, approved.canonical, accepted);
+    const contextIssues = await executionPlanContextIssues(paths.root, approved.canonical, acceptedExecutionContext(state));
     if (contextIssues.length) throw new RemediationHostPreparationError("plan_repair_required", contextIssues.join("; "));
   }
   if (existingRecord && existingRecord.run_id !== params.runId) {

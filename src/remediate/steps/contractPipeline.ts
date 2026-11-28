@@ -1,5 +1,6 @@
 import { QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION } from "../../shared/types/questionReviewReport.js";
-import { STATE_FILENAME } from "../state/store.js";
+import { STATE_FILENAME, type RemediationState } from "../state/store.js";
+import type { ExecutionUnit } from "../../shared/types/executionPlan.js";
 // sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs, tests/remediate-mixed-guidance.test.mjs
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -13,19 +14,19 @@ import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import { loaderCommand } from "./prompts.js";
 import { preparePlanningGraph } from "./planningGraph.js";
-import { renderPlanAuthorPrompt, renderPlanReviewPrompt, reviewRequirementForRole } from "./contractPipelinePrompts.js";
+import { renderLockedPlanHistory, renderPlanAuthorPrompt, renderPlanReviewPrompt, reviewRequirementForRole } from "./contractPipelinePrompts.js";
 import {
   executionPlanPaths, PlanSourceSchema, readPlanSource, readCanonicalPlan, ingestExecutionPlan,
   readPlanReviewHistory, readPlanReview, readApprovedExecutionPlan,
   CritiqueSchema, CriticSchema, PlanJudgeSchema, PlanRiskDecisionSchema, PLAN_REVIEW_ROLES, executionPlanContextIssues,
   PlanReviewReceiptSchema, readExecutionIntent, type PlanSource, type PlanReviewRole, type CanonicalPlan, type PlanReviewReceipt,
-  type PlanReviewHistory,
+  acceptedExecutionContext, readPendingReplan, readReplanBase, type PlanReviewHistory,
 } from "../contractPipeline/executionPlan.js";
 
 export { readApprovedExecutionPlan } from "../contractPipeline/executionPlan.js";
 
 export interface ContractPipelineStepOptions {
-  root: string; artifactsDir: string; runId: string; sourcePaths?: string[]; forceRevision?: boolean;
+  root: string; artifactsDir: string; runId: string; sourcePaths?: string[];
   sourceRead?: { path: string; bytes: Buffer };
   planningGraph?: () => Promise<string>;
 }
@@ -111,15 +112,15 @@ async function emit(options: ContractPipelineStepOptions, prompt: string, status
  * The repair bound is spent for this review cycle. Nothing records an operator override of a reviewer's refusal (by design;
  * #14 removed waivers), so the step names the only working exits: a revised plan that is reviewed again, or cancelling the run.
  */
-function repairBoundSpent(options: ContractPipelineStepOptions, review: string, kind: string, remaining: unknown): Promise<RemediationStep> {
-  return emit(options, `${review} has not converged after eight repair decisions in this review cycle. There is no operator override of the reviewers' refusal. To continue, revise the plan so it addresses every one of these ${kind}, and write the complete revision to ${executionPlanPaths(options.artifactsDir).submission}; the revision is reviewed again. Otherwise the operator may cancel the run. Do not implement an unapproved plan.\n\nRemaining ${kind}:\n${JSON.stringify(remaining, null, 2)}`, "blocked");
+function repairBoundSpent(options: ContractPipelineStepOptions, review: string, kind: string, remaining: unknown, lockedHistory: string): Promise<RemediationStep> {
+  return emit(options, `${review} has not converged after eight repair decisions in this review cycle. There is no operator override of the reviewers' refusal. To continue, revise the plan so it addresses every one of these ${kind}, and write the complete revision to ${executionPlanPaths(options.artifactsDir).submission}; the revision is reviewed again. Otherwise the operator may cancel the run. Do not implement an unapproved plan.\n\n${lockedHistory}\n\nRemaining ${kind}:\n${JSON.stringify(remaining, null, 2)}`, "blocked");
 }
 
-async function authorStep(options: ContractPipelineStepOptions, source: PlanSource, canonical?: CanonicalPlan, reason?: string) {
+async function authorStep(options: ContractPipelineStepOptions, source: PlanSource, lockedHistory: string, canonical?: CanonicalPlan, reason?: string) {
   const paths = executionPlanPaths(options.artifactsDir);
   return emit(options, renderPlanAuthorPrompt({ root: options.root, source, canonical,
     history: await readPlanReviewHistory(options.artifactsDir), sourcePath: paths.source,
-    planPath: paths.canonical, outputPath: paths.submission, reason,
+    planPath: paths.canonical, outputPath: paths.submission, reason, lockedHistory,
     graphHint: await options.planningGraph?.() }));
 }
 
@@ -229,19 +230,36 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
     try { actual = hashContent(await readFile(entry.path, "utf8")); } catch { actual = "missing"; }
     if (actual !== entry.sha256) return emit(options, `The agreed input ${entry.path} changed or disappeared. The current plan is preserved. Restore the agreed source or explicitly start a new run; an old review cannot authorize changed source evidence.`, "blocked");
   }
-  const state = await readOptionalJsonFile<{ plan?: { units?: unknown[] }; items?: Record<string, { status: string }> }>(join(options.artifactsDir, STATE_FILENAME));
-  const acceptedUnits = new Map<string, unknown>();
+  const state = await readOptionalJsonFile<Pick<RemediationState, "plan" | "items" | "wave_simplifications">>(join(options.artifactsDir, STATE_FILENAME));
+  const acceptedUnits = new Map<string, ExecutionUnit>();
   for (const unit of state?.plan?.units ?? []) {
-    const entry = unit as { id: string };
-    if (["resolved", "resolved_no_change"].includes(state?.items?.[entry.id]?.status ?? "")) acceptedUnits.set(entry.id, unit);
+    if (["resolved", "resolved_no_change"].includes(state?.items?.[unit.id]?.status ?? "")) acceptedUnits.set(unit.id, unit);
   }
-  const ingestion = await ingestExecutionPlan({ ...options, acceptedUnits });
+  const lockedHistory = renderLockedPlanHistory(acceptedUnits);
+  const pending = await readPendingReplan(options.artifactsDir);
+  let replanBase: CanonicalPlan | undefined;
+  if (pending) {
+    try { replanBase = await readReplanBase(options.artifactsDir, pending, source); }
+    catch (error) {
+      return emit(options, `The original review evidence for the pending replan cannot be verified. Restore that historical bundle before proceeding: ${String(error)}`, "blocked");
+    }
+  }
+  const ingestion = await ingestExecutionPlan({ ...options, acceptedUnits, ...(replanBase ? { replanBase } : {}) });
   const canonical = await readCanonicalPlan(options.artifactsDir);
-  if (ingestion.issues.length || !canonical) return authorStep(options, source, canonical, ingestion.issues.join("\n"));
-  if (await readApprovedExecutionPlan(options.artifactsDir)) return options.forceRevision && !ingestion.changed ? authorStep(options,source,canonical,"The operator requested a revised plan. Preserve accepted execution units and add explicit follow-up work where needed.") : null;
+  if (ingestion.issues.length || !canonical) return authorStep(options, source, lockedHistory, canonical, ingestion.issues.join("\n"));
+  if (replanBase && canonical.revision_sha256 === replanBase.revision_sha256) {
+    const contextIssues = await executionPlanContextIssues(options.root, canonical, acceptedExecutionContext(state ?? {}));
+    return authorStep(options, source, lockedHistory, canonical, [
+      "The operator requested a revised plan. Revise against the current repository context and obtain fresh review.",
+      ...contextIssues,
+    ].join("\n"));
+  }
+  const approved = await readApprovedExecutionPlan(options.artifactsDir);
+  if (approved && !pending) return null;
   const contextIssues = await executionPlanContextIssues(options.root, canonical);
-  if (contextIssues.length) return authorStep(options,source,canonical,contextIssues.join("\n"));
-  if (source.request || canonical.plan.source_dispositions.some(entry => entry.status === "deferred")) {
+  if (contextIssues.length) return authorStep(options,source,lockedHistory,canonical,contextIssues.join("\n"));
+  if (approved) return null;
+  if (pending || source.request || canonical.plan.source_dispositions.some(entry => entry.status === "deferred")) {
     const decisionPath = paths.ownerDecision;
     const rawDecision = await readOptionalJsonFile<unknown>(decisionPath);
     const decision = z.object({ revision_sha256: z.string(), confirmed_by: z.literal("host"), approved_unit_ids: z.array(z.string()), declined_units: z.array(z.object({ id: z.string(), reason: z.string().min(1) }).strict()), deferred_findings: z.array(z.object({ finding_id:z.string(), reason:z.string().min(1) }).strict()).default([]) }).strict().safeParse(rawDecision);
@@ -252,7 +270,7 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
     }
   }
   const pendingRepair = await readPlanReviewHistory(options.artifactsDir);
-  if (pendingRepair.repair_revision === canonical.revision_sha256) return authorStep(options, source, canonical, pendingRepair.repair_reason);
+  if (pendingRepair.repair_revision === canonical.revision_sha256) return authorStep(options, source, lockedHistory, canonical, pendingRepair.repair_reason);
   for (const role of PLAN_REVIEW_ROLES) {
     const result = await reviewStep(options, canonical, role);
     if ("step_kind" in result) return result;
@@ -260,9 +278,9 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
       const critique = CritiqueSchema.parse(result.result);
       if (critique.verdict !== "approved" || critique.issues.some(issue => issue.blocking)) {
         const history=await readPlanReviewHistory(options.artifactsDir);
-        if(history.repair_rounds>=8) return repairBoundSpent(options,"Conceptual review","design issues",critique.issues);
+        if(history.repair_rounds>=8) return repairBoundSpent(options,"Conceptual review","design issues",critique.issues,lockedHistory);
         await writeJsonFile(paths.history,{...history,repair_rounds:history.repair_rounds+1,repair_revision:canonical.revision_sha256,repair_reason:JSON.stringify(critique)});
-        return authorStep(options,source,canonical,JSON.stringify(critique,null,2));
+        return authorStep(options,source,lockedHistory,canonical,JSON.stringify(critique,null,2));
       }
     }
     if (role === "judge") {
@@ -271,15 +289,15 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
       if (judge.verdict !== "approved") {
         const counterexamples = await mergedCounterexamples(options.artifactsDir, canonical.revision_sha256, history);
         const acceptedIds = judge.classifications.filter(entry => entry.classification === "accepted").map(entry => entry.counterexample_id);
-        if (history.repair_rounds >= 8) return repairBoundSpent(options, "Plan review", "judge-accepted counterexamples", acceptedIds.map(id => counterexamples.get(id) ?? { id }));
+        if (history.repair_rounds >= 8) return repairBoundSpent(options, "Plan review", "judge-accepted counterexamples", acceptedIds.map(id => counterexamples.get(id) ?? { id }), lockedHistory);
         await writeJsonFile(paths.history, { counterexamples: [...counterexamples.values()], accepted_ids: acceptedIds, repair_rounds: history.repair_rounds + 1, repair_revision: canonical.revision_sha256, repair_reason: JSON.stringify(judge) });
-        return authorStep(options, source, canonical, JSON.stringify(judge, null, 2));
+        return authorStep(options, source, lockedHistory, canonical, JSON.stringify(judge, null, 2));
       }
       const residuals = judge.classifications.filter(entry => entry.classification === "residual_risk");
       if (residuals.length) {
         const riskPath = paths.riskDecisions;
         const risk = PlanRiskDecisionSchema.safeParse(await readOptionalJsonFile<unknown>(riskPath));
-        if (!risk.success || risk.data.revision_sha256 !== canonical.revision_sha256 || residuals.some(entry => !risk.data.accepted_counterexample_ids.includes(entry.counterexample_id))) return emit(options, `# Accept or repair remaining risks\n\nThe independent judge proposes these residual risks, which remain the operator's choice:\n${JSON.stringify(residuals,null,2)}\nAsk the operator to accept them or revise the plan. Explicit acceptance is recorded at ${riskPath}: ${JSON.stringify({revision_sha256:canonical.revision_sha256,confirmed_by:"host",accepted_counterexample_ids:residuals.map(entry=>entry.counterexample_id)})}. Never infer risk acceptance from the judge's classification.`, "blocked");
+        if (!risk.success || risk.data.revision_sha256 !== canonical.revision_sha256 || residuals.some(entry => !risk.data.accepted_counterexample_ids.includes(entry.counterexample_id))) return emit(options, `# Accept or repair remaining risks\n\nThe independent judge proposes these residual risks, which remain the operator's choice:\n${JSON.stringify(residuals,null,2)}\nAsk the operator to accept them or revise the plan. Explicit acceptance is recorded at ${riskPath}: ${JSON.stringify({revision_sha256:canonical.revision_sha256,confirmed_by:"host",accepted_counterexample_ids:residuals.map(entry=>entry.counterexample_id)})}. Never infer risk acceptance from the judge's classification.\n\n${lockedHistory}`, "blocked");
       }
       const finalExamples = await mergedCounterexamples(options.artifactsDir, canonical.revision_sha256, history);
       // Approval closes this review cycle: the repair bound is per cycle, so a later revision of the approved plan starts at zero.
