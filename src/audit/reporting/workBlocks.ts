@@ -180,77 +180,6 @@ function relationshipsForFindings(params: {
   });
 }
 
-function blockDependencies(params: {
-  blocks: readonly WorkBlock[];
-  graphBundle?: GraphBundle;
-  criticalFlows?: CriticalFlowManifest;
-}): WorkBlock[] {
-  const blocksByFile = new Map<string, string[]>();
-  for (const block of params.blocks) {
-    for (const path of block.owned_files) {
-      const normalized = toPosixPath(path);
-      const blockIds = blocksByFile.get(normalized) ?? [];
-      blockIds.push(block.id);
-      blocksByFile.set(normalized, blockIds);
-    }
-  }
-  for (const ids of blocksByFile.values()) ids.sort(compareCodeUnits);
-
-  const candidates = new Set<string>();
-  const addCandidate = (from: string, to: string): void => {
-    if (from !== to) candidates.add(`${from}\u0000${to}`);
-  };
-  for (const edge of [
-    ...(params.graphBundle?.graphs.imports ?? []),
-    ...(params.graphBundle?.graphs.calls ?? []),
-    ...(params.graphBundle?.graphs.references ?? []),
-  ]) {
-    for (const from of blocksByFile.get(toPosixPath(edge.from)) ?? []) {
-      for (const to of blocksByFile.get(toPosixPath(edge.to)) ?? []) {
-        addCandidate(from, to);
-      }
-    }
-  }
-  for (const flow of params.criticalFlows?.flows ?? []) {
-    const ordered: string[] = [];
-    const seen = new Set<string>();
-    for (const path of [...flow.entrypoints, ...flow.paths]) {
-      for (const blockId of blocksByFile.get(toPosixPath(path)) ?? []) {
-        if (seen.has(blockId)) continue;
-        seen.add(blockId);
-        ordered.push(blockId);
-      }
-    }
-    for (let index = 1; index < ordered.length; index += 1) {
-      addCandidate(ordered[index - 1]!, ordered[index]!);
-    }
-  }
-
-  const dependencies = new Map(
-    params.blocks.map((block) => [block.id, new Set<string>()]),
-  );
-  const reaches = (from: string, target: string): boolean => {
-    const pending = [from];
-    const visited = new Set<string>();
-    while (pending.length > 0) {
-      const current = pending.pop()!;
-      if (current === target) return true;
-      if (visited.has(current)) continue;
-      visited.add(current);
-      pending.push(...(dependencies.get(current) ?? []));
-    }
-    return false;
-  };
-  for (const candidate of [...candidates].sort(compareCodeUnits)) {
-    const [from, to] = candidate.split("\u0000") as [string, string];
-    if (!reaches(to, from)) dependencies.get(from)?.add(to);
-  }
-  return params.blocks.map((block) => ({
-    ...block,
-    depends_on: [...(dependencies.get(block.id) ?? [])].sort(compareCodeUnits),
-  }));
-}
-
 /** Project findings through the shared content-coherence membership core. */
 export function buildWorkBlockPartition(
   params: WorkBlockPartitionInput,
@@ -301,14 +230,9 @@ export function buildWorkBlockPartition(
     };
     return block;
   });
-  const withDependencies = blockDependencies({
-    blocks,
-    graphBundle: params.graphBundle,
-    criticalFlows: params.criticalFlows,
-  });
   return {
     coherence_trace: coherenceTrace,
-    blocks: withDependencies,
-    seams: deriveWorkBlockSeams(withDependencies),
+    blocks,
+    seams: deriveWorkBlockSeams(blocks),
   };
 }
