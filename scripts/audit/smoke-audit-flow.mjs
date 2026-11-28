@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/smoke-fixture-root.test.ts, tests/audit/smoke-producer-contract.test.ts
+// sites-pinned: tests/review-evidence.test.mjs
 // The audit-code smoke FLOW — one home for the sequence both audit smokes run.
 //
 // `smoke-linked-audit-code.mjs` and `smoke-packaged-audit-code.mjs` differ only
@@ -113,7 +113,7 @@ async function submitIndependentReview(promptPath, resultPath) {
   await writeFile(resultPath, JSON.stringify(envelope, null, 2) + "\n");
 }
 
-// sites-pinned: tests/audit/smoke-progress.test.ts
+// sites-pinned: tests/review-evidence.test.mjs
 // Each CLI invocation gets a new agent slot. Compare the producer's actual
 // obligations and artifact content revisions across calls, excluding slot paths.
 async function* smokeSteps(runNextStep, log) {
@@ -244,8 +244,12 @@ async function advanceToDispatchReady(runNextStep, log) {
   }
 }
 
-async function nextStepUntilPresentReport(runNextStep, log) {
+async function nextStepUntilPresentReport(runNextStep, log, submitSupplement) {
   for await (const step of smokeSteps(runNextStep, log)) {
+    if (step.step_kind === "dispatch_review") {
+      await submitSupplement(step);
+      continue;
+    }
     if (step.step_kind === "synthesis_narrative") {
       const narrativeResultsPath = step.artifact_paths?.synthesis_narrative_results;
       assert.equal(
@@ -698,28 +702,39 @@ export async function runAuditFlowPhase({
   stepStart = Date.now();
   log.step("submit bound inconclusive answers");
   const submittedIds = [];
+  const supplementPrefix = "full-file-inspection:";
+  let supplementalReads = 0;
   const submissionDir = await mkdtemp(join(tmpdir(), "audit-smoke-answer-"));
-  try {
-    const answerPath = join(submissionDir, "answer.json");
+  const answerPath = join(submissionDir, "answer.json");
+  async function submitWorkload(workload, supplemental) {
+    assert.ok(workload.work_items.length > 0);
     for (const item of workload.work_items) {
       const { question, assignment } = item.binding;
+      if (supplemental) assert.ok(question.question_id.startsWith(supplementPrefix), "unexpected new semantic question");
+      const identity = {
+        schema_version: workload.contract_version, question_id: question.question_id,
+        revision_id: question.revision_id, snapshot_id: question.snapshot_id,
+      };
+      const inspected = supplemental ? await Promise.all(question.requested_parts.map(async ({ part_id }, index) => {
+        const source = question.source_dependencies.find(dependency => dependency.kind === "source" && dependency.key === part_id);
+        assert.ok(source, "expected a bound fixture source per supplemental part");
+        const bytes = await readFile(join(workload.source_root, source.key));
+        const ref = { path: source.key, ...(bytes.length ? { start_line: 1 } : {}) };
+        return { ...identity, part_id, observation_id: `read-${index}`, kind: "source_confirmed",
+          statement: `Read ${bytes.length} bytes of frozen fixture ${source.key}.`, source_refs: [ref], evidence_refs: [] };
+      })) : [];
+      supplementalReads += inspected.length;
       const submission = {
-        schema_version: workload.contract_version,
-        submission_id: `fixture-${assignment.assignment_id}`,
-        assignment_id: assignment.assignment_id,
-        question_id: question.question_id,
-        revision_id: question.revision_id,
-        snapshot_id: question.snapshot_id,
-        inspected_sources: [],
+        ...identity, submission_id: `fixture-${assignment.assignment_id}`, assignment_id: assignment.assignment_id,
+        inspected_sources: inspected.flatMap(observation => observation.source_refs),
         evidence_ids: [],
         limitations: ["This smoke verifies submission and report wiring, not repository behavior."],
         answer: {
-          outcome: "inconclusive",
-          findings: [],
-          observations: [],
+          outcome: "inconclusive", findings: [], observations: inspected,
           parts: question.requested_parts.map(({ part_id }) => ({
-            part_id, outcome: "inconclusive", observation_ids: [],
-            reason: "The synthetic smoke did not establish this part.",
+            part_id, outcome: "inconclusive",
+            observation_ids: inspected.filter(observation => observation.part_id === part_id).map(observation => observation.observation_id),
+            reason: "The synthetic smoke did not establish semantic behavior for this part.",
           })),
         },
       };
@@ -732,14 +747,22 @@ export async function runAuditFlowPhase({
       assert.equal(receipt.submission_id, submission.submission_id);
       submittedIds.push(submission.submission_id);
     }
+  }
+  let presented;
+  try {
+    await submitWorkload(workload, false);
+    log.elapsed("submit bound inconclusive answers", stepStart);
+    stepStart = Date.now();
+    log.step("next-step until present_report (expect supplemental file inspection, completion and promotion)");
+    presented = await nextStepUntilPresentReport(runNextStep, log, async step => {
+      const supplementalWorkload = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8"));
+      assert.equal(supplementalWorkload.contract_version, workload.contract_version);
+      assert.equal(supplementalWorkload.run_id, workload.run_id);
+      await submitWorkload(supplementalWorkload, true);
+    });
   } finally {
     await rm(submissionDir, { recursive: true, force: true });
   }
-  log.elapsed("submit bound inconclusive answers", stepStart);
-
-  stepStart = Date.now();
-  log.step("next-step until present_report (expect completion + promotion)");
-  const presented = await nextStepUntilPresentReport(runNextStep, log);
   assert.equal(presented.status, "complete");
   assert.equal(
     await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8").then((content) =>
@@ -749,6 +772,10 @@ export async function runAuditFlowPhase({
   );
   const report = JSON.parse(await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8"));
   assert.equal(report.question_review.completion, "incomplete");
+  const coverage = report.question_review.file_coverage;
+  assert.ok(supplementalReads > 0 && coverage.admitted_count > 0);
+  assert.equal(coverage.inspected_count, coverage.admitted_count);
+  assert.deepEqual(coverage.gaps, []);
   assert.deepEqual(report.findings, []);
   assert.deepEqual(report.question_review.accepted.map(({ submission }) => submission.submission_id).sort(), submittedIds.sort());
   assert.ok(report.question_review.questions.every(({ parts }) => parts.every(({ state }) => state !== "clean")));
