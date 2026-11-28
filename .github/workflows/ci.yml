@@ -77,7 +77,6 @@ on:
       - "scripts/review-routing-data.mjs"
       - "scripts/shared/**"
       - "scripts/shared/constitutional-doc-paths.generated.mjs"
-      - "scripts/shared/executor-write-sites.mjs"
       - "scripts/shared/generate-*.mjs"
       - "scripts/shared/generate-cli-surface.mjs"
       - "scripts/shared/generate-constitutional-doc-paths.mjs"
