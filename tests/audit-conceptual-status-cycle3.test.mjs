@@ -27,7 +27,7 @@ async function fixture(t, depth) {
     await writeFile(path, JSON.stringify(value));
   };
   const statePath = join(artifactsDir, "audit_state.json");
-  await put(statePath, { status: "in_progress" });
+  await put(statePath, { status: "active" });
   const dispatch = await prepareConceptualDispatch({
     artifactsDir, sourceRoot: root, bundle: {}, settings: { conceptual_depth: depth },
   });

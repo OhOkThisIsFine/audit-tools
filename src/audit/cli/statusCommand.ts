@@ -3,9 +3,9 @@ import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
-import { assertSubmissionRunId, hashContent, isFileMissingError, readJsonFile, toPromptPathToken } from "audit-tools/shared";
+import { assertSubmissionRunId, hashContent, isFileMissingError, isJsonParseError, readJsonFile, toPromptPathToken } from "audit-tools/shared";
 import { AuditTaskSchema } from "../types.js";
-import type { AuditState, ObligationState } from "../types/auditState.js";
+import { AuditTopLevelStatusSchema, type AuditState, type ObligationState } from "../types/auditState.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
 import { deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
@@ -149,18 +149,33 @@ async function publishedPreflight(artifactsDir: string, step: StepArtifact | und
   }
 }
 
+function reportInvalidAuditState(artifactsDir: string): void {
+  outputJson({
+    artifacts_dir: artifactsDir,
+    status: "invalid_audit_state",
+    error: "audit_state.json is malformed or does not contain a recognized audit status.",
+  });
+  process.exitCode = 1;
+}
+
 async function reportHeldStatus(artifactsDir: string): Promise<void> {
   await assertNoPendingFoldReceipt(artifactsDir);
   const auditStatePath = join(artifactsDir, ARTIFACT_DEFINITIONS.audit_state.fileName);
 
-  // 1. Read audit_state.json
-  let auditState: AuditState | null = null;
+  let auditState: AuditState | undefined;
   try {
-    auditState = await readJsonFile<AuditState>(auditStatePath);
-  } catch (error) {
-    if (!isFileMissingError(error)) {
-      throw error;
+    const state = await readJsonFile<AuditState | null>(auditStatePath);
+    if (!state || !AuditTopLevelStatusSchema.safeParse(state.status).success) {
+      reportInvalidAuditState(artifactsDir);
+      return;
     }
+    auditState = state;
+  } catch (error) {
+    if (isJsonParseError(error)) {
+      reportInvalidAuditState(artifactsDir);
+      return;
+    }
+    if (!isFileMissingError(error)) throw error;
   }
 
   const step = await readCurrentStep(artifactsDir).catch(() => undefined);
