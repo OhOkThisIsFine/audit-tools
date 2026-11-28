@@ -3,6 +3,10 @@ import type { ReviewAcceptedAnswer, ReviewLens, ReviewPlan } from "../../shared/
 
 const PACK_SIZE = 8;
 export const FILE_INSPECTION_PREFIX = "full-file-inspection:";
+// Colons cannot occur in validated repository paths. Keep all already valid
+// parts byte-for-byte, escaping only those whose whitespace would break ID parsing.
+export const fileInspectionPartId = (path: string) =>
+  path === path.trim() ? path : "file:" + encodeURIComponent(path);
 const pathLens = (path: string): ReviewLens => {
   if (/(^|\/)(tests?|__tests__|specs?)(\/|$)|\.(test|spec)\./iu.test(path)) return "tests";
   if (/(^|\/)(\.github|scripts|deploy|config|configs)(\/|$)|(?:^|\/)(package\.json|Dockerfile|[^/]+\.config\.[^/]+)$/iu.test(path)) return "config_deployment";
@@ -46,7 +50,7 @@ function inspectionPacket(base: ReviewPlan, lens: ReviewLens, packet: readonly s
     schema_version: base.schema_version, snapshot_id: base.snapshot_id,
     question_id, revision_id, lens, inventory_item_ids: [question_id],
     expected_outcome: "Inspect each named frozen file for the assigned lens. Read the actual file, not just tool output. Each inspected file needs an inspected_sources entry and a line-anchored source-confirmed observation in its own part (path-only for an empty file). If you cannot read a file, omit its inspected_sources entry and submit its part as inconclusive with the access reason. Do not run tools against targets or infer a defect from a lead.",
-    requested_parts: packet.map(path => ({ part_id: path, expectation: "Inspect " + path + " for " + lens + "; report a supported finding, a checked clean result, or an explicit inconclusive reason." })),
+    requested_parts: packet.map(path => ({ part_id: fileInspectionPartId(path), expectation: "Inspect " + path + " for " + lens + "; report a supported finding, a checked clean result, or an explicit inconclusive reason." })),
     source_dependencies, evidence_dependencies: [], plan_status: "pending",
   };
   return { item, question };
@@ -64,15 +68,15 @@ export function extendFullFileReview(
   const lenses = selected.length ? selected :
     base.lens_decisions.filter(row => row.decision === "not_applicable").map(row => row.lens);
   if (!lenses.length) return base;
-  const admittedSet = new Set(admitted);
+  const admittedByPart = new Map(admitted.map(path => [fileInspectionPartId(path), path]));
   const coveredByPacket = new Set<string>();
   const packets = new Map<string, ReturnType<typeof inspectionPacket>>();
   for (const { submission } of history) {
     if (!submission.question_id.startsWith(FILE_INSPECTION_PREFIX) || packets.has(submission.question_id) ||
         submission.snapshot_id !== base.snapshot_id) continue;
-    const paths = submission.answer.parts.map(part => part.part_id).sort(compareCodeUnits);
-    if (!paths.length || paths.length > PACK_SIZE || new Set(paths).size !== paths.length ||
-        paths.some(path => !admittedSet.has(path) || !fingerprints.has(path))) continue;
+    const paths = submission.answer.parts.flatMap(part => admittedByPart.get(part.part_id) ?? []).sort(compareCodeUnits);
+    if (paths.length !== submission.answer.parts.length || !paths.length || paths.length > PACK_SIZE ||
+        new Set(paths).size !== paths.length || paths.some(path => !fingerprints.has(path))) continue;
     for (const lens of lenses) {
       const packet = inspectionPacket(base, lens, paths, fingerprints);
       if (packet.question.question_id !== submission.question_id || packet.question.revision_id !== submission.revision_id) continue;

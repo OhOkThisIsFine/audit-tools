@@ -1,6 +1,6 @@
 // sites-pinned: tests/audit/question-review-acceptance.test.ts
 import { compareCodeUnits, pathMatchesPrefix, stableStringify } from "audit-tools/shared";
-import { FILE_INSPECTION_PREFIX } from "../../orchestrator/fullFileReview.js";
+import { fileInspectionPartId, FILE_INSPECTION_PREFIX } from "../../orchestrator/fullFileReview.js";
 import { isProjectRulePath } from "../../orchestrator/projectRuleEvidence.js";
 import { analyzerReceiptFingerprint } from "../../orchestrator/questionEvidence.js";
 import { DISCONFIRMATION_PART_ID, questionReopenKey } from "../../../shared/types/reviewQuestion.js";
@@ -86,8 +86,9 @@ export function acceptQuestionReview(answers: readonly ReviewAcceptedAnswer[], b
   }
   if (question.question_id.startsWith(FILE_INSPECTION_PREFIX)) {
     const inspected = new Set(submission.inspected_sources.map(ref => ref.path));
-    for (const path of requested) {
-      const part = submission.answer.parts.find(row => row.part_id === path);
+    const assignedPaths = new Set(question.source_dependencies.filter(row => row.kind === "source").map(row => row.key));
+    for (const path of assignedPaths) {
+      const part = submission.answer.parts.find(row => row.part_id === fileInspectionPartId(path));
       if (!part) throw new Error("Static inspection requires a result for each assigned file: " + path);
       const ownSource = part.observation_ids.flatMap(id => {
         const observation = observations.get(id);
@@ -102,7 +103,7 @@ export function acceptQuestionReview(answers: readonly ReviewAcceptedAnswer[], b
         throw new Error("Each declared inspection requires source-confirmed evidence for its own assigned file: " + path);
       }
     }
-    if ([...inspected].some(path => !requested.has(path))) {
+    if ([...inspected].some(path => !assignedPaths.has(path))) {
       throw new Error("Static inspection can declare reads only for its assigned files.");
     }
   }

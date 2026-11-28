@@ -238,3 +238,40 @@ test("full file inspection packets target only bounded, admitted gaps and requir
   assert.match(terminal.reason,/2 of 12 admitted files/);
   await assert.rejects(stat(join(root,".audit-tools","audit-report.md")),{code:"ENOENT"});
 });
+
+test("supplemental review preserves significant path whitespace without putting it in part IDs", async () => {
+  const { admittedFileCoverage, extendFullFileReview, fileInspectionPartId } = await load("audit/orchestrator/fullFileReview.js");
+  const { acceptQuestionReview } = await load("audit/cli/dispatch/questionReviewAcceptance.js");
+  const { ReviewAssignmentSchema, ReviewPlanSchema, ReviewSubmissionSchema } = await load("shared/types/reviewQuestion.js");
+  const schema_version = "audit-tools/question-review/v1";
+  const snapshot_id = "whitespace-snapshot";
+  const admitted = [" src.ts","src.ts","src/ending.ts "];
+  const fingerprints = new Map(admitted.map((path,i)=>[path,"hash:"+i]));
+  const empty = new Set();
+  const base = {schema_version,snapshot_id,questions:[],inventory:[],omissions:[],
+    lens_decisions:[{lens:"behavior",decision:"selected",reason:"Inspect admitted source."}]};
+  const effective = ReviewPlanSchema.parse(extendFullFileReview(base,admitted,fingerprints,[],empty));
+  const [question] = effective.questions;
+  const ids = admitted.map(fileInspectionPartId);
+  assert.equal(ids[1],admitted[1],"valid preexisting part IDs are unchanged");
+  assert.equal(new Set(ids).size,admitted.length);
+  assert.deepEqual(question.requested_parts.map(part=>part.part_id),ids);
+  const identity = {schema_version,snapshot_id,question_id:question.question_id,revision_id:question.revision_id};
+  const assignment_id = "whitespace-fixture";
+  const refs = admitted.map(path=>({path,start_line:1}));
+  const sources = admitted.map(path=>({path,line_count:1,fingerprint:fingerprints.get(path)}));
+  const assignment = ReviewAssignmentSchema.parse({...identity,assignment_id,available_evidence_ids:[],
+    suggested_sources:refs,authorized_scope:{include:[" src.ts","src.ts","src"],exclude:[]}});
+  assert.deepEqual(assignment.authorized_scope.include,[" src.ts","src.ts","src"]);
+  const binding = {question,assignment,sourceFiles:sources,evidence:[],dependencies:question.source_dependencies};
+  const submission = ReviewSubmissionSchema.parse({...identity,submission_id:"whitespace-answer",assignment_id,limitations:[],
+    inspected_sources:refs,evidence_ids:[],
+    answer:{outcome:"clean",findings:[],parts:ids.map((part_id,i)=>({part_id,outcome:"clean",observation_ids:["obs-"+i]})),
+      observations:ids.map((part_id,i)=>({...identity,part_id,observation_id:"obs-"+i,kind:"source_confirmed",
+        statement:"Reviewed exact literal file.",source_refs:[refs[i]],evidence_refs:[]}))}});
+  assert.throws(()=>acceptQuestionReview([],binding,{...submission,
+    inspected_sources:refs.map(ref=>({...ref,path:ref.path.trim()}))},"2026-11-28T00:00:00Z"),/unread assigned file|outside this assignment/);
+  const {record} = acceptQuestionReview([],binding,submission,"2026-11-28T00:00:00Z");
+  assert.deepEqual(admittedFileCoverage(admitted,[record],empty),{admitted_count:3,inspected_count:3,gaps:[]});
+  assert.deepEqual(extendFullFileReview(base,admitted,fingerprints,[],empty,[record],false),effective);
+});
