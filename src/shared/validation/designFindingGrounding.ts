@@ -64,7 +64,7 @@ export function groundDesignFinding(
 
 /**
  * Annotate each design finding with its lane and its grounding verdict, and
- * remove the tool-owned fields a submission can forge: `lead_lineage`, and the
+ * remove tool-owned grounding and provenance a submission can forge, plus the
  * `line_start`/`line_end` this path has no quote to derive.
  *
  * The LANE stamp is unconditional and comes first: every finding reaching this
@@ -111,7 +111,7 @@ export function groundDesignFindings(
   // quote). This lane grounds by path alone and never reads a file, so it has
   // nothing to derive them from: a submitted span would reach the report
   // unchecked beside spans that were, so it is dropped.
-  const marked = findings.map(({ lead_lineage: _forged, question_review_sources: _canonical, ...finding }) => ({
+  const marked = findings.map(({ grounding: _verdict, lead_lineage: _forged, question_review_sources: _canonical, ...finding }) => ({
     ...finding,
     ...(finding.affected_files === undefined
       ? {}

@@ -75,7 +75,7 @@ export function detectNonColocalization(
   const agreementThreshold = input.agreementThreshold ?? DEFAULT_AGREEMENT;
   const overlapThreshold = input.overlapThreshold ?? DEFAULT_OVERLAP;
   const minClusterSize = input.minClusterSize ?? DEFAULT_MIN_CLUSTER;
-  const maxPerKind = input.maxPerKind ?? DEFAULT_MAX_PER_KIND;
+  const maxPerKind = Math.trunc(input.maxPerKind ?? DEFAULT_MAX_PER_KIND) || 0;
   const nextId = createIdGenerator();
 
   const bySizeThenFirst = (a: string[], b: string[]) =>
@@ -101,7 +101,9 @@ export function detectNonColocalization(
       : groups.filter((g) => g.length >= 2)
     ).sort(bySizeThenFirst);
 
-    for (const group of filtered.slice(0, maxPerKind)) {
+    const firstFindingIndex = findings.length;
+    for (const group of filtered) {
+      if (findings.length - firstFindingIndex >= maxPerKind) break;
       const best = bestContainment(group, boundary);
       if (best + 1e-12 >= overlapThreshold) continue;
 
