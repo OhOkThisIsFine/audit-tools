@@ -1,4 +1,7 @@
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
+import type { AssertLockOwnership } from "../../shared/io/fileLock.js";
+import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
+import { commitFold, createFoldTransaction } from "./foldTransaction.js";
 import { ensureRunSourceRoot, readRunSourceRoot, resolveRunSince } from "../io/runSnapshot.js";
 import { readAuditReviewSubmission, currentAuditReviewInputRevision } from "./reviewSubmission.js";
 import { GATE_LANES, systemicChallengeLane } from "./laneSubmissions.js";
@@ -15,18 +18,13 @@ import {
   type SystemicChallengeSubmission,
 } from "audit-tools/shared";
 import { systemicChallengeSchemaForBundle } from "../orchestrator/systemicChallengeExecutor.js";
-import {
-  loadArtifactBundle,
-  writeCoreArtifacts,
-} from "../io/artifacts.js";
+import { loadArtifactBundle } from "../io/artifacts.js";
 import { advanceAudit } from "../orchestrator/advance.js";
 import type { AdvanceAuditResult } from "../orchestrator/advanceTypes.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
 import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
-import { sizeIndexFromManifest } from "../orchestrator/reviewPacketSizing.js";
 import { laneSubmissionPath } from "./laneSubmissions.js";
-import { buildLineIndex } from "./lineIndex.js";
 import { nextStepCommand } from "./prompts.js";
 import type { AnalyzerSetting, SynthesisNarrative, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
@@ -93,12 +91,14 @@ export async function runAuditStep(
   // Deterministic bundle mutation is one heartbeat-protected critical section.
   // Host semantic review never runs here: it is emitted as a workload and this
   // lock only covers local artifact derivation and result ingestion.
-  return await withArtifactTreeHold(options.artifactsDir, runLogger, async () => {
+  return await withArtifactTreeHold(options.artifactsDir, runLogger, async (assertOwnership) => {
+    // The fold, not standalone synthesis, owns recovery of staged submissions.
+    await assertNoPendingFoldReceipt(options.artifactsDir);
     // Check admitted tooling policy before an unsupported standalone executor
     // can restore, create or change the qualified review's frozen snapshot.
     const bundle = await loadArtifactBundle(options.artifactsDir);
     if (options.preferredExecutor === "synthesis_executor") {
-      return runStandaloneSynthesis(options, runLogger, bundle);
+      return runStandaloneSynthesis(options, runLogger, bundle, assertOwnership);
     }
     // The run's frozen snapshot is run state: created once per run, under the
     // hold, and read by every content reader of this step.
@@ -106,7 +106,7 @@ export async function runAuditStep(
     const since = options.since === undefined
       ? undefined
       : await resolveRunSince(options.root, options.artifactsDir, options.since);
-    return runAuditStepLocked({ ...options, since }, runLogger, sourceRoot, bundle);
+    return runAuditStepLocked({ ...options, since }, runLogger, sourceRoot, bundle, assertOwnership);
   });
 }
 
@@ -145,6 +145,7 @@ async function runStandaloneSynthesis(
   options: RunAuditStepOptions,
   runLogger: RunLogger,
   bundle: ArtifactBundle,
+  assertOwnership: AssertLockOwnership,
 ): Promise<AdvanceAuditResult> {
   const { root, artifactsDir } = options;
   const runId = await readQuestionReviewRunId(artifactsDir);
@@ -166,7 +167,7 @@ async function runStandaloneSynthesis(
   if (decideNextStep(projected, { emitStaleness: false }).selected_obligation !== "synthesis_current") {
     throw new Error("No deterministic synthesis is pending. Continue with: " + nextStepCommand(root, artifactsDir));
   }
-  return runAuditStepLocked(options, runLogger, sourceRoot, projected);
+  return runAuditStepLocked(options, runLogger, sourceRoot, projected, assertOwnership);
 }
 
 async function runAuditStepLocked(
@@ -174,15 +175,11 @@ async function runAuditStepLocked(
   runLogger: RunLogger,
   sourceRoot: string,
   bundle: ArtifactBundle,
+  assertOwnership: AssertLockOwnership,
 ): Promise<AdvanceAuditResult> {
   const result = await executeAdvance(options, bundle, runLogger, sourceRoot);
-  // Prune: result.updated_bundle is the full accumulated bundle, so an artifact
-  // an executor cleared to `undefined` must be removed from disk (not left to
-  // reload as a stale "present" artifact). Safe only because this is the
-  // authoritative per-step persist.
-  await writeCoreArtifacts(options.artifactsDir, result.updated_bundle, {
-    prune: true,
-  });
+  // Journal exact writes and prunes under the existing hold, without ingesting lanes.
+  await commitFold(options.artifactsDir, result.updated_bundle, createFoldTransaction(), assertOwnership);
   return result;
 }
 
@@ -196,18 +193,6 @@ async function executeAdvance(
   runLogger: RunLogger,
   sourceRoot: string,
 ): Promise<AdvanceAuditResult> {
-  // A forced question synthesis renders accepted evidence, not review packets
-  // or line attestations. The standalone path checks frozen-source integrity
-  // separately before reaching this dispatch.
-  const indexManifest = options.preferredExecutor === "synthesis_executor"
-    ? undefined
-    : bundle.repo_manifest;
-  const lineIndex = indexManifest
-    ? await buildLineIndex(sourceRoot, indexManifest)
-    : undefined;
-  const sizeIndex = indexManifest
-    ? sizeIndexFromManifest(indexManifest)
-    : undefined;
   const externalAnalyzerResults =
     options.externalAnalyzerData ??
     (options.externalAnalyzerPath
@@ -255,8 +240,6 @@ async function executeAdvance(
     root: sourceRoot,
     repositoryRoot: options.root,
     artifactsDir: options.artifactsDir,
-    lineIndex,
-    sizeIndex,
     externalAnalyzerResults,
     narrativeResults,
     criticalFlowFallbackResults,
