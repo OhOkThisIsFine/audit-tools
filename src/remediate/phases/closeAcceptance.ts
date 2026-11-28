@@ -1,9 +1,8 @@
 import { admitRemediationDirtyBaseline } from "../state/dirtyBaseline.js";
-// sites-pinned: tests/remediate/final-acceptance-window.test.ts
-import { createHash } from "node:crypto";
+// sites-pinned: tests/remediate-close-suite-reuse.test.mjs
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, sep } from "node:path";
-import { headCommit, isAdmittedProjectTestCommand, parseCommandString, runTrackedAsync, type RunLogger } from "audit-tools/shared";
+import { isAbsolute, join } from "node:path";
+import { compareCodeUnits, hashContent, hashContentStream, headCommit, isAdmittedProjectTestCommand, parseCommandString, resolveWithinRoot, runTrackedAsync, type RunLogger } from "audit-tools/shared";
 import { nativeCloseContractScripts, nativeGuardAlias, worktreeContentId } from "../steps/gateCommands.js";
 import type { RemediationState } from "../state/store.js";
 import type { OrchestratorOptions } from "../types/options.js";
@@ -49,7 +48,7 @@ const DEFAULT_NPM_SETTINGS = [
 // misses global, redirected and layered configuration. Unknown output declines reuse.
 async function npmExecutionContext(root: string): Promise<string | undefined> {
   try {
-    const env = Object.entries(process.env).sort(([a], [b]) => a.localeCompare(b));
+    const env = Object.entries(process.env).sort(([a], [b]) => compareCodeUnits(a, b));
     if (env.some(([name, value]) => value && /^node_(options|path)$/i.test(name))) return;
     const keys = DEFAULT_NPM_SETTINGS.map(([key]) => key);
     // npm scripts themselves export npm_config_prefix. Verify npm's effective
@@ -65,15 +64,10 @@ async function npmExecutionContext(root: string): Promise<string | undefined> {
         await realpath(prefix.stdout.trim()) !== await realpath(root)) return;
     const expected = DEFAULT_NPM_SETTINGS.map(([key, value]) => `${key}=${value}`).join("\n");
     if (result.stdout.trim().replaceAll("\r\n", "\n") !== expected) return;
-    return createHash("sha256").update(JSON.stringify([env, expected])).digest("hex");
+    return hashContent(JSON.stringify([env, expected]));
   } catch {
     return undefined;
   }
-}
-
-function within(base: string, path: string): boolean {
-  const rel = relative(base, path);
-  return rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel);
 }
 
 /**
@@ -86,40 +80,37 @@ async function nativeCloseInputs(root: string, npmContext: string): Promise<stri
   try {
     const [tree, head, canonical] = await Promise.all([worktreeContentId(root), headCommit(root), realpath(root)]);
     if (!tree || !head) return;
-    const hash = createHash("sha256").update(JSON.stringify([canonical, tree, head, npmContext]));
-    async function walk(path: string, key: string, installation?: string): Promise<string | undefined> {
-      const entries = (await readdir(path, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-      const subtree = createHash("sha256").update(key);
+    async function* walkEntries(path: string, key: string, installation?: string): AsyncGenerator<Uint8Array> {
+      const entries = (await readdir(path, { withFileTypes: true })).sort((a, b) => compareCodeUnits(a.name, b.name));
+      yield Buffer.from(key);
       // Batch sibling probes to keep Windows filesystem round trips bounded.
       for (let offset = 0; offset < entries.length; offset += 24) {
         const results = await Promise.all(entries.slice(offset, offset + 24).map(async entry => {
           const child = join(path, entry.name);
-          if (entry.isDirectory()) return walk(child, entry.name, installation);
+          if (entry.isDirectory()) return hashContentStream(walkEntries(child, entry.name, installation));
           const info = await lstat(child, { bigint: true });
           const identity = JSON.stringify([entry.name, ...[info.dev, info.ino, info.size, info.mode, info.ctimeNs, info.mtimeNs].map(String)]);
           if (entry.isSymbolicLink() && installation) {
             const target = await realpath(child);
-            return within(installation, target) ? identity + target : undefined;
+            return resolveWithinRoot(installation, target) ? identity + target : undefined;
           }
           if (!entry.isFile() || !info.isFile()) return undefined;
-          return installation ? identity : createHash("sha256").update(identity).update(await readFile(child)).digest("hex");
+          return installation ? identity : hashContent(Buffer.concat([Buffer.from(identity), await readFile(child)]));
         }));
         for (const result of results) {
-          if (result === undefined) return;
-          subtree.update(JSON.stringify(result));
+          if (result === undefined) throw new Error("Unrecognized native close input");
+          yield Buffer.from(JSON.stringify(result));
         }
       }
-      return subtree.digest("hex");
     }
     const built = join(canonical, "dist");
     if (!(await lstat(built)).isDirectory()) return;
     const deps = await realpath(join(canonical, "node_modules"));
     const results = await Promise.all([
-      walk(built, "dist"), walk(deps, "node_modules", deps),
-      walk(join(canonical, "tests"), "tests"), walk(join(canonical, "scripts"), "scripts"),
+      hashContentStream(walkEntries(built, "dist")), hashContentStream(walkEntries(deps, "node_modules", deps)),
+      hashContentStream(walkEntries(join(canonical, "tests"), "tests")), hashContentStream(walkEntries(join(canonical, "scripts"), "scripts")),
     ]);
-    if (results.some(result => result === undefined)) return;
-    return hash.update(JSON.stringify([deps, results])).digest("hex");
+    return hashContent(JSON.stringify([canonical, tree, head, npmContext]) + JSON.stringify([deps, results]));
   } catch {
     return undefined;
   }

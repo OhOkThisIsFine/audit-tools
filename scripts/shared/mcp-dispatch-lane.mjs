@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/triage-lane-health.test.ts
+// sites-pinned: tests/dispatch-deadline-cycle2.test.mjs
 // The agent-dispatch dispatch lane — a stdio MCP client to the agent-dispatch
 // bridge (`node <repo>/src/cli.ts bridge`), ONE bridge process, N concurrent
 // fire/wait pairs matched by JSON-RPC id.
@@ -248,7 +248,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// sites-pinned: tests/shared/dispatch-lane-worktree.test.ts
+// sites-pinned: tests/dispatch-deadline-cycle2.test.mjs
 /** The name every helper-owned lane worktree carries; the pid is its owner. */
 const LANE_WORKTREE_NAME = /^dispatch-lane-(\d+)-[0-9a-f]+$/;
 
@@ -605,8 +605,8 @@ async function callTool(bridge, name, args, deadline, onSend) {
   return sc;
 }
 
-// sites-pinned: tests/shared/triage-lane-health.test.ts
-//   The deadline cancel and the input_required cancel are driven there.
+// sites-pinned: tests/dispatch-deadline-cycle2.test.mjs
+//   The fixture drives deadline cancellation with and without a reply.
 /**
  * Cancel a job. A failed cancel throws a `DispatchLaneError` whose text names
  * the job and `failedWhat`, the phrase that says which cancel failed.
@@ -738,7 +738,7 @@ export function openDispatchLane({
       await bridge.ready(deadline);
       const agent = opts.mode === 'agent' ? 'dispatch' : 'answer';
       const requested = resolve(opts.cwd ?? cwd);
-      // sites-pinned: tests/shared/dispatch-lane-worktree.test.ts
+      // sites-pinned: tests/dispatch-deadline-cycle2.test.mjs
       const worktree = agent === 'dispatch' ? openLaneWorktree(requested, deadline) : null;
       let fireSent = false;
       let terminal = false;
@@ -778,7 +778,7 @@ export function openDispatchLane({
           status: 'unknown',
           jobId,
           checkout: worktree?.path,
-          error: 'execution outcome unknown' + identity + ': ' + (err?.message ?? err),
+          error: 'execution outcome unknown' + identity + ': ' + (/** @type {{ message?: unknown } | null | undefined} */ (err)?.message ?? err),
         });
       } finally {
         if (!fireSent || terminal) worktree?.remove();

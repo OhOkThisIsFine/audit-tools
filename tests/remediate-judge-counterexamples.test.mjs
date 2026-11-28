@@ -47,7 +47,7 @@ async function judgeFixture(t, acceptedIds, currentIds) {
   assert.match(await prompt(next()), /^# Executable plan critique/u);
   await submit("critique", { verdict: "approved", issues: [] });
   assert.match(await prompt(next()), /^# Executable plan critic/u);
-  await submit("critic", { counterexamples: currentIds.map(example) });
+  await submit("critic", { counterexamples: currentIds.map(id => ({ ...example(id), claim: `Current critic claim ${id}` })) });
   const judgePrompt = await prompt(next());
   assert.match(judgePrompt, /^# Executable plan judge/u);
   const classifications = ids => ({ verdict: "approved",
@@ -86,4 +86,15 @@ test("native judge explicitly requests an empty classifications array when only 
   await submit("judge", classifications([]));
   assert.equal(await next(), null);
   assert.deepEqual((await readApprovedExecutionPlan(artifactsDir)).history.counterexamples.map(entry => entry.id), ["closed"]);
+});
+
+test("native judge uses the current critic record when historical IDs recur", async t => {
+  const { judgePrompt, next, submit, classifications } = await judgeFixture(t, ["carried", "repeated"], ["closed", "repeated"]);
+  assert.match(judgePrompt, /^Required counterexample classification IDs: \["carried","repeated","closed"\]\./mu);
+  assert.match(judgePrompt, /Use the current critic review for any ID it reports/u);
+  assert.match(judgePrompt, /^Active counterexamples carried from earlier reviews: .*"id":"carried"/mu);
+  assert.match(judgePrompt, /^Historical counterexamples \(reference only; do not classify\): \[\]\./mu);
+  assert.doesNotMatch(judgePrompt, /"id":"(?:closed|repeated)"/u);
+  await submit("judge", classifications(["carried", "repeated", "closed"]));
+  assert.equal(await next(), null);
 });

@@ -1,8 +1,9 @@
-// sites-pinned: tests/shared/analyzer-acquisition-engine.test.ts, tests/shared/analyzer-pipx-contract.test.ts, tests/audit/analyzer-run-consent.test.ts
+// sites-pinned: tests/analyzer-recovery.test.mjs
 import { accessSync, chmodSync, constants, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 import { hashContent } from "../hash.js";
+import { resolveWithinRoot } from "../io/pathContainment.js";
 import {
   resolveSpawnDeadline,
   runTrackedAsync,
@@ -605,8 +606,7 @@ function existingRuntimePaths(candidate: ExternalAnalyzerCandidate, root: string
       (process.platform === "win32" && basename(executable).toLowerCase() !== name.toLowerCase() + ".exe")) {
     throw new Error("not a directly executable file");
   }
-  const location = relative(realpathSync(root), executable);
-  if (!isAbsolute(location) && location !== ".." && !location.startsWith(".." + sep)) {
+  if (resolveWithinRoot(realpathSync(root), executable) !== null) {
     throw new Error("analyzer executable is inside the frozen source");
   }
   accessSync(executable, constants.X_OK);

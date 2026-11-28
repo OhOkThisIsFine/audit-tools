@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/prompt-capability.test.ts, tests/shared/prompt-renders-its-contract.test.ts, tests/remediate/adversarial-depth-dial.test.ts
+// sites-pinned: tests/remediate-judge-counterexamples.test.mjs, tests/remediate-mixed-guidance.test.mjs
 import type { ReviewRequirement } from "../../shared/types/reviewIndependence.js";
 import type { AdversarialDepth } from "../riskSignal.js";
 import type { PlanReviewRole, PlanSource, CanonicalPlan, PlanReviewHistory } from "../contractPipeline/executionPlan.js";
@@ -59,6 +59,7 @@ export function renderPlanReviewPrompt(params: {
   canonical: CanonicalPlan; history: PlanReviewHistory; priorReviewPaths: string[];
   requirement: ReviewRequirement;
   requiredCounterexampleIds: ReadonlySet<string>;
+  currentCounterexampleIds: ReadonlySet<string>;
   graphHint?: string;
 }): string {
   const tasks = {
@@ -67,11 +68,13 @@ export function renderPlanReviewPrompt(params: {
     judge: `Independently judge every current or previously accepted counterexample, and assess every requirement and source disposition against concrete evidence. Return {verdict:"approved"|"needs_repair",classifications:[{counterexample_id,classification:"accepted"|"repaired"|"invalid"|"out_of_scope"|"duplicate"|"residual_risk",rationale}],requirement_assessments:[{requirement_id,verdict:"satisfied"|"insufficient",evidence:[...]}],disposition_assessments:[{finding_id,verdict:"satisfied"|"insufficient",evidence:[...]}]}. Approved means every requirement/disposition is sufficient and no accepted counterexample remains. For an empty request, include request_disposition_assessment:{verdict:"satisfied"|"insufficient",evidence:[...]}. Use repaired only with concrete evidence that the plan now addresses a previously accepted counterexample. A claimed repair must actually address the counterexample; merely listing its ID is not proof.`,
   };
   const scope = [...new Set(params.canonical.plan.units.flatMap(unit => [...unit.read_paths, ...unit.allowed_files]))];
+  const unmatchedHistory = params.history.counterexamples.filter(entry => !params.currentCounterexampleIds.has(entry.id));
   const counterexamples = params.role === "judge"
     ? `Required counterexample classification IDs: ${JSON.stringify([...params.requiredCounterexampleIds])}.
 ${params.requiredCounterexampleIds.size ? "Classify exactly these IDs once each." : "No IDs are required; return classifications: []."}
-Active counterexamples carried from earlier reviews: ${JSON.stringify(params.history.counterexamples.filter(entry => params.requiredCounterexampleIds.has(entry.id)))}.
-Historical counterexamples (reference only; do not classify): ${JSON.stringify(params.history.counterexamples.filter(entry => !params.requiredCounterexampleIds.has(entry.id)))}.`
+Use the current critic review for any ID it reports; it supersedes earlier records with that ID.
+Active counterexamples carried from earlier reviews: ${JSON.stringify(unmatchedHistory.filter(entry => params.requiredCounterexampleIds.has(entry.id)))}.
+Historical counterexamples (reference only; do not classify): ${JSON.stringify(unmatchedHistory.filter(entry => !params.requiredCounterexampleIds.has(entry.id)))}.`
     : `Historical counterexamples: ${JSON.stringify(params.history.counterexamples)}.`;
   return `# Executable plan ${params.role}
 

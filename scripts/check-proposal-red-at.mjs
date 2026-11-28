@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const PROPOSALS_PREFIX = '.audit-tools/nightly/proposals/';
 
+/** @type {import('node:child_process').ExecFileSyncOptionsWithStringEncoding} */
 const gitOptions = {
   cwd: ROOT,
   encoding: 'utf8',

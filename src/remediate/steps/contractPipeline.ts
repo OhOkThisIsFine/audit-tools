@@ -1,6 +1,6 @@
 import { QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION } from "../../shared/types/questionReviewReport.js";
 import { STATE_FILENAME } from "../state/store.js";
-// sites-pinned: tests/remediate/executable-plan-identity.test.ts, tests/remediate/executable-plan-safety.test.ts, tests/remediate/contract-review-independence.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
+// sites-pinned: tests/remediate-judge-counterexamples.test.mjs, tests/remediate-mixed-guidance.test.mjs, tests/remediate-closeout-refresh.test.mjs
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -128,13 +128,13 @@ async function reviewStep(options: ContractPipelineStepOptions, canonical: Canon
   const prior = await readPlanReview(options.artifactsDir, role, canonical.revision_sha256);
   const { adversarialDepth } = await resolveAdversarialDepth(options.artifactsDir);
   const requirement = reviewRequirementForRole(role, adversarialDepth);
-  const requiredCounterexampleIds = new Set(role === "judge" ? [
-    ...history.accepted_ids,
-    ...CriticSchema.parse(dependencies[1]?.result).counterexamples.map(entry => entry.id),
-  ] : []);
+  const currentCounterexampleIds = new Set(role === "judge"
+    ? CriticSchema.parse(dependencies[1]?.result).counterexamples.map(entry => entry.id)
+    : []);
+  const requiredCounterexampleIds = new Set(role === "judge" ? [...history.accepted_ids, ...currentCounterexampleIds] : []);
   const body = renderPlanReviewPrompt({ role, root: options.root, sourcePath: paths.source, planPath: paths.canonical,
     canonical, history, priorReviewPaths: REVIEW_DEPENDENCIES[role].map(dependency => paths.review(dependency).accepted), requirement,
-    requiredCounterexampleIds, graphHint: await options.planningGraph?.() });
+    requiredCounterexampleIds, currentCounterexampleIds, graphHint: await options.planningGraph?.() });
   const bound = bindWorkerPrompt(body + `\nInput binding: ${inputSha}`, prompt_sha256 => JSON.stringify({
     contract_version: "review-submission/v1", prompt_sha256,
     review: { mode: requirement === "independent" ? "independent" : "degraded", reason: "<how the context meets the review policy>" },
