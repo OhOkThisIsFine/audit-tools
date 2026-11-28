@@ -143,7 +143,7 @@ async function cleanupHeld(
   const sweepPath = join(artifactsDir, sweepName);
   let status: AuditState["status"] | "unknown" = "unknown";
   let stateDigest: string | undefined;
-  let corrupt = false;
+  let invalidMarker: string | undefined;
   if (target) {
     const info = await inspectEntry(join(artifactsDir, marker));
     if (info && (!info.isFile() || info.isSymbolicLink())) {
@@ -155,17 +155,19 @@ async function cleanupHeld(
     if (target) {
       const parsed = AuditTopLevelStatusSchema.safeParse(state?.status);
       if (parsed.success) status = parsed.data;
-      else corrupt = true;
+      else invalidMarker = "Invalid audit_state.json: unrecognized audit status.";
     } else {
       status = state.status;
     }
-    if (!corrupt) stateDigest = hashContent(JSON.stringify(state));
+    if (!invalidMarker) stateDigest = hashContent(JSON.stringify(state));
   } catch (error) {
-    if (target && force && isJsonParseError(error)) corrupt = true;
+    if (target && isJsonParseError(error)) invalidMarker = "Invalid audit_state.json: malformed JSON.";
     else if (!isFileMissingError(error)) throw error;
   }
 
-  const missingRequiredMarker = force && options.requireAuditMarker && status === "unknown" && !corrupt;
+  if (invalidMarker && !force) return { action: "skipped", status, reason: invalidMarker };
+
+  const missingRequiredMarker = force && options.requireAuditMarker && status === "unknown" && !invalidMarker;
   let retainedRecord: string | undefined;
   if (missingRequiredMarker) {
     if (target) {
@@ -180,10 +182,15 @@ async function cleanupHeld(
     }
   }
 
-  const requireSnapshot = target !== undefined && (target.custom || (force && corrupt) || missingRequiredMarker);
+  const requireSnapshot = target !== undefined && (target.custom || invalidMarker !== undefined || missingRequiredMarker);
   if (requireSnapshot && retainedRecord === undefined) {
     await assertOwnership();
-    retainedRecord = await assertCleanupSnapshotOwnership(target.root, artifactsDir);
+    try {
+      retainedRecord = await assertCleanupSnapshotOwnership(target.root, artifactsDir);
+    } catch (error) {
+      if (!invalidMarker || !(error instanceof Error)) throw error;
+      throw new Error(`${invalidMarker} ${error.message}`, { cause: error });
+    }
   }
 
   const sweep = !force && stateDigest && (status === "not_started" || status === "complete")
@@ -234,7 +241,8 @@ async function cleanupHeld(
       return {
         action: "skipped",
         status,
-        reason: `the run's snapshot could not be removed (${problems.join("; ")})` +
+        reason: (invalidMarker ? `${invalidMarker} ` : "") +
+          `the run's snapshot could not be removed (${problems.join("; ")})` +
           (requireSnapshot ? "; refusing cleanup without safe snapshot removal" : "; fix that, or use --force to delete anyway"),
       };
     }
