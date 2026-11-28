@@ -4,8 +4,9 @@ import { dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import {
   hashContent, isFileMissingError, isSha256, resolveWithinRoot,
-  runTrackedAsync, stableStringify,
+  runTrackedAsync, stableStringify, writeJsonFile,
 } from "audit-tools/shared";
+import { errorMessage } from "../../shared/io/json.js";
 import { resolveExecutableFile } from "../../shared/tooling/resolveExecutable.js";
 import { reviewerCbmCacheDirectory } from "../io/reviewerCbmCache.js";
 
@@ -13,6 +14,9 @@ const ENGINE = "codebase-memory-mcp";
 
 const PROJECT = "audit-review";
 const MANIFEST = "ready.json";
+const FailureMarker = z.strictObject({
+  key: z.string().refine(isSha256), reason: z.string().min(1).max(400),
+});
 interface SourceFile { path: string; fingerprint: string }
 export const ReviewerCbmSchema = z.strictObject({
   key: z.string().refine(isSha256), engine: z.literal(ENGINE), build: z.string().refine(isSha256).optional(), version: z.string().optional(),
@@ -64,21 +68,45 @@ async function run(binary: string, home: string, operation: string, args: object
 
 /** Source-only local index. Stage only admitted bytes, never the live workspace,
  * Git metadata, or file links. Remove the staging tree before publishing. */
-export async function prepareReviewerCbm(runDir: string, sourceRoot: string, files: readonly SourceFile[]): Promise<ReviewerCbm | undefined> {
+export async function prepareReviewerCbm(runDir: string, sourceRoot: string, files: readonly SourceFile[]): Promise<{
+  indexed?: ReviewerCbm; failure?: string; reusedFailure?: boolean;
+}> {
   const binary = executable();
-  if (!binary) {
-    if (process.env.AUDIT_TOOLS_CBM_BIN !== undefined) throw new Error("AUDIT_TOOLS_CBM_BIN must name an absolute native executable.");
-    return undefined;
+  const configured = process.env.AUDIT_TOOLS_CBM_BIN;
+  if (!binary && configured === undefined) return {};
+  let build: string | undefined;
+  let preflightFailure: string | undefined;
+  if (binary) {
+    try { build = await executableBuild(binary); }
+    catch (error) { preflightFailure = errorMessage(error); }
+  } else {
+    preflightFailure = "AUDIT_TOOLS_CBM_BIN must name an absolute native executable.";
   }
-  const build = await executableBuild(binary);
-  const identity = { engine: ENGINE, build, files };
-  const key = hashContent(stableStringify(identity));
-  const meta = ReviewerCbmSchema.parse({ key, engine: ENGINE, build });
+  const root = await realpath(sourceRoot);
+  const key = hashContent(stableStringify({
+    engine: ENGINE, root, files, tool: build ? { binary, build } : { unqualified: binary ?? configured },
+    ...(process.platform === "win32" && { systemRoot: process.env.SystemRoot }),
+  }));
   await mkdir(runDir, { recursive: true });
   const cache = await reviewerCbmCacheDirectory(runDir);
+  const failurePath = join(cache, "failed.json");
+  try {
+    const prior = FailureMarker.safeParse(JSON.parse(await readFile(failurePath, "utf8")));
+    if (prior.success && prior.data.key === key) return { failure: prior.data.reason, reusedFailure: true };
+  } catch (error) {
+    if (!isFileMissingError(error) && !(error instanceof SyntaxError)) throw error;
+  }
+  const recordFailure = async (reason: string) => {
+    const failure = reason.slice(0, 400);
+    await mkdir(cache, { recursive: true });
+    await writeJsonFile(failurePath, { key, reason: failure });
+    return { failure };
+  };
+  if (!binary || !build) return recordFailure(preflightFailure ?? "Codebase Memory executable was not qualified.");
+  const meta = ReviewerCbmSchema.parse({ key, engine: ENGINE, build });
   const final = join(cache, key);
   const ready = async () => ReviewerCbmSchema.parse(JSON.parse(await readFile(join(final, MANIFEST), "utf8"))).key === key;
-  try { if (await ready()) return meta; } catch (error) { if (!isFileMissingError(error)) throw error; }
+  try { if (await ready()) return { indexed: meta }; } catch (error) { if (!isFileMissingError(error)) throw error; }
   await mkdir(cache, { recursive: true });
   const scratch = await mkdtemp(join(cache, "build-"));
   const input = join(scratch, "source");
@@ -87,7 +115,6 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
       await Promise.all(["appdata", "localappdata"].map(path => mkdir(join(scratch, path))));
     }
     await mkdir(input);
-    const root = await realpath(sourceRoot);
     for (const file of files) {
       if (file.path.includes("\\") || file.path.split("/").some(part => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) {
         throw new Error("Unusable path in admitted source index.");
@@ -102,18 +129,22 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, content, { flag: "wx" });
     }
-    const response = z.looseObject({ status: z.literal("indexed") }).safeParse(await run(binary, scratch, "index_repository", {
-      repo_path: input, name: PROJECT, mode: "full", doc_candidates: false,
-    }, 60_000));
-    if (!response.success) throw new Error("Codebase Memory did not confirm that indexing finished.");
-    if (files[0]) {
-      await queryPage(binary, scratch, { path: files[0].path, symbol: "__audit_tools_empty_probe__", direction: "outbound", detail: "call-sites", limit: 1 });
+    try {
+      const response = z.looseObject({ status: z.literal("indexed") }).safeParse(await run(binary, scratch, "index_repository", {
+        repo_path: input, name: PROJECT, mode: "full", doc_candidates: false,
+      }, 60_000));
+      if (!response.success) throw new Error("Codebase Memory did not confirm that indexing finished.");
+      if (files[0]) {
+        await queryPage(binary, scratch, { path: files[0].path, symbol: "__audit_tools_empty_probe__", direction: "outbound", detail: "call-sites", limit: 1 });
+      }
+    } catch (error) {
+      return await recordFailure(errorMessage(error));
     }
     await rm(input, { recursive: true, force: true });
     await writeFile(join(scratch, MANIFEST), JSON.stringify(meta) + "\n", { flag: "wx" });
     try { await rename(scratch, final); }
     catch (error) { if (!(await ready().catch(() => false))) throw error; }
-    return meta;
+    return { indexed: meta };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

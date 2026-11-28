@@ -1498,7 +1498,8 @@ const emitAnalyzerCalibration = emissionRow<"analyzer_calibration">(
       : graph.indexed
       ? "The Codebase Memory index is available; query it on demand."
       : graph.graphIndexFailed
-        ? "Codebase Memory could not index this run. Diagnostic: " + JSON.stringify(graph.graphIndexError) +
+        ? (graph.graphIndexFailureReused ? "Codebase Memory reused the documented fallback for unchanged inputs; no indexing was attempted. " :
+          "Codebase Memory could not index this run. ") + "Diagnostic: " + JSON.stringify(graph.graphIndexError) +
           ". Check the configured executable and compatibility. Repair when feasible under existing permission. After a change, run next-step to try again. If it cannot be restored, record the specific limitation. " + fallback
         : "Codebase Memory is not configured. If indexed detail would materially help, propose installing or configuring it; do not silently install it. " + fallback;
     const prompt = [

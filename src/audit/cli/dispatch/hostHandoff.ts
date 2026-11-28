@@ -284,12 +284,19 @@ export async function publishAuditEvidenceGraph(
     .sort((a, b) => compareCodeUnits(a.path, b.path));
   let indexed;
   let graphIndexError: string | undefined;
+  let graphIndexFailureReused = false;
   if (indexSourceOnly !== "native-only" && (graph || indexSourceOnly)) {
-    try { indexed = await prepareReviewerCbm(artifactsDir, sourceRoot, files); }
+    try {
+      const result = await prepareReviewerCbm(artifactsDir, sourceRoot, files);
+      indexed = result.indexed;
+      graphIndexError = result.failure;
+      graphIndexFailureReused = result.reusedFailure === true;
+    }
     catch (error) {
       graphIndexError = errorMessage(error);
-      console.warn("[audit-code] Codebase Memory index unavailable: " + graphIndexError);
     }
+    if (graphIndexError) console.warn("[audit-code] Codebase Memory index unavailable: "
+      + (graphIndexFailureReused ? "reused unchanged fallback; no index attempted. " : "") + graphIndexError);
   }
   // An empty native graph is an index transport only after source indexing
   // actually succeeded. Failed or unconfigured indexing must not publish it.
@@ -300,7 +307,7 @@ export async function publishAuditEvidenceGraph(
   const graphSha256 = graphText === undefined ? undefined : hashContent(graphText);
   const graphIndex = graphSha256 === undefined ? undefined : reviewerGraphIndex(artifactsDir, graphSha256);
   if (graphIndex !== undefined && graphText !== undefined) await saveImmutableReviewText(graphIndex, graphText);
-  return { graphIndex, graphSha256, indexed, indexedOnly, graphIndexFailed: graphIndexError !== undefined, graphIndexError };
+  return { graphIndex, graphSha256, indexed, indexedOnly, graphIndexFailed: graphIndexError !== undefined, graphIndexError, graphIndexFailureReused };
 }
 
 export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
