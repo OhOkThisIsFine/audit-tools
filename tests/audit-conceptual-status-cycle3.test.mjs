@@ -4,8 +4,9 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { format, promisify } from "node:util";
 import test from "node:test";
+import { runCli } from "../dist/audit/cli.js";
 import { prepareConceptualDispatch } from "../dist/audit/cli/conceptualDispatch.js";
 import { readAuditReviewBinding } from "../dist/audit/cli/auditReviewBindings.js";
 import { GATE_LANES, recordLaneOutcome } from "../dist/audit/cli/laneSubmissions.js";
@@ -51,9 +52,27 @@ async function fixture(t, depth) {
       return [path, e.isFile() ? await readFile(path) : e.isDirectory() ? "directory" : "other"];
     }).sort());
   };
-  const status = async () => {
+  const status = async ({ subprocess = false } = {}) => {
     const before = await inventory();
-    const { stdout } = await exec(process.execPath, [cli, "status", "--root", root], { cwd: root, timeout: 15000 });
+    const argv = [cli, "status", "--root", root];
+    // Keep one standalone CLI witness. The remaining calls exercise the
+    // identical dispatcher against each on-disk state without restarting Node.
+    let stdout;
+    if (subprocess) {
+      ({ stdout } = await exec(process.execPath, argv, { cwd: root, timeout: 15000 }));
+    } else {
+      stdout = "";
+      const exitCode = process.exitCode;
+      const log = t.mock.method(console, "log", (...args) => { stdout += format(...args) + "\n"; });
+      try {
+        process.exitCode = undefined;
+        await runCli([process.execPath, ...argv]);
+        assert.equal(process.exitCode ?? 0, 0);
+      } finally {
+        log.mock.restore();
+        process.exitCode = exitCode;
+      }
+    }
     assert.deepEqual(await inventory(), before, "status must not modify the run, submissions, or ledger");
     const report = JSON.parse(stdout);
     assert.equal(report.systemic_challenge_continuation, null);
@@ -77,7 +96,7 @@ test("a deep publication follows current perspective and judge results without r
   const judgeAnswer = {
     round_id: manifest.round_id, findings: [], candidate_dispositions: [], final_finding_shares: [],
   };
-  assert.equal((await status()).state, "await_perspectives");
+  assert.equal((await status({ subprocess: true })).state, "await_perspectives");
 
   // A prompt-bound judge response cannot bypass missing perspectives.
   await submit(judge, judgeAnswer);

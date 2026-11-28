@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { format } from "node:util";
+import { runCli } from "../dist/audit/cli.js";
 import { fileURLToPath } from "node:url";
 import { runTrackedAsync } from "audit-tools/shared";
 import { runSyntaxResolutionExecutor } from "../dist/audit/orchestrator/syntaxResolutionExecutor.js";
@@ -168,9 +170,24 @@ test("import CLI persists only admitted results, reports all received rows, and 
   await writeFile(join(artifacts, "repo_manifest.json"), JSON.stringify(sampleManifest));
   const command = [process.execPath, fileURLToPath(new URL("../audit-code.mjs", import.meta.url)),
     "import-external-analyzer", "--root", root, "--artifacts-dir", artifacts, "--external-analyzer-results", source];
-  const call = async results => {
+  const call = async (results, { subprocess = false } = {}) => {
     await writeFile(source, JSON.stringify({ tool: "fixture", results }));
-    return runTrackedAsync(command, { cwd: root, timeout: 20000 });
+    // The earlier standalone CLI test covers success; keep the malformed
+    // subprocess here to prove the public nonzero exit and stderr boundary.
+    if (subprocess) return runTrackedAsync(command, { cwd: root, timeout: 20000 });
+    let stdout = "", stderr = "";
+    const previous = process.exitCode;
+    const log = t.mock.method(console, "log", (...args) => { stdout += format(...args) + "\n"; });
+    const error = t.mock.method(console, "error", (...args) => { stderr += format(...args) + "\n"; });
+    try {
+      process.exitCode = undefined;
+      await runCli(command);
+      return { stdout, stderr, status: process.exitCode ?? 0 };
+    } finally {
+      log.mock.restore();
+      error.mock.restore();
+      process.exitCode = previous;
+    }
   };
   const admitted = sampleRow("sample.js");
   const omitted = sampleRow("excluded.js");
@@ -179,7 +196,7 @@ test("import CLI persists only admitted results, reports all received rows, and 
   assert.equal(JSON.parse(noop.stdout).received_count, 1);
   assert.match(JSON.parse(noop.stdout).progress_summary, /Omitted 1 finding/);
   await assert.rejects(readFile(stored, "utf8"), { code: "ENOENT" });
-  const malformed = await call([admitted, null]);
+  const malformed = await call([admitted, null], { subprocess: true });
   assert.notEqual(malformed.status, 0);
   assert.match(malformed.stderr, /Invalid external analyzer result at results\[1\]/);
   await assert.rejects(readFile(stored, "utf8"), { code: "ENOENT" });
