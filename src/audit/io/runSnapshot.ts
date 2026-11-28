@@ -51,9 +51,9 @@ import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath,
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
-import { compareCodeUnits, hashContent, isFileMissingError, isSha256, readOptionalJsonFile, resolveAuditCodeStateDir, resolveWithinRoot, toPosixPath, uniqueSorted, writeJsonFile } from "audit-tools/shared";
+import { compareCodeUnits, hashContent, isFileMissingError, isSha256, readJsonFile, readOptionalJsonFile, resolveAuditCodeStateDir, resolveWithinRoot, toPosixPath, uniqueSorted, writeJsonFile } from "audit-tools/shared";
 import { headCommit, isGitRepo, workingTreeTree } from "../../shared/git.js";
-import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../../shared/tooling/exec.js";
+import { runTrackedAsync, shellQuote, TRACKED_CHILD_DEADLINE_MS } from "../../shared/tooling/exec.js";
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { buildRepoManifestFromFs, isIntakeIgnored } from "../extractors/fsIntake.js";
 import { loadIgnoreFile } from "../extractors/ignore.js";
@@ -541,9 +541,16 @@ async function pinsIntact(pins: readonly GitPin[]): Promise<boolean> {
   return true;
 }
 
-function restoreRefusal(reason: string): Error {
+export function forceCleanupCommand(root: string, artifactsDir: string): string {
+  const quotePath = (path: string) => process.platform === "win32"
+    ? "'" + resolve(path).replace(/'/g, "''") + "'" // PowerShell literal argument.
+    : shellQuote(resolve(path));
+  return `audit-code cleanup --force --root ${quotePath(root)} --artifacts-dir ${quotePath(artifactsDir)}`;
+}
+
+function restoreRefusal(root: string, artifactsDir: string, reason: string): Error {
   return new Error("Unable to verify/restore frozen bytes: " + reason +
-    ". Run \`audit-code cleanup --force\` to discard the run, then start a new one.");
+    `. Run \`${forceCleanupCommand(root, artifactsDir)}\` to discard the run, then start a new one.`);
 }
 
 async function readRawSourceManifest(root: string) {
@@ -561,7 +568,7 @@ function rawSourceDigest(files: readonly { path: string; hash?: string | undefin
  * Git clean/checkout filters can preserve normalized text without restoring
  * the exact bytes bound to this audit's evidence.
  */
-async function restoreSnapshot(record: RunSnapshot, artifactsDir: string): Promise<RunSnapshot> {
+async function restoreSnapshot(record: RunSnapshot, root: string, artifactsDir: string): Promise<RunSnapshot> {
   const recordPath = runSnapshotPath(artifactsDir);
   // A crash or failed comparison must not allow the next reader to mistake
   // freshly created Git metadata for an already verified recovery.
@@ -570,7 +577,7 @@ async function restoreSnapshot(record: RunSnapshot, artifactsDir: string): Promi
     await readOptionalJsonFile<unknown>(join(artifactsDir, "repo_manifest.json")).catch(() => undefined),
   );
   if (expected && (!expected.success || !expected.data.files.length || expected.data.files.some(file => !isSha256(file.hash)))) {
-    throw restoreRefusal("the frozen repository manifest is missing or lacks complete raw hashes");
+    throw restoreRefusal(root, artifactsDir, "the frozen repository manifest is missing or lacks complete raw hashes");
   }
   const warnings: string[] = [];
   const linked = new Set<string>();
@@ -587,15 +594,15 @@ async function restoreSnapshot(record: RunSnapshot, artifactsDir: string): Promi
   const actual = await readRawSourceManifest(record.source_root);
   if (record.repinned_source_digest) {
     if (rawSourceDigest(actual.files) !== record.repinned_source_digest) {
-      throw restoreRefusal("the restored repository does not match the repinned bytes");
+      throw restoreRefusal(root, artifactsDir, "the restored repository does not match the repinned bytes");
     }
   } else if (expected?.success) {
     const remaining = new Map(actual.files.map(({ path, hash }) => [path, hash]));
     for (const { path, hash } of expected.data.files) {
-      if (remaining.get(path) !== hash) throw restoreRefusal("no matching copy of " + path);
+      if (remaining.get(path) !== hash) throw restoreRefusal(root, artifactsDir, "no matching copy of " + path);
       remaining.delete(path);
     }
-    if (remaining.size > 0) throw restoreRefusal("the restored repository has paths outside the frozen manifest");
+    if (remaining.size > 0) throw restoreRefusal(root, artifactsDir, "the restored repository has paths outside the frozen manifest");
   }
   reportWarnings(warnings);
   const restored = { ...record, linked: [...linked].sort(compareCodeUnits) };
@@ -633,9 +640,13 @@ async function checkSnapshotDirectories(anchor: string, path: string): Promise<v
   }
 }
 
-async function snapshotLayout(root: string, artifactsDir: string) {
+async function snapshotLayout(root: string, artifactsDir: string, strictPath = false) {
   const repositoryRoot = await realpath(root);
-  const key = snapshotKey(repositoryRoot, await realpath(artifactsDir).catch(() => resolve(artifactsDir)));
+  const target = await realpath(artifactsDir).catch(error => {
+    if (strictPath) throw error;
+    return resolve(artifactsDir);
+  });
+  const key = snapshotKey(repositoryRoot, target);
   const state = resolve(resolveAuditCodeStateDir());
   const dir = join(state, "snapshots", key);
   const tree = join(dir, "tree");
@@ -644,9 +655,9 @@ async function snapshotLayout(root: string, artifactsDir: string) {
 }
 
 /** Validate the ENTIRE record before cleanup, restoration or re-pinning mutates anything. */
-async function validateSnapshotOwnership(record: RunSnapshot, root: string | undefined, artifactsDir: string) {
+async function validateSnapshotOwnership(record: RunSnapshot, root: string | undefined, artifactsDir: string, strictPath = false) {
   if (root === undefined) ownershipFailure("the caller did not supply the live repository identity");
-  const layout = await snapshotLayout(root, artifactsDir);
+  const layout = await snapshotLayout(root, artifactsDir, strictPath);
   if (record.repository_root !== layout.repositoryRoot) ownershipFailure("repository_root differs from the caller");
   const gitRoot = await isGitRepo(layout.repositoryRoot);
   if ((record.kind === "git") !== gitRoot) ownershipFailure("snapshot kind differs from the live repository");
@@ -729,6 +740,28 @@ async function validateSnapshotOwnership(record: RunSnapshot, root: string | und
   return layout;
 }
 
+/**
+ * Read-only affirmative proof for explicit recovery where status cannot
+ * establish identity. An acquisition receipt is rollback authority, but
+ * creation atomically renames it on publication; two records are ambiguous.
+ * The snapshot directory itself may be gone (the very reason for recovery).
+ */
+export async function assertCleanupSnapshotOwnership(root: string, artifactsDir: string): Promise<void> {
+  const present: string[] = [];
+  for (const path of [runSnapshotPath(artifactsDir), acquiringSnapshotPath(artifactsDir)]) {
+    const info = await lstat(path).catch(error => {
+      if (isFileMissingError(error)) return undefined;
+      throw error;
+    });
+    if (info === undefined) continue;
+    if (!info.isFile() || info.isSymbolicLink()) ownershipFailure(`unsafe snapshot record at ${path}`);
+    present.push(path);
+  }
+  if (present.length !== 1) ownershipFailure("expected exactly one working-run snapshot record");
+  const record = RunSnapshotSchema.parse(await readJsonFile<unknown>(present[0]));
+  await validateSnapshotOwnership(record, root, artifactsDir, true);
+}
+
 async function createRunSnapshot(root: string, artifactsDir: string): Promise<RunSnapshot> {
   const { repositoryRoot, dir, tree, ref } = await snapshotLayout(root, artifactsDir);
   await removeSnapshotDir(dir);
@@ -784,17 +817,17 @@ export async function ensureRunSnapshot(root: string, artifactsDir: string): Pro
   const existing = await readRunSnapshot(artifactsDir);
   if (existing !== undefined) {
     await validateSnapshotOwnership(existing, root, artifactsDir);
-    if (existing.restore_unverified) throw restoreRefusal("a previous recovery did not prove identity");
+    if (existing.restore_unverified) throw restoreRefusal(root, artifactsDir, "a previous recovery did not prove identity");
     if (existing.kind === "copy") {
       if (!existsSync(existing.source_root)) {
         throw new Error(
           `The frozen copy this audit run reads (${existing.source_root}) is gone, so the run's inputs cannot be ` +
-          "recovered. Run `audit-code cleanup --force` to discard the run, then start a new one.",
+          `recovered. Run \`${forceCleanupCommand(root, artifactsDir)}\` to discard the run, then start a new one.`,
         );
       }
       return existing;
     }
-    return (await pinsIntact(existing.pins)) ? existing : restoreSnapshot(existing, artifactsDir);
+    return (await pinsIntact(existing.pins)) ? existing : restoreSnapshot(existing, root, artifactsDir);
   }
   if (await readSnapshotRecord(acquiringSnapshotPath(artifactsDir)) !== undefined) {
     const problems = await removeRunSnapshot(artifactsDir, root);
@@ -856,7 +889,7 @@ export async function lookupRunSince(artifactsDir: string, since: string): Promi
 export async function readRunSourceRoot(root: string, artifactsDir: string): Promise<string> {
   fenceSnapshotsFromParentRepositories();
   const record = await readRunSnapshot(artifactsDir);
-  if (record?.restore_unverified) throw restoreRefusal("a previous recovery did not prove identity");
+  if (record?.restore_unverified) throw restoreRefusal(root, artifactsDir, "a previous recovery did not prove identity");
   return record?.source_root ?? root;
 }
 
@@ -921,7 +954,7 @@ export async function repinRunSnapshot(artifactsDir: string, root: string | unde
   if (record === undefined) return;
   await validateSnapshotOwnership(record, root, artifactsDir);
   if (record.kind !== "git") return;
-  if (record.restore_unverified) throw restoreRefusal("a previous recovery did not prove identity");
+  if (record.restore_unverified) throw restoreRefusal(record.repository_root, artifactsDir, "a previous recovery did not prove identity");
   const edited = await readRawSourceManifest(record.source_root);
   const repinned_source_digest = rawSourceDigest(edited.files);
   const pins = [...record.pins];
