@@ -746,7 +746,11 @@ async function validateSnapshotOwnership(record: RunSnapshot, root: string | und
  * creation atomically renames it on publication; two records are ambiguous.
  * The snapshot directory itself may be gone (the very reason for recovery).
  */
-export async function assertCleanupSnapshotOwnership(root: string, artifactsDir: string): Promise<void> {
+export async function assertCleanupSnapshotOwnership(
+  root: string,
+  artifactsDir: string,
+  options: { snapshotAlreadyRemoved?: boolean } = {},
+): Promise<string> {
   const present: string[] = [];
   for (const path of [runSnapshotPath(artifactsDir), acquiringSnapshotPath(artifactsDir)]) {
     const info = await lstat(path).catch(error => {
@@ -759,7 +763,12 @@ export async function assertCleanupSnapshotOwnership(root: string, artifactsDir:
   }
   if (present.length !== 1) ownershipFailure("expected exactly one working-run snapshot record");
   const record = RunSnapshotSchema.parse(await readJsonFile<unknown>(present[0]));
-  await validateSnapshotOwnership(record, root, artifactsDir, true);
+  const { dir } = await validateSnapshotOwnership(record, root, artifactsDir, true);
+  if (options.snapshotAlreadyRemoved && await lstat(dir).catch(error => {
+    if (isFileMissingError(error)) return undefined;
+    throw error;
+  })) ownershipFailure("the snapshot directory has not been removed");
+  return present[0];
 }
 
 async function createRunSnapshot(root: string, artifactsDir: string): Promise<RunSnapshot> {
@@ -979,10 +988,14 @@ export async function repinRunSnapshot(artifactsDir: string, root: string | unde
  * then the directory, then each checkout's own registration and ref (deepest
  * first), then the record. Never throws — a cleanup must not fail on the
  * scratch it is reclaiming; each problem is returned for the caller to report.
- * The record goes last and only on a clean removal, so a failed one can be
- * retried and a second call is a no-op.
+ * The record goes last and only on a clean removal unless explicit cleanup
+ * retains it as proof of ownership until its artifact sweep completes.
  */
-export async function removeRunSnapshot(artifactsDir: string, root: string | undefined): Promise<string[]> {
+export async function removeRunSnapshot(
+  artifactsDir: string,
+  root: string | undefined,
+  options: { retainRecord?: string } = {},
+): Promise<string[]> {
   const problems: string[] = [];
   let record: RunSnapshot | undefined;
   let dir: string;
@@ -993,6 +1006,9 @@ export async function removeRunSnapshot(artifactsDir: string, root: string | und
       path = acquiringSnapshotPath(artifactsDir);
       record = await readSnapshotRecord(path);
     }
+    if (options.retainRecord !== undefined && (record === undefined || path !== options.retainRecord)) {
+      ownershipFailure("the verified snapshot record changed before removal");
+    }
     if (record === undefined) return removeSnapshotReviewerCache(artifactsDir);
     ({ dir } = await validateSnapshotOwnership(record, root, artifactsDir));
   } catch (error) {
@@ -1001,7 +1017,7 @@ export async function removeRunSnapshot(artifactsDir: string, root: string | und
   problems.push(...await removeSnapshotReviewerCache(artifactsDir));
   if (problems.length > 0) return problems;
   problems.push(...await removeSnapshotTreeAndPins(dir, record.pins));
-  if (problems.length === 0) {
+  if (problems.length === 0 && options.retainRecord === undefined) {
     await rm(path, { force: true }).catch(error => problems.push(`could not remove ${path}: ${String(error)}`));
   }
   return problems;
