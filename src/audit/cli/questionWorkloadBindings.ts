@@ -19,6 +19,8 @@ export async function questionWorkloadBindings(
 ): Promise<AuditQuestionBinding[]> {
   const plan = effectivePlan ?? bundle.review_plan;
   if (!plan) throw new Error("Plan review questions before publishing an assignment");
+  const active = plan.questions.filter(q => q.plan_status === "pending" || q.plan_status === "active");
+  if (!active.length) return [];
   const scope = reviewSourceScope(bundle, bundle.scope);
   const allowed = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])].sort(compareCodeUnits);
   // Only direct submission supplies this index, after checking that its entire
@@ -78,8 +80,7 @@ export async function questionWorkloadBindings(
     if (keys.some(key => /^(?:design-(?:contract|conceptual|systemic)|charter):/u.test(key))) return 0;
     return keys.some(key => key.startsWith("design-lead:")) ? 2 : 1;
   };
-  return plan.questions.filter(q => q.plan_status === "pending" || q.plan_status === "active")
-    .sort((a, b) => priority(a) - priority(b)).map(question => {
+  return active.sort((a, b) => priority(a) - priority(b)).map(question => {
     const suggested_sources = sourcesFor(question.inventory_item_ids);
     const matches = new Set<number>();
     for (const { path } of suggested_sources) {

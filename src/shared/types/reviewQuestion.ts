@@ -39,9 +39,10 @@ export type ReviewSourceRef = z.infer<typeof ReviewSourceRefSchema>;
 
 export const ReviewDependencySchema = z.strictObject({
   kind: z.enum(["source", "evidence", "membership"]),
-  key: id,
+  key: z.string().min(1),
   fingerprint: id,
-});
+}).refine(dep => dep.kind === "source" ? repoPath.safeParse(dep.key).success : dep.key === dep.key.trim(),
+  { path: ["key"], message: "Source keys must be repository paths; other keys must not have surrounding whitespace" });
 export type ReviewDependency = z.infer<typeof ReviewDependencySchema>;
 
 /** In-memory current dependencies, optionally sharing one frozen source index per cycle. */
@@ -125,7 +126,7 @@ export const ReviewAssignmentSchema = z.strictObject({
   ...version,
   ...questionBinding,
   assignment_id: id,
-  authorized_scope: z.strictObject({ include: z.array(value), exclude: z.array(value) }),
+  authorized_scope: z.strictObject({ include: z.array(repoPath), exclude: z.array(repoPath) }),
   suggested_sources: z.array(ReviewSourceRefSchema),
   available_evidence_ids: z.array(id),
 });
