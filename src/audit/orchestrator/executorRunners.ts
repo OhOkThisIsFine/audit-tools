@@ -100,7 +100,7 @@ async function synthesisReadInputs(
         })
       : null,
     charter: options.artifactsDir ? await readQuestionReportCharterOptions(options.artifactsDir) : undefined,
-    questionReview: { accepted: cycle.answers, evidence: cycle.evidence, adjudications: cycle.adjudications,
+    questionReview: { effectivePlan: cycle.effectivePlan, fileCoverage: cycle.fileCoverage, accepted: cycle.answers, evidence: cycle.evidence, adjudications: cycle.adjudications,
       analyzerCoverageGaps: options.artifactsDir ? await readAnalyzerCoverageGaps(options.artifactsDir, bundle) : undefined,
       dependenciesByQuestion: cycle.dependenciesByQuestion, consolidations: cycle.consolidations, reopens: cycle.reopens ?? [] },
   };

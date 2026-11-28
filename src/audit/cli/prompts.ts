@@ -92,7 +92,7 @@ Detected source languages: ${languages.slice(0, 20).map(([name, count]) => name 
 
 This repo is applicable to ${params.pending.length} consent-gated analyzer(s) with no recorded
 decision. Present EACH candidate below with your recommendation and record the operator's choices.
-Both \`declined\` and \`granted\` cover this run only; a new audit asks again.
+Decisions cover this run only; a new audit asks again. Record \`granted_existing\` if the operator permits the existing executable and its scan behavior but no acquisition, \`granted\` only if they also permit acquisition, or \`declined\`.
 Ask explicitly before installing these analyzers or permitting their code/config execution.
 A grant does not install the runner it names (npx, pipx, …). If a granted analyzer
 cannot run on this machine, for example because its runner is not installed, the audit

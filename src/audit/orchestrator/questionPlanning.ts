@@ -103,7 +103,7 @@ export function reviewSourceScope(bundle: ArtifactBundle, overrideScope?: AuditS
   const intent = bundle.intent_checkpoint;
   const scope = overrideScope ?? bundle.scope;
   const delta = scope?.mode === "delta" ? new Set([...scope.seed_files, ...scope.expanded_files]) : undefined;
-  const sourceStatus = (path: string, contract = false): string | undefined => {
+  const sourceStatus = (path: string, contract = false, requireFingerprint = true): string | undefined => {
     const exclusion = intent?.excluded_scope?.find((row) => pathMatchesPrefix(path, row.path));
     if (exclusion) return exclusion.reason;
     const file = files.get(path);
@@ -116,11 +116,13 @@ export function reviewSourceScope(bundle: ArtifactBundle, overrideScope?: AuditS
       return disposition?.reason ?? (disposition ? `Source disposition: ${disposition.status}.` : "Source disposition has not been established.");
     }
     if (delta && !contractDocument && !delta.has(path)) return "Outside the confirmed changed scope.";
-    if (!file.hash) return "Source is present but lacks a verifiable content fingerprint.";
+    if (requireFingerprint && !file.hash) return "Source is present but lacks a verifiable content fingerprint.";
     return undefined;
   };
   return {
     files, dispositions, sourceStatus,
+    emptySourcePaths: new Set([...files.values()].filter(file => file.size_bytes === 0 && file.hash).map(file => file.path)),
+    includedSourcePaths: ordered([...files.keys()].filter((path) => sourceStatus(path, false, false) === undefined)),
     allowedSourcePaths: ordered([...files.keys()].filter((path) => sourceStatus(path) === undefined)),
     allowedContractPaths: ordered([...files.keys()].filter((path) => sourceStatus(path, true) === undefined)),
   };

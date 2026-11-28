@@ -1,8 +1,8 @@
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import { readOptionalJsonFile } from "../../shared/io/json.js";
-import { AnalyzerSelectionSchema } from "./analyzerSelection.js";
+import { analyzerRuntimeOverrides, AnalyzerSelectionSchema, runtimeOverrideFields, validRuntimeOverride } from "./analyzerSelection.js";
 import { z } from "zod";
-import { hashContent, stableStringify } from "audit-tools/shared";
+import { hashContent, stableStringify, type ExistingAnalyzerRuntime } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { incompleteAnalyzerStatuses } from "./acquisitionExecutor.js";
 
@@ -14,9 +14,26 @@ export const AnalyzerCalibrationSchema = z.strictObject({
     action: z.enum(["accept", "retry", "limited"]),
     reason: explanation,
     coverage: explanation,
+    ...runtimeOverrideFields,
+    change: z.strictObject({
+      kind: z.enum(["environment", "configuration"]),
+      detail: explanation,
+    }).optional(),
+    recovery: z.strictObject({
+      disposition: z.enum(["exhausted", "permission_refused"]),
+      detail: explanation,
+    }).optional(),
   })).max(100),
   unresolved: z.array(explanation).max(100),
 });
+
+function retrySignature(runtime: ExistingAnalyzerRuntime | undefined, change: { kind: string; detail: string }) {
+  const spelling = (path: string) => process.platform === "win32" ? normalize(path).toLowerCase() : normalize(path);
+  return hashContent(stableStringify([
+    runtime ? [spelling(runtime.executable), runtime.localRules ? spelling(runtime.localRules) : null] : null,
+    change.kind, change.detail.replace(/\s+/gu, " ").trim(),
+  ]));
+}
 
 export function analyzerCalibrationRequest(bundle: ArtifactBundle, selection: unknown) {
   const incomplete = new Set(incompleteAnalyzerStatuses(bundle).map(row => row.tool));
@@ -26,6 +43,19 @@ export function analyzerCalibrationRequest(bundle: ArtifactBundle, selection: un
     : new Set<string>();
   const statuses = bundle.external_analyzer_acquisition?.tool_statuses.filter(row =>
     row.status !== "skipped" || selectedTools.has(row.tool)) ?? [];
+  const runtimes = new Map(Object.entries(analyzerRuntimeOverrides(parsedSelection.success ? parsedSelection.data.decisions : [])));
+  const previousRetries = new Map<string, Set<string>>();
+  for (const retry of bundle.external_analyzer_acquisition?.calibration_retries ?? []) {
+    for (const row of retry.tools) {
+      const override = analyzerRuntimeOverrides([row])[row.tool];
+      if (override) runtimes.set(row.tool, override);
+      if (row.change) {
+        const signatures = previousRetries.get(row.tool) ?? new Set<string>();
+        signatures.add(retrySignature(runtimes.get(row.tool), row.change));
+        previousRetries.set(row.tool, signatures);
+      }
+    }
+  }
   const admitted = new Set(bundle.file_disposition?.files.filter(file => file.status === "included").map(file => file.path));
   const tools = statuses.map(row => {
     const admittedSkipped = row.reported_coverage?.skipped.filter(path => admitted.has(path)) ?? [];
@@ -36,7 +66,7 @@ export function analyzerCalibrationRequest(bundle: ArtifactBundle, selection: un
     manifest: bundle.repo_manifest?.files, disposition: bundle.file_disposition?.files,
     acquisition: bundle.external_analyzer_acquisition, results: bundle.external_analyzer_results, selection,
   }));
-  return { input_sha256, tools };
+  return { input_sha256, tools, runtimes, previousRetries };
 }
 
 export type AnalyzerCalibrationRequest = ReturnType<typeof analyzerCalibrationRequest>;
@@ -46,9 +76,18 @@ export function currentAnalyzerCalibration(value: unknown, request: AnalyzerCali
   if (!answer.success || answer.data.input_sha256 !== request.input_sha256) return;
   const byId = new Map(answer.data.decisions.map(row => [row.tool, row]));
   if (byId.size !== answer.data.decisions.length || byId.size !== request.tools.length) return;
-  if (!request.tools.every(tool => byId.has(tool.tool) &&
-      (!tool.incomplete || byId.get(tool.tool)?.action !== "accept") &&
-      (tool.status !== "skipped" || byId.get(tool.tool)?.action === "limited"))) return;
+  if (!request.tools.every(tool => {
+    const row = byId.get(tool.tool);
+    if (!row || !validRuntimeOverride(row, row.action === "retry") ||
+        (row.action === "retry" && !row.change)) return false;
+    if (row.action === "retry" && row.change) {
+      const runtime = analyzerRuntimeOverrides([row])[row.tool] ?? request.runtimes.get(row.tool);
+      if (request.previousRetries.get(row.tool)?.has(retrySignature(runtime, row.change))) return false;
+    }
+    if (tool.status === "skipped") return row.action === "limited";
+    if (tool.incomplete && row.action === "accept") return false;
+    return !(tool.incomplete && row.action === "limited") || Boolean(row.recovery);
+  })) return;
   return answer.data;
 }
 

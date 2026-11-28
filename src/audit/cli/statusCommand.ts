@@ -7,12 +7,15 @@ import { AuditTaskSchema } from "../types.js";
 import type { AuditState, ObligationState } from "../types/auditState.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
-import { ARTIFACT_DEFINITIONS } from "../io/artifacts.js";
+import { deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
+import { readRunSourceRoot } from "../io/runSnapshot.js";
+import { FILE_INSPECTION_PREFIX } from "../orchestrator/fullFileReview.js";
+import { ARTIFACT_DEFINITIONS, loadArtifactBundle } from "../io/artifacts.js";
 import { ReviewPlanSchema, type ReviewPlan } from "../../shared/types/reviewQuestion.js";
 import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import { loadCurrentActiveReviewRun } from "./reviewRun.js";
 import { StepArtifactSchema } from "./steps.js";
-import { inspectAuditQuestionHandoff } from "./dispatch/hostHandoff.js";
+import { inspectAuditQuestionHandoff, readAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
 import { readExistingRunConsentUnlocked } from "../../shared/analyzerRunConsent.js";
 import { functionalPreflightPath } from "./functionalPreflight.js";
 import { getRunPaths } from "../io/runArtifacts.js";
@@ -32,8 +35,18 @@ async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: st
     if ((!alongsideChallenge && step.step_kind !== "dispatch_review") || step.run_id !== runId ||
         step.status !== "ready" || !boundPath ||
         resolve(step.artifacts_dir) !== resolve(artifactsDir)) return { state: "stale" };
-    const issued = await inspectAuditQuestionHandoff({ root: step.repo_root, artifactsDir, runId });
-    const revisions = new Map(plan.questions.map(question => [question.question_id, question.revision_id]));
+    const boundary = { root: step.repo_root, artifactsDir, runId };
+    const issued = await inspectAuditQuestionHandoff(boundary);
+    let effectivePlan = plan;
+    if (issued.questions.some(question => question.question_id.startsWith(FILE_INSPECTION_PREFIX))) {
+      const bundle = await loadArtifactBundle(artifactsDir, {});
+      const workload = await readAuditQuestionWorkload(boundary);
+      const sourceRoot = await readRunSourceRoot(step.repo_root, artifactsDir);
+      const cycle = await deriveQuestionCycleUnlocked({ ...boundary, bundle, sourceRoot,
+        readOnlyRunId: runId, verifiedSourceFiles: workload.source_files });
+      effectivePlan = cycle.effectivePlan;
+    }
+    const revisions = new Map(effectivePlan.questions.map(question => [question.question_id, question.revision_id]));
     if (resolve(issued.path) !== resolve(boundPath) || issued.stale || issued.questions.some(question =>
       question.snapshot_id !== plan.snapshot_id || revisions.get(question.question_id) !== question.revision_id
     ) || step.progress?.pending_tasks !== issued.questions.length) return { state: "stale" };

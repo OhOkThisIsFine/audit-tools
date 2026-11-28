@@ -24,6 +24,7 @@ test("a completed audit delivers canonical findings and narrative to remediation
   await mkdir(join(root,"src"));
   await writeFile(join(root,"src/value.ts"),"export function total(a: number,b: number) { return a-b; }\n");
   await writeFile(join(root,"src/app.ts"),"import {total} from './value.js';\nexport const price=total(2,3);\n");
+  await writeFile(join(root,"src/isolated.ts"),"const internal = 1;\n");
   const {persistAnalyzerSettings} = await load("shared/analyzerPolicy.js");
   const {EXTERNAL_ANALYZER_CANDIDATES} = await load("shared/analyzers/candidates.js");
   await persistAnalyzerSettings(root,Object.fromEntries([...EXTERNAL_ANALYZER_CANDIDATES.map(x=>x.id),"typescript","python","css","html","sql"].map(id=>[id,"skip"])));
@@ -40,8 +41,8 @@ test("a completed audit delivers canonical findings and narrative to remediation
     await mkdir(dirname(p),{recursive:true});
     await writeFile(p,JSON.stringify(v));
   };
-  let writtenAnswer = false;
-  for(let i=0;i<12;i++){
+  let writtenAnswer = false, writtenCoverage = false;
+  for(let i=0;i<14;i++){
     const step = await next();
     const prompt = await readFile(step.prompt_path,"utf8");
     assert.notEqual(step.status,"blocked",step.progress?.summary);
@@ -67,10 +68,35 @@ test("a completed audit delivers canonical findings and narrative to remediation
         });
       }
     }else if(step.step_kind==="dispatch_review"){
-      assert.equal(writtenAnswer,false,"The same assignment should not be reissued after its answer is saved");
-      writtenAnswer = true;
       const {work_items}=JSON.parse(await readFile(step.artifact_paths.host_workload,"utf8"));
       if(work_items.length!==1) throw new Error("Expected one fixture review assignment, got "+work_items.length);
+      const { binding } = work_items[0];
+      if (binding.question.question_id.startsWith("full-file-inspection:")) {
+        assert.equal(writtenAnswer, true);
+        assert.equal(writtenCoverage, false);
+        const {stdout:statusJson} = await promisify(execFile)(process.execPath,[bin,"status","--root",root],
+          {cwd:root,env,windowsHide:true,timeout:15000});
+        assert.equal(JSON.parse(statusJson).question_review_handoff.state,"current");
+        const {schema_version, question_id, revision_id, snapshot_id} = binding.question;
+        const identity = {schema_version, question_id, revision_id, snapshot_id};
+        const refs = binding.question.requested_parts.map(p => ({path:p.part_id,start_line:1}));
+        assert.deepEqual(refs.map(ref => ref.path), ["src/isolated.ts"]);
+        const payload = { ...identity, submission_id:"full-coverage-answer", assignment_id:binding.assignment.assignment_id,
+          inspected_sources:refs, evidence_ids:[], limitations:[],
+          answer:{outcome:"clean", findings:[],
+            parts:refs.map((ref,i)=>({part_id:ref.path,outcome:"clean",observation_ids:["inspection-"+i]})),
+            observations:refs.map((ref,i)=>({...identity,part_id:ref.path,observation_id:"inspection-"+i,
+              kind:"source_confirmed",statement:"Checked the isolated declaration.",source_refs:[ref],evidence_refs:[]}))}};
+        const from = join(root,".audit-tools","coverage-test-answer.json");
+        await put(from,payload);
+        const {stdout} = await promisify(execFile)(process.execPath,[bin,"submit","--root",root,
+          "--work-item",binding.assignment.assignment_id,"--from",from], {cwd:root,env,windowsHide:true,timeout:15000});
+        assert.equal(JSON.parse(stdout).disposition,"accepted");
+        writtenCoverage = true;
+        continue;
+      }
+      assert.equal(writtenAnswer,false,"The same assignment should not be reissued after its answer is saved");
+      writtenAnswer = true;
       const {binding:{question,assignment},result_path}=work_items[0];
       const source = assignment.suggested_sources.find(ref => ref.path === "src/value.ts");
       assert.ok(source);
@@ -78,13 +104,13 @@ test("a completed audit delivers canonical findings and narrative to remediation
         schema_version:"audit-tools/question-review/v1",submission_id:"contract-suite-answer",
         question_id:question.question_id,assignment_id:assignment.assignment_id,
         revision_id:question.revision_id,snapshot_id:question.snapshot_id,
-        inspected_sources:assignment.suggested_sources,evidence_ids:[],limitations:[],
+        inspected_sources:[{path:"src/value.ts"},{path:"src/app.ts"},{path:"src/isolated.ts"}],evidence_ids:[],limitations:[],
         answer:{outcome:"findings",parts:question.requested_parts.map((p,i)=>({part_id:p.part_id,outcome:i===0?"findings":"clean",observation_ids:["observation-"+i]})),
           observations:question.requested_parts.map((p,i)=>({
             schema_version:"audit-tools/question-review/v1",question_id:question.question_id,revision_id:question.revision_id,
             snapshot_id:question.snapshot_id,observation_id:"observation-"+i,part_id:p.part_id,kind:"source_confirmed",
             statement:i===0?"The arithmetic helper subtracts instead of adding.":"The fixture has a single caller.",
-            source_refs:assignment.suggested_sources,evidence_refs:[]
+            source_refs:i===0?[{path:"src/value.ts",start_line:1},{path:"src/app.ts",start_line:1}]:[{path:"src/app.ts",start_line:1}],evidence_refs:[]
           })),findings:["incorrect-total","incorrect-price"].map((finding_id,index)=>({
             schema_version:"audit-tools/question-review/v1",question_id:question.question_id,revision_id:question.revision_id,
             finding_id,kind:"confirmed_defect",severity:index===0?"high":"low",confidence:"high",
@@ -110,12 +136,14 @@ test("a completed audit delivers canonical findings and narrative to remediation
     }else if(step.step_kind==="present_report"){
       assert.equal(step.status,"complete");
       assert.equal(writtenAnswer,true);
+      assert.equal(writtenCoverage,true);
       const machinePath=join(root,".audit-tools","audit-findings.json");
       const original=await readFile(machinePath,"utf8");
       const machine=JSON.parse(original);
       assert.equal(machine.contract_version,"audit-tools/audit-findings/v2");
       assert.equal(machine.question_review.completion,"complete");
-      assert.deepEqual(machine.question_review.accepted.map(({submission})=>submission.submission_id),["contract-suite-answer"]);
+      assert.deepEqual(machine.question_review.accepted.map(({submission})=>submission.submission_id),["contract-suite-answer","full-coverage-answer"]);
+      assert.deepEqual(machine.question_review.file_coverage,{admitted_count:3,inspected_count:3,gaps:[]});
       const markdown=await readFile(step.artifact_paths.final_report,"utf8");
       assert.match(markdown,/Coverage: \*\*complete\*\*/);
       assert.ok(markdown.includes(machine.question_review.snapshot_id));

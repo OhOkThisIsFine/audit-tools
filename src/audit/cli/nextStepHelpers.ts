@@ -1,5 +1,6 @@
+import { QuestionAuditFindingsReportSchema } from "../../shared/types/questionReviewReport.js";
 import { analyzerCalibrationRequest, currentAnalyzerCalibration, type AnalyzerCalibrationRequest } from "../orchestrator/analyzerCalibration.js";
-import { analyzerSelectionRequest, currentAnalyzerSelection, type AnalyzerSelectionRequest } from "../orchestrator/analyzerSelection.js";
+import { analyzerRuntimeOverrides, analyzerSelectionRequest, currentAnalyzerSelection, type AnalyzerSelectionRequest } from "../orchestrator/analyzerSelection.js";
 import { nextStepCommand } from "./prompts.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { assertQualifiedReviewObligation, assertQualifiedReviewStillCurrent, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
@@ -483,6 +484,16 @@ export async function buildTerminalStep(
     progress_summary: reason,
     stop: { kind, ...(retry ? { command: nextStepCommand(params.root, params.artifactsDir) } : {}) },
   });
+  const parsedReport = bundle.review_plan && QuestionAuditFindingsReportSchema.safeParse(bundle.audit_findings);
+  const fileCoverage = parsedReport && parsedReport.success ? parsedReport.data.question_review.file_coverage : undefined;
+  if (fileCoverage?.gaps.length && reportRendered) {
+    const reason = `Incomplete file inspection: ${fileCoverage.inspected_count} of ${fileCoverage.admitted_count} admitted files. ` +
+      `See the exact gaps in the working report at ${auditReportPath(params.artifactsDir)}. Reopen inconclusive packets after restoring access.`;
+    const blocked = { ...state, status: "blocked" as const };
+    await writeHandoffOnly({ root: params.root, artifactsDir: params.artifactsDir, bundle, audit_state: blocked,
+      progress_summary: reason, stop: { kind: "blocked" } });
+    return { kind: "blocked", state: blocked, bundle, reason };
+  }
   if (!reportRendered) {
     await persist(blockedReason, "blocked");
     return { kind: "blocked", state, bundle, reason: blockedReason };
@@ -529,8 +540,9 @@ function applyRunConsent(
       .filter(([, value]) => value === "declined")
       .map(([id]) => [id, "declined" as const]),
   );
-  const granted = Object.entries(consent.decisions).filter(([, value]) => value === "granted").map(([id]) => id);
-  options.consentToken = granted.length ? { value: consent.run_id, tools: granted } : undefined;
+  const granted = Object.entries(consent.decisions).filter(([, value]) => value !== "declined").map(([id]) => id);
+  const existingOnlyTools = Object.entries(consent.decisions).filter(([, value]) => value === "granted_existing").map(([id]) => id);
+  options.consentToken = granted.length ? { value: consent.run_id, tools: granted, existingOnlyTools } : undefined;
 }
 
 /**
@@ -540,7 +552,7 @@ function applyRunConsent(
  *     applicable candidate / all decided) → run the deterministic acquisition
  *     executor (`fallthrough`);
  *   - a decisions submission arrived on the `analyzer_consent` lane
- *     (`{ "<id>": "granted" | "declined" }`) → persist the decisions into
+ *     (`{ "<id>": "granted" | "granted_existing" | "declined" }`) → persist the decisions into
  *     session config (decisions durable, tokens never), fold them into the
  *     in-flight acquisition options, and re-scan (`continue`);
  *   - otherwise → emit the ONE batched operator-interactive offer step
@@ -2814,15 +2826,19 @@ function calibrationObligation(inputs: CalibrationInputs): AuditObligationDef {
           const affected = answer.decisions.filter(row => row.action === "retry").map(row => row.tool);
           if (affected.length > 0) {
             if (!externalAcquisition) throw new Error("Analyzer calibration requires acquisition options.");
+            const existingRuntimes = {
+              ...Object.fromEntries(request.runtimes),
+              ...analyzerRuntimeOverrides(answer.decisions),
+            };
             const next = await runExternalAnalyzerAcquisitionExecutor(
-              bundle, requireSourceRoot(ctx.params), externalAcquisition, affected,
+              bundle, requireSourceRoot(ctx.params), { ...externalAcquisition, existingRuntimes }, affected,
             );
             const marker = next.updated.external_analyzer_acquisition!;
             marker.calibration_retries = [...(marker.calibration_retries ?? []), {
               input_sha256: request.input_sha256, at: marker.generated_at ?? new Date().toISOString(),
-              tools: answer.decisions.filter(row => affected.includes(row.tool)).map(({ tool, coverage, reason }) => {
+              tools: answer.decisions.filter(row => affected.includes(row.tool)).map(({ tool, coverage, reason, existing_executable, local_rules, change }) => {
                 const measured = marker.tool_statuses.find(row => row.tool === tool);
-                return { tool, coverage, reason, status: measured?.status, version: measured?.version };
+                return { tool, coverage, reason, status: measured?.status, version: measured?.version, existing_executable, local_rules, change };
               }),
             }];
             next.updated.artifact_metadata = computeArtifactMetadata(
@@ -2839,7 +2855,7 @@ function calibrationObligation(inputs: CalibrationInputs): AuditObligationDef {
           const quarantine = await quarantineSubmissionFile(artifactsDir, incoming.path, lane);
           await recordLaneOutcome(artifactsDir, lane, {
             kind: "rejected", issueCode: "submission_contract_invalid",
-            message: "Calibrate each attempted tool exactly once against the current evidence. Degraded results cannot be accepted as complete." + quarantineSurvivalNote(quarantine),
+            message: "Calibrate each attempted tool exactly once against the current evidence. Degraded results cannot be accepted as complete and need a concrete recovery disposition before closing. An identical runtime and recorded change cannot be retried twice." + quarantineSurvivalNote(quarantine),
           });
           return emitCalibration(bundle, request);
         }
@@ -2909,6 +2925,7 @@ export function buildAuditObligations(
           if (!selection) return { kind: "emit", step: { kind: "analyzer_selection", state, bundle, request }, state: bundle };
         }
         if (calibration) calibration.selection = selection;
+        ctx.params.externalAcquisition.existingRuntimes = analyzerRuntimeOverrides(selection.decisions);
         const skipped = Object.fromEntries(selection.decisions.filter(row => row.action === "omit").map(row => [row.tool, "skip" as const]));
         ctx.analyzersRef.value = { ...ctx.params.analyzers, ...skipped };
         ctx.params.externalAcquisition.analyzers = { ...ctx.params.externalAcquisition.analyzers, ...skipped };
@@ -3278,6 +3295,12 @@ async function runDeterministicFold(
           if (admittedFiles.length > 0) {
             const integrity = await checkFileIntegrity(requireSourceRoot(params), startBundle.repo_manifest, admittedFiles);
             if (!integrity.is_clean) {
+              if (startBundle.review_plan && startBundle.scope?.mode === "full" &&
+                  (integrity.missing_files.length || integrity.io_errors.length)) {
+                throw new Error("Full file inspection is blocked by unreadable frozen files: " +
+                  [...integrity.missing_files, ...integrity.io_errors].sort().join(", ") +
+                  ". Restore access to this frozen snapshot before continuing; its admitted scope was not reduced.");
+              }
               process.stderr.write(
                 `[audit-code] nextStep: integrity check - ${integrity.changed_files.length} changed, ` +
                 `${integrity.missing_files.length} missing, ${integrity.io_errors.length} io-error(s); re-running intake.\n`,

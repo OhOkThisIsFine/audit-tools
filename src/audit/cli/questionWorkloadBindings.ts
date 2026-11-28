@@ -3,7 +3,7 @@ import { compareCodeUnits, hashContent, stableStringify, toPosixPath } from "aud
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { projectRuleMatchesLens } from "../orchestrator/projectRuleEvidence.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
-import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewEvidence, type ReviewReopenEvent, type ReviewSourceRef, questionReopenDependencies } from "../../shared/types/reviewQuestion.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewPlan, type ReviewAssignment, type ReviewEvidence, type ReviewReopenEvent, type ReviewSourceRef, questionReopenDependencies } from "../../shared/types/reviewQuestion.js";
 import type { AuditQuestionBinding } from "./dispatch/questionReviewAcceptance.js";
 import { buildLineIndexForPaths } from "./lineIndex.js";
 
@@ -15,8 +15,9 @@ export async function questionWorkloadBindings(
   evidence: readonly ReviewEvidence[],
   verifiedSourceFiles?: AuditQuestionBinding["sourceFiles"],
   reopens: readonly ReviewReopenEvent[] = [],
+  effectivePlan?: ReviewPlan,
 ): Promise<AuditQuestionBinding[]> {
-  const plan = bundle.review_plan;
+  const plan = effectivePlan ?? bundle.review_plan;
   if (!plan) throw new Error("Plan review questions before publishing an assignment");
   const scope = reviewSourceScope(bundle, bundle.scope);
   const allowed = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])].sort(compareCodeUnits);

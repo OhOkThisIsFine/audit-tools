@@ -339,6 +339,10 @@ export const ExternalAnalyzerAcquisitionMarkerSchema = z
       tools: z.array(z.object({
         tool: z.string(), reason: z.string(), coverage: z.string(),
         status: z.string().optional(), version: z.string().optional(),
+        existing_executable: z.string().optional(), local_rules: z.string().optional(),
+        change: z.object({
+          kind: z.enum(["environment", "configuration", "narrowed_scope"]), detail: z.string(),
+        }).strict().optional(),
       }).strict()),
     }).strict()).optional(),
   })

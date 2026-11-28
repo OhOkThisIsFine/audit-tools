@@ -9,6 +9,8 @@ import type {
 } from "audit-tools/shared";
 import {
   runAcquisitionEngine,
+  existingRuntimeRequired,
+  type ExistingAnalyzerRuntime,
   prepareAcquisition,
   compareCodeUnits,
   stableStringify,
@@ -41,6 +43,7 @@ import {
  */
 export interface ExternalAcquisitionAdvanceOptions {
   deadline?: SpawnDeadline;
+  existingRuntimes?: Readonly<Record<string, ExistingAnalyzerRuntime>>;
   resolveExecutable?: BinaryResolveOptions["resolveExecutable"];
   /** Hermeticity gate: acquisition runs ONLY when true. Default off (empty marker). */
   enabled?: boolean;
@@ -155,7 +158,8 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   const versions = new Map<string, string>();
   const versionFailures: ExternalAnalyzerToolStatus[] = [];
   const selected = await Promise.all(candidates.map(async candidate => {
-    if (!options.latestReleases || engineOptions.admissions?.get(candidate.id) !== null) return candidate;
+    if (!options.latestReleases || engineOptions.admissions?.get(candidate.id) !== null ||
+        options.existingRuntimes?.[candidate.id] || existingRuntimeRequired(candidate, engineOptions)) return candidate;
     const recorded = bundle.external_analyzer_acquisition?.tool_statuses.find(status => status.tool === candidate.id)?.version;
     try {
       const release = await resolveAnalyzerRelease(candidate, fetcher,
@@ -190,8 +194,8 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     },
   );
 
-  const runnable = availableCandidates.filter(candidate => candidate.runner !== "binary" ||
-    Object.hasOwn(resolvedBinaries, candidate.id));
+  const unresolvedIds = new Set(unresolvedStatuses.map(status => status.tool));
+  const runnable = availableCandidates.filter(candidate => !unresolvedIds.has(candidate.id));
   const { results, statuses } = await runAcquisitionEngine(runnable, root, {
     ...engineOptions, resolvedBinaries,
   });

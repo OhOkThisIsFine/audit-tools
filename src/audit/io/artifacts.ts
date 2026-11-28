@@ -1,3 +1,5 @@
+import { admittedFileCoverage, extendFullFileReview } from "../orchestrator/fullFileReview.js";
+import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { assertNoPendingFoldReceipt } from "./foldReceiptPath.js";
 // sites-pinned: tests/audit/producer-contract-boundaries.test.ts, tests/audit/io-remediation.test.ts, tests/audit/seam-atomic-promote-findings.test.ts
 import { z, type ZodTypeAny } from "zod";
@@ -175,6 +177,8 @@ export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
   /** Transient projection from the one accepted ledger, owned by this fold. */
   question_cycle?: {
     pending: readonly { question: ReviewQuestion }[];
+    effectivePlan?: ReviewPlan;
+    fileCoverage?: import("../../shared/types/questionReviewReport.js").QuestionReviewReport["file_coverage"];
     answers: readonly ReviewAcceptedAnswer[];
     evidence: readonly ReviewEvidence[];
     adjudications: readonly ReviewAdjudication[];
@@ -996,9 +1000,28 @@ async function expectedQuestionMarkdown(artifactsDir: string): Promise<string | 
   if (!plan.success) return undefined;
   const report = QuestionAuditFindingsReportSchema.safeParse(await readOptionalJsonFile<unknown>(auditFindingsPath(artifactsDir)));
   if (!report.success || report.data.question_review.snapshot_id !== plan.data.snapshot_id) return undefined;
-  const revisions = new Map(report.data.question_review.questions.map(q => [q.question_id, q.revision_id]));
-  if (revisions.size !== plan.data.questions.length ||
-      !plan.data.questions.every(q => revisions.get(q.question_id) === q.revision_id)) return undefined;
+  const actual = report.data.question_review;
+  const revisions = new Map(actual.questions.map(q => [q.question_id, q.revision_id]));
+  let effective = plan.data;
+  if (actual.file_coverage) {
+    const [repo_manifest, file_disposition, scope, intent_checkpoint] = await Promise.all([
+      ARTIFACT_DEFINITIONS.repo_manifest.read(join(artifactsDir, ARTIFACT_DEFINITIONS.repo_manifest.fileName)),
+      ARTIFACT_DEFINITIONS.file_disposition.read(join(artifactsDir, ARTIFACT_DEFINITIONS.file_disposition.fileName)),
+      ARTIFACT_DEFINITIONS.scope.read(join(artifactsDir, ARTIFACT_DEFINITIONS.scope.fileName)),
+      ARTIFACT_DEFINITIONS.intent_checkpoint.read(join(artifactsDir, ARTIFACT_DEFINITIONS.intent_checkpoint.fileName)),
+    ]);
+    if (!repo_manifest || !file_disposition || scope?.mode !== "full") return undefined;
+    const source = reviewSourceScope({ repo_manifest, file_disposition, scope, intent_checkpoint });
+    const fingerprints = new Map(source.allowedSourcePaths.map(path => [path, source.files.get(path)!.hash!] as const));
+    const baseIds = new Set(plan.data.questions.map(q => q.question_id));
+    const currentIds = new Set(actual.questions.flatMap(q => q.accepted_answer_ids));
+    const current = actual.accepted.filter(row => currentIds.has(row.submission.submission_id));
+    effective = extendFullFileReview(plan.data, source.includedSourcePaths, fingerprints, current.filter(
+      row => baseIds.has(row.submission.question_id)), source.emptySourcePaths, actual.accepted);
+    if (stableStringify(actual.file_coverage) !== stableStringify(admittedFileCoverage(source.includedSourcePaths, current, source.emptySourcePaths))) return undefined;
+  }
+  if (revisions.size !== actual.questions.length || revisions.size !== effective.questions.length ||
+      !effective.questions.every(q => revisions.get(q.question_id) === q.revision_id)) return undefined;
   const runId = await readQuestionReviewRunId(artifactsDir, { includeEnded: true });
   if (!runId) return undefined;
   const ledger = await readOptionalJsonFile<{
@@ -1009,7 +1032,6 @@ async function expectedQuestionMarkdown(artifactsDir: string): Promise<string | 
       (ledger.consolidations !== undefined && !Array.isArray(ledger.consolidations)) ||
       (ledger.reopens !== undefined && !Array.isArray(ledger.reopens)))) return undefined;
   const sorted = (rows: readonly unknown[]) => rows.map(row => stableStringify(row)).sort();
-  const actual = report.data.question_review;
   if (stableStringify(actual.signal_dispositions ?? []) !== stableStringify(plan.data.signal_dispositions ?? []) ||
       stableStringify(sorted(actual.accepted)) !== stableStringify(sorted(ledger?.answers ?? [])) ||
       stableStringify(sorted(actual.adjudications)) !== stableStringify(sorted(ledger?.adjudications ?? [])) ||

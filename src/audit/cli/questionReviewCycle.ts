@@ -1,6 +1,7 @@
 // sites-pinned: tests/audit/next-step-question-workload.test.ts
 import { isFileMissingError } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { admittedFileCoverage, extendFullFileReview } from "../orchestrator/fullFileReview.js";
 import { collectQuestionEvidence } from "../orchestrator/questionEvidence.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
@@ -22,6 +23,7 @@ interface QuestionCycleOptions {
   bundle: ArtifactBundle;
   readOnlyRunId?: string;
   staleArtifacts?: StaleArtifactSet;
+  verifiedSourceFiles?: AuditQuestionBinding["sourceFiles"];
 }
 
 /** The same source/evidence binding for dispatch, report and direct submit. */
@@ -54,7 +56,7 @@ export async function deriveCurrentQuestionBindings(
     rulePaths: [...new Set(plan.inventory.flatMap(item => item.contract_refs.map(ref => ref.path)))].filter(isProjectRulePath),
   });
   const bindings = await questionWorkloadBindings(bundle, sourceRoot, evidence, verifiedSourceFiles, reopens);
-  return { bindings, evidence, sourceFiles };
+  return { bindings, evidence, sourceFiles, admitted: scope.includedSourcePaths, emptyPaths: scope.emptySourcePaths };
 }
 
 /** One projection for host dispatch and report synthesis. The existing host
@@ -66,26 +68,58 @@ export async function deriveQuestionCycleUnlocked(options: QuestionCycleOptions)
   const runId = options.readOnlyRunId ?? await ensureQuestionReviewRunIdUnlocked(artifactsDir);
   const boundary = { root, artifactsDir, runId };
   const ledger = await readAuditQuestionLedger(boundary);
-  const { bindings, evidence, sourceFiles } = await deriveCurrentQuestionBindings(bundle, sourceRoot, undefined, ledger.reopens, options.staleArtifacts);
-  const currentAssignmentIds = new Set(bindings.map(({ assignment }) => assignment.assignment_id));
+  const { bindings: baseBindings, evidence, sourceFiles, admitted, emptyPaths } = await deriveCurrentQuestionBindings(
+    bundle, sourceRoot, options.verifiedSourceFiles, ledger.reopens, options.staleArtifacts);
+  const sourceIndex = indexQuestionDependencies([...sourceFiles].map(([key, fingerprint]) => ({ kind: "source" as const, key, fingerprint })));
+  const dependencies = (binding: AuditQuestionBinding) => ({
+    sourceIndex, local: [...binding.dependencies, ...binding.evidence.flatMap(item => item.dependencies)],
+  });
+  const indexAnswers = (answers: typeof ledger.answers) => {
+    const byQuestion = new Map<string, typeof ledger.answers>();
+    for (const answer of answers) {
+      const id = answer.submission.question_id;
+      const rows = byQuestion.get(id) ?? [];
+      rows.push(answer);
+      byQuestion.set(id, rows);
+    }
+    return byQuestion;
+  };
+  const current = (binding: AuditQuestionBinding, indexed: ReturnType<typeof indexAnswers>) =>
+    projectQuestionReview(binding.question, indexed.get(binding.question.question_id) ?? [], dependencies(binding)).current;
+  const full = bundle.scope?.mode === "full";
+  const effective = async (answers: typeof ledger.answers) => {
+    const indexed = indexAnswers(answers);
+    const base = baseBindings.map(binding => current(binding, indexed));
+    const effectivePlan = full ? extendFullFileReview(plan, admitted, sourceFiles, base.flat(), emptyPaths,
+      answers, base.every(rows => rows.length > 0)) : plan;
+    const additional = effectivePlan === plan ? [] : await questionWorkloadBindings(bundle, sourceRoot, evidence,
+      baseBindings[0]?.sourceFiles ?? options.verifiedSourceFiles, ledger.reopens,
+      { ...effectivePlan, questions: effectivePlan.questions.slice(plan.questions.length) });
+    return {
+      effectivePlan, bindings: [...baseBindings, ...additional],
+      currentByBinding: [...base, ...additional.map(binding => current(binding, indexed))],
+    };
+  };
+  const before = await effective(ledger.answers);
+  const currentAssignmentIds = new Set(before.bindings.map(({ assignment }) => assignment.assignment_id));
   const ledgerOnly = { ...ledger, accepted_count: 0, issues: [] };
   const ingestion = options.readOnlyRunId !== undefined ? ledgerOnly
     : await ingestAuditQuestionResults(boundary, currentAssignmentIds).catch(error => {
       if (isFileMissingError(error)) return ledgerOnly;
       throw error;
     });
-  const sourceIndex = indexQuestionDependencies([...sourceFiles].map(([key, fingerprint]) => ({ kind: "source" as const, key, fingerprint })));
-  const dependenciesByQuestion = new Map(bindings.map(binding => [binding.question.question_id, {
-    sourceIndex, local: [...binding.dependencies, ...binding.evidence.flatMap(item => item.dependencies)],
-  }] as const));
-  const pending = bindings.filter(binding => {
-    const active = projectQuestionReview(binding.question, ingestion.answers,
-      dependenciesByQuestion.get(binding.question.question_id));
+  const { effectivePlan, bindings, currentByBinding } = ingestion.accepted_count > 0 ? await effective(ingestion.answers) : before;
+  const dependenciesByQuestion = new Map(bindings.map(binding => [binding.question.question_id, dependencies(binding)] as const));
+  const pending: AuditQuestionBinding[] = [];
+  const currentAnswers = bindings.flatMap((binding, index) => {
+    const active = currentByBinding[index]!;
     // An accepted inconclusive answer is not a clean result or a reason for
     // infinite redispatch. Reporting keeps its unanswered parts visible.
-    return active.current.length === 0;
+    if (!active.length) pending.push(binding);
+    return active;
   });
-  return { runId, bindings, pending, evidence, dependenciesByQuestion, ...ingestion };
+  const fileCoverage = full ? admittedFileCoverage(admitted, currentAnswers, emptyPaths) : undefined;
+  return { runId, bindings, pending, evidence, dependenciesByQuestion, effectivePlan, fileCoverage, ...ingestion };
 }
 
 export function assertQualifiedReviewObligation(obligation: string | null): void {

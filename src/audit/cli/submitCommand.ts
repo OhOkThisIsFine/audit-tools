@@ -5,13 +5,13 @@ import { submitGateResult, SUPPORTED_GATE_SUBMISSIONS } from "./submitGateResult
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getArtifactsDir, getFlag, getRootDir } from "./args.js";
-import { consolidateAuditQuestionFindings, readAuditQuestionLedger, readAuditQuestionWorkload, reopenAuditQuestions, submitAuditQuestionResult } from "./dispatch/hostHandoff.js";
+import { consolidateAuditQuestionFindings, readAuditQuestionWorkload, reopenAuditQuestions, submitAuditQuestionResult } from "./dispatch/hostHandoff.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { computeStaleArtifacts } from "../orchestrator/staleness.js";
 import { readRunSourceRoot } from "../io/runSnapshot.js";
-import { assertQualifiedReviewStillCurrent, deriveCurrentQuestionBindings, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
+import { assertQualifiedReviewStillCurrent, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
 import { ReviewReopenRequestSchema, type ReviewToolingTransition } from "../../shared/types/reviewQuestion.js";
 import { ReviewFindingConsolidationSchema } from "../../shared/types/questionReviewReport.js";
 import { readQuestionReviewRunId } from "./questionReviewSession.js";
@@ -63,8 +63,8 @@ export async function submitWorkItemResult(params: {
     if (workload.source_root !== toPosixPath(sourceRoot)) {
       throw new Error("The issued snapshot is no longer current; run next-step before submitting.");
     }
-    const ledger = await readAuditQuestionLedger(boundary);
-    const { bindings } = await deriveCurrentQuestionBindings(bundle, sourceRoot, workload.source_files, ledger.reopens, staleArtifacts);
+    const { bindings } = await deriveQuestionCycleUnlocked({ root: params.root, artifactsDir: params.artifactsDir,
+      sourceRoot, bundle, readOnlyRunId: runId, staleArtifacts, verifiedSourceFiles: workload.source_files });
     const current = bindings.find(({ assignment }) => assignment.assignment_id === params.workItemId);
     if (!current || stableStringify(issued.binding) !== stableStringify({
       question: current.question, assignment: current.assignment, dependencies: current.dependencies,
