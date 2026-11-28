@@ -42,6 +42,17 @@ async function executableBuild(binary: string): Promise<string> {
   return hashContent(JSON.stringify([resolved, ...[file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].map(String)]));
 }
 
+export function codebaseMemoryFailureDetail(stderr: string, status: number | null, processError: boolean): string {
+  if (/secure CLI coordination|CBM daemon could not start/iu.test(stderr)) {
+    return "local Codebase Memory daemon could not start or coordinate. Check the current host's daemon capability and private runtime directory. Retry on a host already authorized for local daemon access, or explicitly record the coverage limitation";
+  }
+  if (/CLI exact-build admission could not be verified/iu.test(stderr)) {
+    return "could not verify local Codebase Memory build admission. Check daemon access and whether another CBM session is active. Retry on a host already authorized for local daemon access, or explicitly record the coverage limitation";
+  }
+  if (/saved runtime settings/iu.test(stderr)) return "could not load isolated runtime settings";
+  return processError ? "process could not complete within the runner bounds" : "exit " + status;
+}
+
 async function run(binary: string, home: string, operation: string, args: object, timeout: number): Promise<unknown> {
   const result = await runTrackedAsync([binary, "cli", "--json", operation], {
     cwd: home, timeout, maxBuffer: 1024 * 1024, input: JSON.stringify(args) + "\n",
@@ -54,9 +65,7 @@ async function run(binary: string, home: string, operation: string, args: object
   });
   const failure = new Error("Codebase Memory " + operation + " did not return compatible JSON.");
   if (result.status !== 0 || result.error) {
-    const detail = /secure CLI coordination/u.test(result.stderr) ? "host rejected the secure coordination directory"
-      : /saved runtime settings/u.test(result.stderr) ? "could not load isolated runtime settings"
-      : result.error ? "process could not complete within the runner bounds" : "exit " + result.status;
+    const detail = codebaseMemoryFailureDetail(result.stderr, result.status, Boolean(result.error));
     throw new Error("Codebase Memory " + operation + " failed: " + detail + ".");
   }
   let raw: unknown;

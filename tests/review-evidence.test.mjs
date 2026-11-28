@@ -74,6 +74,18 @@ test("hybrid graph keeps the exact current calibrated index, not a rediscovered 
   }
 });
 
+test("Codebase Memory distinguishes daemon startup from generic failures without exposing stderr", async () => {
+  const { codebaseMemoryFailureDetail } = await load("audit/cli/reviewerCodebaseMemory.js");
+  for (const error of ["CBM daemon could not start within 30000 ms", "secure CLI coordination directory rejected", "CLI exact-build admission could not be verified; retry after active CBM operations exit"]) {
+    const detail = codebaseMemoryFailureDetail(error + "\nprivate/runtime/path", 1, false);
+    assert.match(detail, /host already authorized for local daemon access/);
+    assert.doesNotMatch(detail, /private\/runtime\/path/);
+  }
+  assert.equal(codebaseMemoryFailureDetail("saved runtime settings", 1, false), "could not load isolated runtime settings");
+  assert.equal(codebaseMemoryFailureDetail("", null, true), "process could not complete within the runner bounds");
+  assert.equal(codebaseMemoryFailureDetail("unknown stderr", 1, false), "exit 1");
+});
+
 test("shared entrypoints retain distinct flow evidence and explicitly chosen lenses", async () => {
   const { buildReviewQuestionPlan } = await load("audit/orchestrator/questionPlanning.js");
   const { questionWorkloadBindings } = await load("audit/cli/questionWorkloadBindings.js");
