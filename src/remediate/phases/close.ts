@@ -2084,9 +2084,18 @@ async function cleanupArchivedCloseScratch(
   if (lostOwnership) throw lostOwnership.error;
   if (copyFailure) return archiveFailed("friction archive", copyFailure);
   await options.assertOwnership?.();
+  let conformanceOwnershipFailure: { error: unknown } | undefined;
   try {
-    await archiveConformanceSubjects(options.artifactsDir, outputDirFor(options.artifactsDir));
+    await archiveConformanceSubjects(options.artifactsDir, outputDirFor(options.artifactsDir), async () => {
+      try {
+        await options.assertOwnership?.();
+      } catch (error) {
+        conformanceOwnershipFailure = { error };
+        throw error;
+      }
+    });
   } catch (error) {
+    if (conformanceOwnershipFailure) throw conformanceOwnershipFailure.error;
     return archiveFailed("conformance evidence archive", error);
   }
   // Remove only copies proven archived. Never remove the root, live lock,

@@ -46,20 +46,23 @@ const DEFAULT_NPM_SETTINGS = [
 
 // Ask the same npm executable at the same cwd; guessing rc-file locations
 // misses global, redirected and layered configuration. Unknown output declines reuse.
-async function npmExecutionContext(root: string): Promise<string | undefined> {
+async function npmExecutionContext(root: string, assertOwnership?: () => Promise<void>): Promise<string | undefined> {
+  const env = Object.entries(process.env).sort(([a], [b]) => compareCodeUnits(a, b));
+  if (env.some(([name, value]) => value && /^node_(options|path)$/i.test(name))) return;
+  const keys = DEFAULT_NPM_SETTINGS.map(([key]) => key);
+  // npm scripts themselves export npm_config_prefix. Verify npm's effective
+  // *project* root rather than treating that inherited global prefix as an override.
+  const probe = async (args: string[]) => {
+    await assertOwnership?.();
+    // An unrecognized npm context permits fallback; loss of ownership does not.
+    try { return await runTrackedAsync(args, { cwd: root, timeout: 10_000 }); }
+    catch { return undefined; }
+  };
+  const result = await probe(["npm", "config", "get", ...keys]);
+  const prefix = await probe(["npm", "prefix"]);
   try {
-    const env = Object.entries(process.env).sort(([a], [b]) => compareCodeUnits(a, b));
-    if (env.some(([name, value]) => value && /^node_(options|path)$/i.test(name))) return;
-    const keys = DEFAULT_NPM_SETTINGS.map(([key]) => key);
-    // npm scripts themselves export npm_config_prefix. Verify npm's effective
-    // *project* root rather than treating that inherited global prefix as an override.
-    const opts = { cwd: root, timeout: 10_000 };
-    const [result, prefix] = await Promise.all([
-      runTrackedAsync(["npm", "config", "get", ...keys], opts),
-      runTrackedAsync(["npm", "prefix"], opts),
-    ]);
-    if (result.status !== 0 || result.error || result.signal ||
-        prefix.status !== 0 || prefix.error || prefix.signal ||
+    if (result?.status !== 0 || result.error || result.signal ||
+        prefix?.status !== 0 || prefix.error || prefix.signal ||
         !isAbsolute(prefix.stdout.trim()) ||
         await realpath(prefix.stdout.trim()) !== await realpath(root)) return;
     const expected = DEFAULT_NPM_SETTINGS.map(([key, value]) => `${key}=${value}`).join("\n");
@@ -161,7 +164,7 @@ export async function runCloseAcceptance(params: {
   let recheckNativeGuard: (() => Promise<boolean>) | undefined;
   const nativeContext = !options.finalGateRunner &&
     state.plan?.test_command_source === "project_facts" && testCommand === DEFAULT_CLOSE_TEST &&
-    nativeCloseContractScripts(options.root) ? await npmExecutionContext(options.root) : undefined;
+    nativeCloseContractScripts(options.root) ? await npmExecutionContext(options.root, assertOwnership) : undefined;
   runLogger?.event({ phase: "close", kind: "executor_start", obligation: state.status, note: "tool_owned_final_gate" });
   const gate = await runToolOwnedFinalGate(options.root, {
     runner: options.finalGateRunner,
@@ -169,7 +172,7 @@ export async function runCloseAcceptance(params: {
     testCommand: state.plan?.test_command_source !== "project_facts" ? combinedArgv : undefined,
     ...(nativeContext ? { nativeCloseUnit: async () => {
       const root = options.root;
-      if (!nativeCloseContractScripts(root) || await npmExecutionContext(root) !== nativeContext ||
+      if (!nativeCloseContractScripts(root) || await npmExecutionContext(root, assertOwnership) !== nativeContext ||
           !isAdmittedProjectTestCommand(["npm", "test"], root)) return;
       const before = await nativeCloseInputs(root, nativeContext);
       if (!before) return;
@@ -180,7 +183,7 @@ export async function runCloseAcceptance(params: {
           const result = await runTrackedAsync(argv, { cwd, windowsHide: true, timeout: NATIVE_CLOSE_DEADLINE_MS });
           const ran = observedNativeCloseLeaf(result);
           const green = result.status === 0 && !result.error && result.signal == null;
-          const sameInputs = async () => await npmExecutionContext(root) === nativeContext &&
+          const sameInputs = async () => await npmExecutionContext(root, assertOwnership) === nativeContext &&
             await nativeCloseInputs(root, nativeContext) === before &&
             nativeCloseContractScripts(root) && isAdmittedProjectTestCommand(["npm", "test"], root);
           const passed = green && await sameInputs();

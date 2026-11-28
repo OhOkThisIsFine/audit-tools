@@ -13,7 +13,7 @@ import { readSubmissionDocument } from "../../shared/submission/submissionClassi
 
 
 /** Historical evidence only; admission continues to use the run's live request and state. */
-export async function archiveConformanceSubjects(artifactsDir: string, outputDir: string): Promise<void> {
+export async function archiveConformanceSubjects(artifactsDir: string, outputDir: string, assertOwnership?: () => Promise<void>): Promise<void> {
   const sourceDir = conformanceSubjectsDir(artifactsDir);
   let names: string[];
   try { names = await readdir(sourceDir); }
@@ -24,6 +24,7 @@ export async function archiveConformanceSubjects(artifactsDir: string, outputDir
   for (const name of names.sort()) {
     if (!/^[a-f0-9]{64}(?:\.review)?\.json$/.test(name)) throw new Error(`Unexpected conformance subject filename: ${name}`);
     const document = JSON.parse(await readFile(join(sourceDir, name), "utf8")) as unknown;
+    await assertOwnership?.();
     await writeJsonFile(join(outputDir, "remediation-conformance", name), document);
   }
 }
@@ -103,7 +104,7 @@ export async function writeTriageObservation(artifactsDir: string, runId: string
 }
 
 /** A context-only replan may keep immutable work, but not its old review verdict. */
-export async function refreshReplannedHostConformance(root: string, artifactsDir: string, state: RemediationState): Promise<ConformanceReviewIssue[]> {
+export async function refreshReplannedHostConformance(root: string, artifactsDir: string, state: RemediationState, assertOwnership?: () => Promise<void>): Promise<ConformanceReviewIssue[]> {
   const plan = state.plan;
   if (!state.conformance_review?.enabled || !plan || !plan.review_revision_sha256) return [];
   const issues: ConformanceReviewIssue[] = [];
@@ -152,11 +153,13 @@ export async function refreshReplannedHostConformance(root: string, artifactsDir
     }
     const refreshed = await checkConformanceSubject({
       artifactsDir, runId: plan.plan_id, itemId: unit.id, obligationIds: unit.requirement_ids,
+      assertOwnership,
       content: { ...prior, review_revision_sha256: plan.review_revision_sha256, refreshed_head: head },
       evidenceInstruction: "This was an already landed implementation. Verify the cited commit and obligations against the approved plan and the refreshed HEAD. Review any changed read context: the prior receipt is not current approval.",
     });
     if (!refreshed.ok) issues.push(refreshed.issue);
     else if (refreshed.receipt && await matchesScope() && await headCommit(root) === head) {
+      await assertOwnership?.();
       item.conformance_review = refreshed.receipt;
     } else reject("The candidate changed while refreshing conformance. Re-run next-step on stable source.");
   }
