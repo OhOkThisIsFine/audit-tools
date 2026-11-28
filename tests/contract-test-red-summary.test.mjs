@@ -111,7 +111,8 @@ test("suite child timeout is infrastructure red, followed by a stamp on an uncha
   }` });
   assert.equal(timedOut.status, 1, timedOut.stderr);
   assert.match(timedOut.stdout, /incomplete result/);
-  assert.match(timedOut.stderr, /Contract suite timed out \(ETIMEDOUT\) after 120s/);
+  const expectedSeconds = process.platform === "win32" ? 240 : 120;
+  assert.ok(timedOut.stderr.includes(`Contract suite timed out (ETIMEDOUT) after ${expectedSeconds}s`), timedOut.stderr);
   assert.match(timedOut.stderr, /Rerun npm run test:built unfiltered on the same unchanged checkout/);
   assert.doesNotMatch(timedOut.stderr, /Failing contract tests|synthetic spawnSync failure|incomplete result/);
   assert.equal(existsSync(fixture.stampPath), false);
