@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -47,9 +47,8 @@ async function fixture(t, parent = tmpdir()) {
   const artifactsDir = join(root, ".audit-tools", "remediation");
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }).trim();
   git("init", "--template=", "-q");
-  git("config", "user.name", "Fixture");
-  git("config", "user.email", "fixture@example.invalid");
-  git("config", "commit.gpgsign", "false");
+  await appendFile(join(root, ".git", "config"),
+    "\n[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n[commit]\n\tgpgsign = false\n");
   await writeFile(join(root, "fixture.txt"), "fixture\n");
   git("add", "fixture.txt");
   git("commit", "-qm", "Fixture baseline");
@@ -152,7 +151,6 @@ async function fakeDelivery(t, action = "push", { dirty = true, legacy = false, 
     const argv = [binary, ...args];
     const matches = expected => JSON.stringify(argv) === JSON.stringify(expected);
     const result = (exit_code = 0, stdout = "") => ({ command: argv, exit_code, stdout });
-    const candidate = git("rev-parse", "HEAD");
     if (matches(["git", "symbolic-ref", "--quiet", "HEAD"])) return result(0, ref);
     if (matches(["git", "for-each-ref", "--format=%(upstream:remotename)%09%(upstream:remoteref)", "--", ref])) return result(0, `origin\t${ref}`);
     if (matches(["git", "config", "--get-regexp", "^(url\\..*\\.(insteadof|pushinsteadof)$|remote\\.https://|http\\..*\\.followredirects$)"])) {
@@ -177,8 +175,10 @@ async function fakeDelivery(t, action = "push", { dirty = true, legacy = false, 
       if (calls.pushes.length && behavior.driftPrHead) tip = strayTip;
       return result(0, `${tip}\t${ref}`);
     }
-    if (matches([...httpsGit, "push", "--porcelain", "--no-follow-tags", "--recurse-submodules=no",
-      `--force-with-lease=${ref}:${parent}`, "--", address, `${candidate}:${ref}`])) {
+    if (binary === "git" && args.includes("--porcelain")) {
+      const candidate = git("rev-parse", "HEAD");
+      assert.ok(matches([...httpsGit, "push", "--porcelain", "--no-follow-tags", "--recurse-submodules=no",
+        `--force-with-lease=${ref}:${parent}`, "--", address, `${candidate}:${ref}`]));
       calls.pushes.push(argv);
       assert.equal(git("rev-parse", "HEAD^"), parent);
       assert.equal((await readReceipt()).in_progress.delivery.candidate, candidate);
@@ -192,6 +192,7 @@ async function fakeDelivery(t, action = "push", { dirty = true, legacy = false, 
     }
     if (matches(["gh", "pr", "create", "--repo", "github.com/fixture-owner/fixture-repo",
       "--head", "topic", "--base", "main", "--fill"])) {
+      const candidate = git("rev-parse", "HEAD");
       calls.prs.push(argv);
       assert.equal(tip, candidate);
       assert.equal((await readReceipt()).in_progress.receipts.at(-1).stdout, `${candidate}\t${ref}`);
@@ -199,11 +200,13 @@ async function fakeDelivery(t, action = "push", { dirty = true, legacy = false, 
     }
     if (matches(["gh", "api", "--hostname", "github.com", "repos/fixture-owner/fixture-repo/pulls/123", "--jq",
       "[.head.repo.full_name,.head.ref,.head.sha,.base.repo.full_name,.base.ref] | @tsv"])) {
-      return result(0, `fixture-owner/fixture-repo\ttopic\t${behavior.unverifiedPr ? strayTip : candidate}\tfixture-owner/fixture-repo\tmain`);
+      const observed = behavior.unverifiedPr ? strayTip : git("rev-parse", "HEAD");
+      return result(0, `fixture-owner/fixture-repo\ttopic\t${observed}\tfixture-owner/fixture-repo\tmain`);
     }
     const isAdd = matches(["git", "--literal-pathspecs", "add", "--", ".audit-tools/remediation-report.md"]);
     const isCommit = matches(["git", "--literal-pathspecs", "commit", "-m", "Fix: Verify fixture", "--", ".audit-tools/remediation-report.md"]);
-    const isCat = matches(["git", "--no-replace-objects", "cat-file", "commit", candidate]);
+    const isCat = binary === "git" && args[1] === "cat-file" &&
+      matches(["git", "--no-replace-objects", "cat-file", "commit", git("rev-parse", "HEAD")]);
     assert.ok(isAdd || isCommit || isCat || matches(["git", "rev-parse", "--verify", "HEAD"]),
       `Unexpected argv (no fallback): ${JSON.stringify(argv)}`);
     if (isAdd) calls.adds++;
@@ -373,13 +376,14 @@ test("the native emitted finalize command advances only a current, approved clos
   const { next, cli, root, git, store, artifactsDir } = f;
   const baseline = git("rev-parse", "HEAD");
   const finalize = (...args) => next("--finalize-closing", ...args);
+  const step = (finalizeClosing = true) => decideNextStep({ root, artifactsDir, skipFinalGate: true, finalizeClosing });
   const noClose = async () => {
     assert.equal((await store.loadState()).closing_plan.pre_authorized, undefined);
     assert.equal(git("rev-parse", "HEAD"), baseline);
   };
 
   await store.saveState({ ...await store.loadState(), status: "implementing" });
-  assert.equal(finalize().step_kind, "confirm_resume_or_restart");
+  assert.equal((await step()).step_kind, "confirm_resume_or_restart");
   await store.saveState({ ...await store.loadState(), status: "closing" });
   // The exact flag is a continuation, not approval of a preview that did not exist.
   const first = finalize();
@@ -388,9 +392,9 @@ test("the native emitted finalize command advances only a current, approved clos
   const runEmitted = () => cli(...first.allowed_commands[0].split(" ").slice(1));
   await noClose();
 
-  assert.equal(next().step_kind, "confirm_resume_or_restart");
+  assert.equal((await step(false)).step_kind, "confirm_resume_or_restart");
   await put(join(artifactsDir, "confirm_resume_ack.json"), { choice: "resume" });
-  assert.equal(next().step_kind, "close_run"); // A resume ack is not closing approval.
+  assert.equal((await step(false)).step_kind, "close_run"); // A resume ack is not closing approval.
   await rm(join(artifactsDir, "confirm_resume_ack.json"));
   await noClose();
 
@@ -408,13 +412,13 @@ test("the native emitted finalize command advances only a current, approved clos
       source_hash: hashContent("Original report"), projected_path: other, selected_count: 1,
     },
   });
-  const sourceChanged = runEmitted();
+  const sourceChanged = await step();
   assert.equal(sourceChanged.step_kind, "input_conflict");
   assert.match(await readFile(sourceChanged.prompt_path, "utf8"), /original audit report changed/);
   await rm(sourceManifest);
 
   await put(join(artifactsDir, "confirm_resume_ack.json"), { choice: "restart" });
-  assert.equal(runEmitted().step_kind, "confirm_resume_or_restart");
+  assert.equal((await step()).step_kind, "confirm_resume_or_restart");
   await rm(join(artifactsDir, "confirm_resume_ack.json"));
   await noClose();
 
@@ -424,13 +428,13 @@ test("the native emitted finalize command advances only a current, approved clos
   cli("resume");
 
   await rm(paths.approval);
-  const unreviewed = runEmitted();
+  const unreviewed = await step();
   assert.equal(unreviewed.step_kind, "contract_pipeline");
   assert.equal(unreviewed.status, "blocked");
   await noClose();
   await put(paths.approval, approval);
 
-  const changed = runEmitted();
+  const changed = await step();
   assert.equal(changed.step_kind, "close_run"); // The observed file list changed.
   assert.match(await readFile(changed.prompt_path, "utf8"), /other\.md/);
   await noClose();
