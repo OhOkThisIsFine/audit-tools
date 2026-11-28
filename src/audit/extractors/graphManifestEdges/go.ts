@@ -31,31 +31,32 @@ export function stripGoLineComment(line: string): string {
   return commentIndex !== undefined ? line.slice(0, commentIndex) : line;
 }
 
-function unquoteGoWorkspaceSpecifier(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length < 2) {
-    return trimmed;
-  }
-
-  if (trimmed[0] === '"' && trimmed.at(-1) === '"') {
+function unquoteGoWorkspaceSpecifier(value: string): string | undefined {
+  if (value.startsWith('"')) {
     try {
-      const parsed: unknown = JSON.parse(trimmed);
-      return typeof parsed === "string" ? parsed.trim() : trimmed;
+      const parsed: unknown = JSON.parse(value);
+      return typeof parsed === "string" ? parsed.trim() : undefined;
     } catch {
-      return trimmed.slice(1, -1).trim();
+      return undefined;
     }
   }
 
-  if (trimmed[0] === "`" && trimmed.at(-1) === "`") {
-    return trimmed.slice(1, -1).trim();
+  if (/^`[^`]*`$/.test(value)) {
+    return value.slice(1, -1).trim();
   }
 
-  return trimmed;
+  return /["`]/.test(value) ? undefined : value;
 }
 
 export function splitGoWorkspaceSpecifiers(value: string): string[] {
   const specifiers: string[] = [];
   let tokenStart: number | undefined;
+  function flushToken(end: number): void {
+    if (tokenStart === undefined) return;
+    const specifier = unquoteGoWorkspaceSpecifier(value.slice(tokenStart, end));
+    if (specifier) specifiers.push(specifier);
+    tokenStart = undefined;
+  }
 
   // Use scanStringAware to correctly skip over quoted string content, and
   // detect whitespace-delimited token boundaries in unquoted regions.
@@ -71,13 +72,7 @@ export function splitGoWorkspaceSpecifiers(value: string): string[] {
       },
       onUnquoted(char, i) {
         if (/\s/.test(char)) {
-          if (tokenStart !== undefined) {
-            const specifier = unquoteGoWorkspaceSpecifier(value.slice(tokenStart, i));
-            if (specifier.length > 0) {
-              specifiers.push(specifier);
-            }
-            tokenStart = undefined;
-          }
+          flushToken(i);
         } else {
           tokenStart ??= i;
         }
@@ -86,19 +81,27 @@ export function splitGoWorkspaceSpecifiers(value: string): string[] {
   );
 
   // Flush final token (no trailing whitespace).
-  if (tokenStart !== undefined) {
-    const specifier = unquoteGoWorkspaceSpecifier(value.slice(tokenStart));
-    if (specifier.length > 0) {
-      specifiers.push(specifier);
-    }
-  }
+  flushToken(value.length);
 
   return specifiers;
 }
 
+function goWorkspaceBlockEnd(line: string): number {
+  let closeIndex = -1;
+  scanStringAware(line, GO_SCAN_OPTIONS, {
+    onUnquoted(char, i) {
+      if (char === ")") {
+        closeIndex = i;
+        return false;
+      }
+    },
+  });
+  return closeIndex;
+}
+
 function goWorkspaceUseSpecifiers(content: string): string[] {
   const specifiers: string[] = [];
-  let inUseBlock = false;
+  let blockSpecifiers: string[] | undefined;
 
   for (const rawLine of content.split(/\r?\n/)) {
     const trimmed = stripGoLineComment(rawLine).trim();
@@ -106,37 +109,29 @@ function goWorkspaceUseSpecifiers(content: string): string[] {
       continue;
     }
 
-    if (inUseBlock) {
-      const closeIndex = trimmed.indexOf(")");
-      const body =
-        closeIndex >= 0 ? trimmed.slice(0, closeIndex).trim() : trimmed;
-      specifiers.push(...splitGoWorkspaceSpecifiers(body));
-      if (closeIndex >= 0) {
-        inUseBlock = false;
+    let body = trimmed;
+    if (blockSpecifiers === undefined) {
+      const useMatch = /^use(?:\s+(.+)|\s*)$/.exec(trimmed);
+      if (!useMatch) {
+        continue;
       }
-      continue;
+
+      body = useMatch[1]?.trim() ?? "";
+      if (!body.startsWith("(")) {
+        specifiers.push(...splitGoWorkspaceSpecifiers(body));
+        continue;
+      }
+      body = body.slice(1);
+      blockSpecifiers = [];
     }
 
-    const useMatch = /^use(?:\s+(.+)|\s*)$/.exec(trimmed);
-    if (!useMatch) {
-      continue;
-    }
-
-    let body = useMatch[1]?.trim() ?? "";
-    if (!body.startsWith("(")) {
-      specifiers.push(...splitGoWorkspaceSpecifiers(body));
-      continue;
-    }
-
-    body = body.slice(1).trim();
-    const closeIndex = body.indexOf(")");
+    const closeIndex = goWorkspaceBlockEnd(body);
+    blockSpecifiers.push(...splitGoWorkspaceSpecifiers(
+      closeIndex < 0 ? body : body.slice(0, closeIndex),
+    ));
     if (closeIndex >= 0) {
-      specifiers.push(
-        ...splitGoWorkspaceSpecifiers(body.slice(0, closeIndex).trim()),
-      );
-    } else {
-      specifiers.push(...splitGoWorkspaceSpecifiers(body));
-      inUseBlock = true;
+      specifiers.push(...blockSpecifiers);
+      blockSpecifiers = undefined;
     }
   }
 

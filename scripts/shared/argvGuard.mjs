@@ -37,7 +37,7 @@ export const isHelpFlag = (arg) => arg === '--help' || arg === '-h';
  *   are `unknown` (`Infinity` for a variadic tail).
  *
  * `--` ends flag parsing, as everywhere else: every remaining argument is DATA,
- * taken as a positional and never inspected for flags. That is the one escape
+ * subject to the same positional cap and never inspected for flags. That is the one escape
  * for a variadic tail of free prose that may itself begin with a dash
  * (`answer.mjs DOC-1 -- "--keep the pin"`), and it is the standard separator
  * rather than a bespoke flag. Everything BEFORE it is still refused when
@@ -60,32 +60,30 @@ export function parseArgv(argv, spec = {}) {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (dataOnly) {
-      positionals.push(arg);
-      continue;
-    }
-    if (arg === '--') {
-      dataOnly = true;
-      continue;
-    }
-    if (isHelpFlag(arg)) {
-      help = true;
-      continue;
-    }
-    if (values.has(arg)) {
-      if (i + 1 >= argv.length) missingValue.push(arg);
-      else seen.set(arg, argv[++i]);
-      continue;
-    }
-    if (flags.has(arg)) {
-      seen.set(arg, true);
-      continue;
-    }
-    // Anything else that looks like a flag is refused. A bare `-` is a
-    // positional (a common stdin convention); a leading `--` is not.
-    if (arg.startsWith('-') && arg !== '-') {
-      unknown.push(arg);
-      continue;
+    if (!dataOnly) {
+      if (arg === '--') {
+        dataOnly = true;
+        continue;
+      }
+      if (isHelpFlag(arg)) {
+        help = true;
+        continue;
+      }
+      if (values.has(arg)) {
+        if (i + 1 >= argv.length) missingValue.push(arg);
+        else seen.set(arg, argv[++i]);
+        continue;
+      }
+      if (flags.has(arg)) {
+        seen.set(arg, true);
+        continue;
+      }
+      // Anything else that looks like a flag is refused. A bare `-` is a
+      // positional (a common stdin convention); a leading `--` is not.
+      if (arg.startsWith('-') && arg !== '-') {
+        unknown.push(arg);
+        continue;
+      }
     }
     if (positionals.length >= maxPositionals) unknown.push(arg);
     else positionals.push(arg);
