@@ -218,11 +218,11 @@ async function runCli(root, artifactsDir, command, { failAt, operation = "rm", k
 
 const terminalField = "cleanup_terminal_sweep";
 
-// These refusal checks have no injected fault or child-exit behavior of their
+// These checks have no injected fault or child-exit behavior of their
 // own. Use the real dispatcher without starting a new Node process for each
-// payload/flag permutation. The surrounding interruption and retry still cross
-// the child boundary. These tests run serially and restore the process state.
-async function runRefusal(root, artifactsDir, command, flags = []) {
+// payload/flag permutation or clean retry. The injected interruption and a
+// markerless retry still cross the child boundary. Restore the process state.
+async function dispatchInProcess(root, artifactsDir, command, flags = []) {
   const { runCli: dispatch } = await import("../dist/audit/cli.js");
   const { log, error } = console;
   const exitCode = process.exitCode;
@@ -259,7 +259,7 @@ for (const stage of ["transition", "rewrite", "receipt", "record", "marker", "rm
       assert.deepEqual(await fs.readdir(owned), []);
       await fs.writeFile(evidence, "markerless payload");
       for (const flags of [[], ["--force"]]) {
-        const refused = flags.length ? await runCli(root, owned, "cleanup", { flags }) : await runRefusal(root, owned, "cleanup");
+        const refused = flags.length ? await runCli(root, owned, "cleanup", { flags }) : await dispatchInProcess(root, owned, "cleanup");
         assert.equal(refused.code, 1, refused.stdout);
         assert.equal(await fs.readFile(evidence, "utf8"), "markerless payload");
       }
@@ -267,7 +267,7 @@ for (const stage of ["transition", "rewrite", "receipt", "record", "marker", "rm
       const custom = join(root, "markerless-custom");
       await fs.mkdir(custom);
       for (const flags of [[], ["--force"]]) {
-        assert.equal((await runRefusal(root, custom, "cleanup", flags)).code, 1);
+        assert.equal((await dispatchInProcess(root, custom, "cleanup", flags)).code, 1);
       }
     } else {
       const state = JSON.parse(await fs.readFile(marker));
@@ -277,14 +277,14 @@ for (const stage of ["transition", "rewrite", "receipt", "record", "marker", "rm
         const originalReceipt = join(owned, "cleanup-sweep.json");
         const receiptBytes = await fs.readFile(originalReceipt);
         await fs.rm(record);
-        const refused = await runRefusal(root, owned, "cleanup");
+        const refused = await dispatchInProcess(root, owned, "cleanup");
         assert.equal(refused.code, 1);
         assert.match(JSON.parse(refused.stdout).reason, /snapshot ownership no longer matches/);
         assert.deepEqual(await fs.readFile(originalReceipt), receiptBytes);
         await fs.writeFile(record, originalRecord);
         await fs.writeFile(evidence, "replacement after failed transition");
         for (const command of ["cleanup", "next-step"]) {
-          const foreign = command === "next-step" ? await runCli(root, owned, command) : await runRefusal(root, owned, command);
+          const foreign = command === "next-step" ? await runCli(root, owned, command) : await dispatchInProcess(root, owned, command);
           assert.equal(foreign.code, 1);
           assert.match(foreign.stderr || foreign.stdout, /Unexpected sweep payload not covered by its receipt/);
           assert.equal(await fs.readFile(evidence, "utf8"), "replacement after failed transition");
@@ -294,7 +294,7 @@ for (const stage of ["transition", "rewrite", "receipt", "record", "marker", "rm
         await fs.rm(evidence);
         const fold = join(owned, ".fold-receipt.json");
         await fs.writeFile(fold, "{}");
-        const pending = await runRefusal(root, owned, "next-step");
+        const pending = await dispatchInProcess(root, owned, "next-step");
         assert.equal(pending.code, 1);
         assert.match(pending.stderr, /incomplete fold receipt prevents terminal cleanup/);
         assert.equal(await fs.readFile(fold, "utf8"), "{}");
@@ -303,7 +303,8 @@ for (const stage of ["transition", "rewrite", "receipt", "record", "marker", "rm
       }
       if (stage === "marker") assert.deepEqual(await fs.readdir(owned), ["audit_state.json"]);
     }
-    const result = await runCli(root, owned, "cleanup");
+    const retry = stage === "rmdir" ? runCli : dispatchInProcess;
+    const result = await retry(root, owned, "cleanup");
     assert.equal(result.code, 0, result.stderr || result.stdout);
     assert.equal(JSON.parse(result.stdout).action, stage === "rmdir" ? "already-complete" : "deleted");
     if (stage === "rmdir") assert.deepEqual(await fs.readdir(owned), []);
@@ -323,7 +324,7 @@ for (const withSnapshot of [false, true]) {
     const identity = await fs.readFile(marker);
     assert.ok(JSON.parse(identity)[terminalField]);
     await fs.writeFile(join(owned, "unexpected.txt"), "unexpected payload");
-    const unexpected = await runRefusal(root, owned, "next-step");
+    const unexpected = await dispatchInProcess(root, owned, "next-step");
     assert.equal(unexpected.code, 1);
     assert.match(unexpected.stderr, /Unexpected terminal sweep entry/);
     assert.equal(await fs.readFile(join(owned, "unexpected.txt"), "utf8"), "unexpected payload");
@@ -332,13 +333,13 @@ for (const withSnapshot of [false, true]) {
     const controlBytes = await fs.readFile(control);
     if (withSnapshot) await fs.copyFile(join(sibling, "run-snapshot.json"), control);
     else await fs.writeFile(control, '{"state_sha256":"different"}');
-    const mismatched = await runRefusal(root, owned, "next-step");
+    const mismatched = await dispatchInProcess(root, owned, "next-step");
     assert.equal(mismatched.code, 1);
     assert.match(mismatched.stderr, withSnapshot ? /not the owned source directory/ : /Invalid terminal sweep receipt/);
     await fs.writeFile(control, controlBytes);
     const fold = join(owned, ".fold-receipt.json");
     await fs.writeFile(fold, "{}");
-    const pending = await runRefusal(root, owned, "next-step");
+    const pending = await dispatchInProcess(root, owned, "next-step");
     assert.equal(pending.code, 1);
     assert.match(pending.stderr, /incomplete fold receipt prevents terminal cleanup/);
     assert.equal(await fs.readFile(fold, "utf8"), "{}");
@@ -381,7 +382,7 @@ test("next-step resumes original marker with a prepared receipt and a verified m
   for (const command of ["cleanup", "next-step"]) {
     // Reuse a prior payload name: an ordinary restarted sweep would delete it.
     await fs.writeFile(evidence, "new, unowned payload");
-    const refused = await runRefusal(root, owned, command);
+    const refused = await dispatchInProcess(root, owned, command);
     assert.equal(refused.code, 1);
     assert.match(refused.stderr || refused.stdout, /Unexpected terminal sweep entry/);
     assert.equal(await fs.readFile(evidence, "utf8"), "new, unowned payload");
@@ -389,7 +390,7 @@ test("next-step resumes original marker with a prepared receipt and a verified m
     assert.deepEqual(await fs.readdir(owned), inventory);
   }
   await fs.writeFile(tempPath, "not a verified marker temp");
-  const lookalike = await runRefusal(root, owned, "next-step");
+  const lookalike = await dispatchInProcess(root, owned, "next-step");
   assert.equal(lookalike.code, 1);
   assert.match(lookalike.stderr, /Unexpected terminal sweep entry/);
   assert.equal(await fs.readFile(tempPath, "utf8"), "not a verified marker temp");
@@ -397,7 +398,7 @@ test("next-step resumes original marker with a prepared receipt and a verified m
   for (const name of ["artifact-tree.lock", "artifact-tree.lock.steal"]) {
     const hold = join(owned, name);
     await fs.mkdir(hold);
-    const unsafe = await runRefusal(root, owned, "next-step");
+    const unsafe = await dispatchInProcess(root, owned, "next-step");
     assert.equal(unsafe.code, 1);
     assert.match(unsafe.stderr, /Unsafe artifact tree hold entry/);
     assert.ok((await fs.stat(hold)).isDirectory());
