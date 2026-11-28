@@ -16,14 +16,14 @@ type QuestionBundle = ArtifactBundle & { review_plan?: ReviewPlan };
 export type QuestionSynthesisOptions = {
   auditRead: AuditRead | null;
   charter?: QuestionReportCharterOptions;
-  questionReview: Omit<QuestionReportInput, "plan" | "auditRead">;
+  questionReview: Omit<QuestionReportInput, "plan" | "auditRead"> & { effectivePlan?: ReviewPlan };
 };
 
 function currentQuestionReport(bundle: QuestionBundle, options: QuestionSynthesisOptions) {
   if (!bundle.review_plan) throw new Error("Question synthesis requires a current review_plan.");
   return QuestionAuditFindingsReportSchema.parse(buildQuestionAuditFindingsReport({
     ...options.questionReview,
-    plan: bundle.review_plan,
+    plan: options.questionReview.effectivePlan ?? bundle.review_plan,
     auditRead: options.auditRead,
   }));
 }

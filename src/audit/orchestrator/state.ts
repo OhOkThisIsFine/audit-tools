@@ -482,7 +482,7 @@ export function deriveAuditState(
     (o) => o.state === "missing" || o.state === "stale",
   );
   if (!incomplete && has(bundle.audit_report)) {
-    status = "complete";
+    status = (bundle.question_cycle?.fileCoverage?.gaps.length ?? 0) > 0 ? "blocked" : "complete";
   }
 
   return {

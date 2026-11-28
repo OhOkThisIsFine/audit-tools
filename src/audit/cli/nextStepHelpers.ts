@@ -1,3 +1,4 @@
+import { QuestionAuditFindingsReportSchema } from "../../shared/types/questionReviewReport.js";
 import { analyzerCalibrationRequest, currentAnalyzerCalibration, type AnalyzerCalibrationRequest } from "../orchestrator/analyzerCalibration.js";
 import { analyzerSelectionRequest, currentAnalyzerSelection, type AnalyzerSelectionRequest } from "../orchestrator/analyzerSelection.js";
 import { nextStepCommand } from "./prompts.js";
@@ -483,6 +484,16 @@ export async function buildTerminalStep(
     progress_summary: reason,
     stop: { kind, ...(retry ? { command: nextStepCommand(params.root, params.artifactsDir) } : {}) },
   });
+  const parsedReport = bundle.review_plan && QuestionAuditFindingsReportSchema.safeParse(bundle.audit_findings);
+  const fileCoverage = parsedReport && parsedReport.success ? parsedReport.data.question_review.file_coverage : undefined;
+  if (fileCoverage?.gaps.length && reportRendered) {
+    const reason = `Incomplete file inspection: ${fileCoverage.inspected_count} of ${fileCoverage.admitted_count} admitted files. ` +
+      `See the exact gaps in the working report at ${auditReportPath(params.artifactsDir)}. Reopen inconclusive packets after restoring access.`;
+    const blocked = { ...state, status: "blocked" as const };
+    await writeHandoffOnly({ root: params.root, artifactsDir: params.artifactsDir, bundle, audit_state: blocked,
+      progress_summary: reason, stop: { kind: "blocked" } });
+    return { kind: "blocked", state: blocked, bundle, reason };
+  }
   if (!reportRendered) {
     await persist(blockedReason, "blocked");
     return { kind: "blocked", state, bundle, reason: blockedReason };
@@ -3278,6 +3289,12 @@ async function runDeterministicFold(
           if (admittedFiles.length > 0) {
             const integrity = await checkFileIntegrity(requireSourceRoot(params), startBundle.repo_manifest, admittedFiles);
             if (!integrity.is_clean) {
+              if (startBundle.review_plan && startBundle.scope?.mode === "full" &&
+                  (integrity.missing_files.length || integrity.io_errors.length)) {
+                throw new Error("Full file inspection is blocked by unreadable frozen files: " +
+                  [...integrity.missing_files, ...integrity.io_errors].sort().join(", ") +
+                  ". Restore access to this frozen snapshot before continuing; its admitted scope was not reduced.");
+              }
               process.stderr.write(
                 `[audit-code] nextStep: integrity check - ${integrity.changed_files.length} changed, ` +
                 `${integrity.missing_files.length} missing, ${integrity.io_errors.length} io-error(s); re-running intake.\n`,

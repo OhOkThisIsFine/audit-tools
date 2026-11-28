@@ -38,6 +38,12 @@ export const QuestionReviewReportSchema = z.strictObject({
   schema_version: z.literal(REVIEW_QUESTION_CONTRACT_VERSION),
   snapshot_id: id,
   completion: z.enum(["complete", "incomplete"]),
+  file_coverage: z.strictObject({
+    admitted_count: z.number().int().nonnegative(),
+    inspected_count: z.number().int().nonnegative(),
+    gaps: z.array(z.string().min(1)),
+  }).refine(row => row.inspected_count + row.gaps.length === row.admitted_count &&
+    new Set(row.gaps).size === row.gaps.length, "File coverage counts must match the distinct gaps").optional(),
   analyzer_coverage_gaps: z.array(z.string().min(1)).optional(),
   inventory: ReviewPlanObjectSchema.shape.inventory,
   omissions: ReviewPlanObjectSchema.shape.omissions,

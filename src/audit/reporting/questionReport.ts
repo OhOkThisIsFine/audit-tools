@@ -34,6 +34,7 @@ export interface QuestionReportInput {
   consolidations?: readonly Decisions[number][];
   reopens?: readonly ReviewReopenEvent[];
   auditRead: AuditRead | null;
+  fileCoverage?: QuestionReviewReport["file_coverage"];
   analyzerCoverageGaps?: readonly string[];
 }
 
@@ -220,11 +221,12 @@ export function buildQuestionAuditFindingsReport(input: QuestionReportInput): Qu
   const mappedInventory = new Set(input.plan.questions.flatMap(question => question.inventory_item_ids));
   const unmapped = input.plan.inventory.some(item => item.scope === "in_scope" &&
     !mappedInventory.has(item.inventory_item_id));
-  const completion = questions.length === 0 || unmapped || input.plan.omissions.length > 0 ||
+  const completion = (input.fileCoverage?.gaps.length ?? 0) > 0 || questions.length === 0 || unmapped || input.plan.omissions.length > 0 ||
     questions.some(row => row.state !== "clean" && row.state !== "findings") ? "incomplete" : "complete";
   const question_review: QuestionReviewReport = {
     schema_version: REVIEW_QUESTION_CONTRACT_VERSION, snapshot_id: input.plan.snapshot_id,
     completion, questions, findings: groups.map(({ row }) => row), consolidations, adjudications, accepted,
+    ...(input.fileCoverage ? { file_coverage: input.fileCoverage } : {}),
     ...(input.analyzerCoverageGaps?.length ? { analyzer_coverage_gaps: [...input.analyzerCoverageGaps] } : {}),
     ...(input.reopens?.length ? { reopens: [...input.reopens] } : {}),
     inventory: input.plan.inventory, omissions: input.plan.omissions, lens_decisions: input.plan.lens_decisions,
@@ -238,7 +240,7 @@ export function buildQuestionAuditFindingsReport(input: QuestionReportInput): Qu
     summary: {
       finding_count: findings.length, work_block_count: work.blocks.length,
       severity_breakdown: counts("severity"), lens_breakdown: counts("lens"),
-      audited_file_count: new Set(accepted.filter(answer =>
+      audited_file_count: input.fileCoverage?.inspected_count ?? new Set(accepted.filter(answer =>
         currentAnswerIds.has(answer.submission.submission_id)).flatMap(
         answer => answer.submission.inspected_sources.map(ref => ref.path),
       )).size,

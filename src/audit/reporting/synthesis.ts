@@ -1164,6 +1164,12 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
     }
     for (const risk of report.top_risks ?? []) lines.push(`- Risk: ${risk}`);
   }
+  if (review.file_coverage) {
+    const { admitted_count, inspected_count, gaps } = review.file_coverage;
+    lines.push("", "## Admitted file inspection", "",
+      `${inspected_count} of ${admitted_count} admitted files have current accepted inspection evidence. ${gaps.length} missing.`);
+    if (gaps.length) lines.push("", ...gaps.map(path => "- " + path));
+  }
   if (review.analyzer_coverage_gaps?.length) {
     lines.push("", "## Unresolved analyzer coverage", "",
       "These checks were incomplete or unavailable. This is separate from reviewer coverage.",

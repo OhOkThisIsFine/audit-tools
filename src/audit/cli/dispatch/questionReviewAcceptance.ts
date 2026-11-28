@@ -1,5 +1,6 @@
 // sites-pinned: tests/audit/question-review-acceptance.test.ts
 import { compareCodeUnits, pathMatchesPrefix, stableStringify } from "audit-tools/shared";
+import { FILE_INSPECTION_PREFIX } from "../../orchestrator/fullFileReview.js";
 import { isProjectRulePath } from "../../orchestrator/projectRuleEvidence.js";
 import { analyzerReceiptFingerprint } from "../../orchestrator/questionEvidence.js";
 import { DISCONFIRMATION_PART_ID, questionReopenKey } from "../../../shared/types/reviewQuestion.js";
@@ -82,6 +83,28 @@ export function acceptQuestionReview(answers: readonly ReviewAcceptedAnswer[], b
     if ((part.outcome !== "inconclusive" && !part.observation_ids.some((id) => observations.get(id)?.kind !== "unverified")) ||
         part.observation_ids.some((id) => observations.get(id)?.part_id !== part.part_id)) throw new Error(`Review part has unsupported observation links: ${part.part_id}`);
     seen.add(part.part_id);
+  }
+  if (question.question_id.startsWith(FILE_INSPECTION_PREFIX)) {
+    const inspected = new Set(submission.inspected_sources.map(ref => ref.path));
+    for (const path of requested) {
+      const part = submission.answer.parts.find(row => row.part_id === path);
+      if (!part) throw new Error("Static inspection requires a result for each assigned file: " + path);
+      const ownSource = part.observation_ids.flatMap(id => {
+        const observation = observations.get(id);
+        return observation?.kind === "source_confirmed" ? observation.source_refs.filter(ref => ref.path === path) : [];
+      });
+      if (!inspected.has(path)) {
+        if (part.outcome !== "inconclusive" || !part.reason?.trim() || ownSource.length) {
+          throw new Error("An unread assigned file must be inconclusive with a reason and cannot claim a source confirmation: " + path);
+        }
+      } else if (!ownSource.some(ref => ref.start_line !== undefined ||
+        binding.sourceFiles.some(file => file.path === path && file.line_count === 0))) {
+        throw new Error("Each declared inspection requires source-confirmed evidence for its own assigned file: " + path);
+      }
+    }
+    if ([...inspected].some(path => !requested.has(path))) {
+      throw new Error("Static inspection can declare reads only for its assigned files.");
+    }
   }
   const findings = new Set<string>();
   const claimedObservations = new Set<string>();
