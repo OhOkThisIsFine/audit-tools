@@ -1,18 +1,19 @@
 // sites-pinned: tests/audit/frozen-snapshot.test.ts
-import { readdir, rm, rmdir, stat } from "node:fs/promises";
+import { lstat, readdir, realpath, rm, rmdir, stat } from "node:fs/promises";
 import { isArtifactTreeHoldEntry, withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
-import { hasPendingFoldReceipt } from "../io/foldReceiptPath.js";
-import { join } from "node:path";
-import { hashContent, isFileMissingError, readJsonFile, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+import { foldReceiptPath, hasPendingFoldReceipt } from "../io/foldReceiptPath.js";
+import { join, relative, sep } from "node:path";
+import { auditToolsDir, hashContent, isFileMissingError, isJsonParseError, readJsonFile, readOptionalJsonFile, resolveWithinRoot, writeJsonFile } from "audit-tools/shared";
 import { ARTIFACT_DEFINITIONS, isWorkingDirFullyPromoted, retiredRunEvidenceIsArchived } from "../io/artifacts.js";
-import { removeRunSnapshot } from "../io/runSnapshot.js";
-import type { AuditState } from "../types/auditState.js";
+import { assertCleanupSnapshotOwnership, removeRunSnapshot } from "../io/runSnapshot.js";
+import { AuditTopLevelStatusSchema, type AuditState } from "../types/auditState.js";
 
 export type CleanupOptions = {
   repositoryRoot?: string;
   force?: boolean;
   dryRun?: boolean;
   requireAuditMarker?: boolean;
+  explicitTarget?: { root: string; custom: boolean };
 };
 
 export type CleanupResult = {
@@ -20,6 +21,38 @@ export type CleanupResult = {
   status: AuditState["status"] | "unknown";
   reason?: string;
 };
+
+async function inspectDirectory(root: string, target: string): Promise<void> {
+  if (resolveWithinRoot(root, target, { allowRoot: false }) === null) {
+    throw new Error(`Refusing cleanup: ${target} is not strictly inside the audit root ${root}.`);
+  }
+  let current = root;
+  for (const segment of ["", ...relative(root, target).split(sep)]) {
+    current = join(current, segment);
+    const info = await lstat(current);
+    if (!info.isDirectory() || info.isSymbolicLink()) {
+      throw new Error(`Refusing cleanup: unsafe directory topology at ${current}.`);
+    }
+  }
+  const physicalRoot = await realpath(root);
+  const physicalTarget = await realpath(target);
+  if (resolveWithinRoot(physicalRoot, physicalTarget, { allowRoot: false }) === null) {
+    throw new Error(`Refusing cleanup: the resolved target escapes the audit root: ${target}.`);
+  }
+  if (relative(physicalRoot, physicalTarget).split(sep).some(part => part.toLowerCase() === ".git")) {
+    throw new Error(`Refusing cleanup: ${target} is inside repository Git metadata.`);
+  }
+  if (resolveWithinRoot(physicalTarget, auditToolsDir(physicalRoot)) !== null) {
+    throw new Error(`Refusing cleanup: ${target} contains the shared audit tools output directory.`);
+  }
+}
+
+async function inspectEntry(path: string) {
+  return lstat(path).catch(error => {
+    if (isFileMissingError(error)) return undefined;
+    throw error;
+  });
+}
 
 // Remove a stale working artifacts directory. Two callers, ONE rule: the
 // `cleanup` CLI command (cmdCleanup) and the next-step pre-run sweep
@@ -49,7 +82,7 @@ export type CleanupResult = {
 //
 // With options:
 //   force=true  — delete even when the run is active/blocked, complete with
-//                 work left, or has no state file.
+//                 work left; explicit cleanup still requires a state marker.
 //   dryRun=true — skip the actual rm call and return action='dry-run'.
 // Both default to false.
 export async function cleanupStaleArtifactsDir(
@@ -57,7 +90,8 @@ export async function cleanupStaleArtifactsDir(
   options: CleanupOptions = {},
 ): Promise<CleanupResult> {
   try {
-    await stat(artifactsDir);
+    if (options.explicitTarget) await inspectDirectory(options.explicitTarget.root, artifactsDir);
+    else await stat(artifactsDir);
   } catch (error) {
     if (!isFileMissingError(error)) throw error;
     return { action: "skipped", status: "unknown" };
@@ -82,7 +116,9 @@ async function cleanupHeld(
   assertOwnership: () => Promise<void>,
 ): Promise<CleanupResult> {
   const { force = false, dryRun = false } = options;
-  if (await hasPendingFoldReceipt(artifactsDir)) {
+  const target = options.explicitTarget;
+  if (target) await inspectDirectory(target.root, artifactsDir);
+  if (target ? await inspectEntry(foldReceiptPath(artifactsDir)) : await hasPendingFoldReceipt(artifactsDir)) {
     return { action: "skipped", status: "unknown", reason: "An incomplete fold receipt must be recovered using next-step." };
   }
 
@@ -91,19 +127,36 @@ async function cleanupHeld(
   const sweepPath = join(artifactsDir, sweepName);
   let status: AuditState["status"] | "unknown" = "unknown";
   let stateDigest: string | undefined;
+  let corrupt = false;
+  if (target) {
+    const info = await inspectEntry(join(artifactsDir, marker));
+    if (info && (!info.isFile() || info.isSymbolicLink())) {
+      throw new Error(`Refusing cleanup: unsafe audit state marker at ${join(artifactsDir, marker)}.`);
+    }
+  }
   try {
     const state = await readJsonFile<AuditState>(join(artifactsDir, marker));
-    status = state.status;
-    stateDigest = hashContent(JSON.stringify(state));
-  } catch (error) {
-    if (!isFileMissingError(error)) {
-      throw error;
+    if (target) {
+      const parsed = AuditTopLevelStatusSchema.safeParse(state?.status);
+      if (parsed.success) status = parsed.data;
+      else corrupt = true;
+    } else {
+      status = state.status;
     }
-    // State file missing — status stays "unknown".
+    if (!corrupt) stateDigest = hashContent(JSON.stringify(state));
+  } catch (error) {
+    if (target && force && isJsonParseError(error)) corrupt = true;
+    else if (!isFileMissingError(error)) throw error;
   }
 
-  if (force && options.requireAuditMarker && status === "unknown") {
+  if (force && options.requireAuditMarker && status === "unknown" && !corrupt) {
     return { action: "skipped", status, reason: "The working audit no longer has its identity marker; refusing forced cleanup." };
+  }
+
+  const requireSnapshot = target !== undefined && (target.custom || (force && corrupt));
+  if (requireSnapshot) {
+    await assertOwnership();
+    await assertCleanupSnapshotOwnership(target.root, artifactsDir);
   }
 
   const sweep = !force && stateDigest && (status === "not_started" || status === "complete")
@@ -150,11 +203,12 @@ async function cleanupHeld(
   await assertOwnership();
   const problems = await removeRunSnapshot(artifactsDir, options.repositoryRoot);
   if (problems.length > 0) {
-    if (!force) {
+    if (!force || requireSnapshot) {
       return {
         action: "skipped",
         status,
-        reason: `the run's snapshot could not be removed (${problems.join("; ")}); fix that, or use --force to delete anyway`,
+        reason: `the run's snapshot could not be removed (${problems.join("; ")})` +
+          (requireSnapshot ? "; refusing cleanup without safe snapshot removal" : "; fix that, or use --force to delete anyway"),
       };
     }
     for (const problem of problems) {

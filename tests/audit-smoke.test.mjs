@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -186,4 +186,130 @@ test("a completed audit delivers canonical findings and narrative to remediation
     }
   }
   assert.fail("Synthetic workflow did not reach its report");
+});
+
+test("explicit cleanup proves owned custom targets before dry-run and refuses unsafe recovery", async t => {
+  const temp = await realpath(tmpdir());
+  const fixture = await mkdtemp(join(temp, "audit-cleanup-proof-"));
+  t.after(async () => {
+    const sub = relative(temp, await realpath(fixture));
+    assert.ok(sub.startsWith("audit-cleanup-proof-") && !isAbsolute(sub) && !sub.includes(sep));
+    await rm(fixture, { recursive: true, force: true });
+  });
+  const root = join(fixture, "repo with spaces");
+  const stateDir = join(fixture, "snapshot-state");
+  const checkout = resolve(process.env.AUDIT_TOOLS_TRIAL_CHECKOUT ?? process.cwd());
+  const bin = join(checkout, "audit-code.mjs");
+  const load = p => import(pathToFileURL(join(checkout, "dist", p)).href);
+  const toolPath = [dirname(process.execPath), ...(process.env.SystemRoot ? [join(process.env.SystemRoot, "System32")] : [])].join(delimiter);
+  const env = { ...process.env, PATH:toolPath, AUDIT_CODE_STATE_DIR:stateDir };
+  const run = (...argv) => promisify(execFile)(process.execPath, [bin, ...argv], { cwd: root, env, windowsHide: true, timeout: 15000 });
+  const parent = join(root, "custom output");
+  const owned = join(parent, "working audit");
+  const copied = join(parent, "other run");
+  const outside = join(fixture, "outside");
+  for (const dir of [owned, copied, outside]) await mkdir(dir, { recursive: true });
+  await writeFile(join(root, "example.ts"), "export const value = 1;");
+  const originalState = process.env.AUDIT_CODE_STATE_DIR;
+  process.env.AUDIT_CODE_STATE_DIR = stateDir;
+  t.after(() => {
+    if (originalState === undefined) delete process.env.AUDIT_CODE_STATE_DIR;
+    else process.env.AUDIT_CODE_STATE_DIR = originalState;
+  });
+  const { ensureRunSnapshot } = await load("audit/io/runSnapshot.js");
+  await ensureRunSnapshot(root, owned);
+  const snapshotPath = join(owned, "run-snapshot.json");
+  const snapshotBytes = await readFile(snapshotPath, "utf8");
+  const statePath = join(owned, "audit_state.json");
+  await writeFile(statePath, JSON.stringify({ status: "active", obligations: [] }));
+  const promoted = join(parent, "audit-findings.json");
+  await writeFile(promoted, "promoted");
+  await writeFile(join(copied, "keep.txt"), "sibling");
+  const clean = target => run("cleanup", "--force", "--dry-run", "--root", root, "--artifacts-dir", target);
+  const dryRun = async (target, status) => assert.deepEqual(JSON.parse((await clean(target)).stdout), {
+    artifacts_dir: target, action: "dry-run", status, dry_run: true,
+  });
+  const refuse = (target, reason) => assert.rejects(clean(target), error => {
+    assert.equal(error.code, 1);
+    const response = JSON.parse(error.stdout);
+    assert.ok(["skipped", "refused"].includes(response.action));
+    assert.match(response.reason, reason);
+    return true;
+  });
+
+  await dryRun(owned, "active");
+  await writeFile(statePath, "{unparseable");
+  await dryRun(owned, "unknown");
+  assert.equal(await readFile(statePath, "utf8"), "{unparseable");
+  assert.equal(await readFile(snapshotPath, "utf8"), snapshotBytes);
+  assert.equal(await readFile(promoted, "utf8"), "promoted");
+  assert.equal(await readFile(join(copied, "keep.txt"), "utf8"), "sibling");
+  assert.ok((await readFile(join(JSON.parse(snapshotBytes).source_root, "example.ts"), "utf8")).includes("value = 1"));
+
+  await copyFile(statePath, join(copied, "audit_state.json"));
+  await refuse(copied, /exactly one working-run snapshot record/);
+  await copyFile(snapshotPath, join(copied, "run-snapshot.json"));
+  await refuse(copied, /source_root is not the owned source directory/);
+  await t.test("refuses a junction or symbolic-link escape", async child => {
+    const onDiskAlias = join(root, "link");
+    try {
+      await symlink(outside, onDiskAlias, process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      if (process.platform !== "win32" || error?.code !== "EPERM") throw error;
+      child.skip("Windows runner does not permit creating a fixture junction");
+      return;
+    }
+    await refuse(onDiskAlias, /unsafe directory topology/);
+  });
+  await refuse(outside, /not strictly inside/);
+  await refuse(root, /not strictly inside/);
+  await writeFile(join(owned, ".fold-receipt.json"), "{}");
+  await refuse(owned, /incomplete fold receipt/);
+  await rm(join(owned, ".fold-receipt.json"));
+  await copyFile(snapshotPath, join(owned, "run-snapshot-acquiring.json"));
+  await refuse(owned, /exactly one working-run snapshot record/);
+  await rm(join(owned, "run-snapshot-acquiring.json"));
+  await rm(statePath);
+  await mkdir(statePath);
+  await refuse(owned, /unsafe audit state marker/);
+  await rm(statePath, { recursive: true });
+  await writeFile(statePath, "{unparseable");
+
+  // Test both recovery-hint producers directly so diagnostic assertions do
+  // not depend on what next-step decides to do after rollover refuses.
+  const { rollOverFinishedRun } = await load("audit/io/rollover.js");
+  const record = JSON.parse(snapshotBytes);
+  const sourceWithinState = relative(stateDir, await realpath(record.source_root));
+  assert.ok(sourceWithinState.startsWith("snapshots" + sep) && !isAbsolute(sourceWithinState));
+  await rm(record.source_root, { recursive: true });
+  const expectHint = message => {
+    assert.match(message, /audit-code cleanup --force --root /);
+    assert.ok(message.includes(root), message);
+    assert.ok(message.includes("--artifacts-dir ") && message.includes(owned), message);
+  };
+  await assert.rejects(ensureRunSnapshot(root, owned), error => {
+    assert.match(error.message, /frozen copy/);
+    expectHint(error.message);
+    return true;
+  });
+  await writeFile(snapshotPath, JSON.stringify({ ...record, restore_unverified: true }));
+  await assert.rejects(ensureRunSnapshot(root, owned), error => {
+    assert.match(error.message, /previous recovery did not prove identity/);
+    expectHint(error.message);
+    return true;
+  });
+  const rollover = join(root, "custom rollover", "working");
+  await mkdir(rollover, { recursive: true });
+  await writeFile(join(rollover, "run-ended.json"), "{}");
+  await writeFile(join(rollover, "audit-findings.json"), "{}");
+  const restoreWrite = t.mock.method(process.stderr, "write", () => true);
+  try {
+    assert.equal(await rollOverFinishedRun(rollover, root), false);
+  } finally {
+    restoreWrite.mock.restore();
+  }
+  const message = restoreWrite.mock.calls.map(({ arguments: args }) => args[0]).join("");
+  assert.match(message, /has no promoted copy/);
+  assert.ok(message.includes("audit-code cleanup --force --root ") && message.includes(root) &&
+    message.includes("--artifacts-dir ") && message.includes(rollover), message);
 });

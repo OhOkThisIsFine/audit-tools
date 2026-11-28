@@ -1,68 +1,9 @@
 // sites-pinned: tests/audit/cleanup.test.ts, tests/audit/run-snapshot-ownership.test.ts
 import { outputJson } from "./cliHelpers.js";
-import { existsSync } from "node:fs";
-import { basename, dirname, parse, resolve } from "node:path";
-import { AUDIT_TOOLS_DIRNAME, auditArtifactsDir } from "audit-tools/shared";
+import { relative } from "node:path";
+import { auditArtifactsDir } from "audit-tools/shared";
 import { getArtifactsDir, getRootDir, hasFlag } from "./args.js";
 import { cleanupStaleArtifactsDir } from "./cleanup.js";
-import { ARTIFACT_DEFINITIONS } from "../io/artifacts.js";
-
-// The structural identity of an audit artifacts directory, which the `cleanup`
-// verb has to PROVE a target carries before recursively deleting it
-// (CP-NODE-16). Both segments come from the single-sourced layout in
-// audit-tools/shared (src/shared/io/auditToolsPaths.ts): the dirname constant
-// directly, the area segment derived from the helper that builds it — so a
-// layout change moves this guard with it instead of silently disarming it.
-const AUDIT_AREA_DIRNAME = basename(auditArtifactsDir("."));
-// The supervisor state marker, named by the artifact registry.
-const AUDIT_STATE_FILENAME = ARTIFACT_DEFINITIONS.audit_state.fileName;
-
-export type CleanupTargetValidation =
-  | { ok: true }
-  | { ok: false; reason: string };
-
-/**
- * Validate the cleanup TARGET itself — a purely structural check, independent
- * of audit state, flags, and eligibility (CP-NODE-16). `--force` overrides the
- * interactive/status confirmation inside cleanupStaleArtifactsDir; it must
- * never override this: a mistyped or overly broad `--artifacts-dir` (`.`, a
- * checkout root, a filesystem root) reaching a recursive rm is exactly the
- * accident this verb has to make impossible.
- *
- * Two rules:
- *   1. the path must BE an artifacts dir — `<X>/.audit-tools/audit`, never a
- *      filesystem root — decided from the path shape alone, so it holds even
- *      when the directory does not exist yet;
- *   2. `--force` additionally requires the `audit_state.json` marker on disk:
- *      force waives the STATUS evidence, never the IDENTITY evidence. Without
- *      `--force` a missing marker changes nothing — the eligibility gate in
- *      cleanupStaleArtifactsDir already refuses to delete, so the verb's
- *      skipped / crashed-audit contract is untouched.
- */
-export function validateCleanupTarget(
-  artifactsDir: string,
-): CleanupTargetValidation {
-  const resolved = resolve(artifactsDir);
-
-  if (resolved === parse(resolved).root) {
-    return {
-      ok: false,
-      reason: `refusing to delete ${resolved}: it is a filesystem root, not an ${AUDIT_TOOLS_DIRNAME}/${AUDIT_AREA_DIRNAME} artifacts directory`,
-    };
-  }
-
-  if (
-    basename(resolved) !== AUDIT_AREA_DIRNAME ||
-    basename(dirname(resolved)) !== AUDIT_TOOLS_DIRNAME
-  ) {
-    return {
-      ok: false,
-      reason: `refusing to delete ${resolved}: not an ${AUDIT_TOOLS_DIRNAME}/${AUDIT_AREA_DIRNAME} artifacts directory — pass --artifacts-dir pointing at the audit artifacts dir`,
-    };
-  }
-
-  return { ok: true };
-}
 
 function emitRefusal(
   artifactsDir: string,
@@ -85,26 +26,19 @@ export async function cmdCleanup(argv: string[]): Promise<void> {
   const dryRun = hasFlag(argv, "--dry-run");
   const force = hasFlag(argv, "--force");
 
-  // Target validation precedes EVERY recursive-delete path (CP-NODE-16):
-  // --force relaxes the status confirmation only, never the structural check.
-  const validation = validateCleanupTarget(artifactsDir);
-  if (!validation.ok) {
-    emitRefusal(artifactsDir, validation.reason, dryRun);
-    return;
-  }
-  const markerPath = resolve(artifactsDir, AUDIT_STATE_FILENAME);
-  if (force && !existsSync(markerPath)) {
-    emitRefusal(
-      artifactsDir,
-      `--force given, but ${markerPath} does not exist — the directory carries no audit_state.json marker, so it is not provably an audit artifacts dir; refusing to delete`,
-      dryRun,
-    );
-    return;
-  }
-
+  const root = getRootDir(argv);
+  const custom = relative(auditArtifactsDir(root), artifactsDir) !== "";
   const result = await cleanupStaleArtifactsDir(artifactsDir, {
-    force, dryRun, requireAuditMarker: true, repositoryRoot: getRootDir(argv),
-  });
+    force, dryRun, requireAuditMarker: true, repositoryRoot: root, explicitTarget: { custom, root },
+  }).catch((error: unknown) => ({
+    action: "refused" as const,
+    reason: error instanceof Error ? error.message : String(error),
+  }));
+
+  if (result.action === "refused") {
+    emitRefusal(artifactsDir, result.reason, dryRun);
+    return;
+  }
 
   if (result.action === "skipped") {
     outputJson(

@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { delimiter, extname, isAbsolute, join } from "node:path";
+import { accessSync, constants, statSync } from "node:fs";
+import { delimiter, extname, isAbsolute, join, resolve } from "node:path";
 import {
   admitLocalSpawn,
   resolveExecArgv,
@@ -41,9 +41,19 @@ function toSpawnTuple(candidate: LocalCommandCandidate): {
   return { command: resolved[0], args: resolved.slice(1) };
 }
 
-function resolveFromPath(command: string): string | null {
+function isUsableFile(path: string, accessMode: number): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, accessMode);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function* resolveCommandPaths(root: string, command: string): Generator<string> {
   if (command.trim().length === 0) {
-    return null;
+    return;
   }
 
   if (
@@ -51,7 +61,9 @@ function resolveFromPath(command: string): string | null {
     command.includes("/") ||
     isAbsolute(command)
   ) {
-    return existsSync(command) ? command : null;
+    // Relative explicit paths are launched under the same cwd we probe.
+    yield resolve(root, command);
+    return;
   }
 
   const pathValue = process.env.PATH ?? "";
@@ -78,41 +90,22 @@ function resolveFromPath(command: string): string | null {
 
   for (const dir of pathEntries) {
     for (const ext of effectiveExtensions) {
-      const candidatePath = join(dir, `${command}${ext}`);
-      if (existsSync(candidatePath)) {
-        return candidatePath;
-      }
+      yield resolve(dir, `${command}${ext}`);
     }
   }
 
-  return null;
+  yield join(root, command);
 }
 
-function resolveCandidate(
-  root: string,
-  candidate: LocalCommandCandidate,
-): LocalCommandCandidate | null {
-  if (candidate.command === process.execPath) {
-    return candidate;
-  }
-
-  const resolvedPath = resolveFromPath(candidate.command);
-  if (resolvedPath) {
-    return {
-      ...candidate,
-      command: resolvedPath,
-    };
-  }
-
-  const repoLocalPath = join(root, candidate.command);
-  if (existsSync(repoLocalPath)) {
-    return {
-      ...candidate,
-      command: repoLocalPath,
-    };
-  }
-
-  return null;
+function isUnusableLaunch(result: Awaited<ReturnType<typeof runTrackedAsync>>): boolean {
+  if (!result.error || result.signal || (result.status !== null && result.status >= 0)) return false;
+  const code = (result.error as NodeJS.ErrnoException).code;
+  if (code === "ENOENT" || code === "ENOTDIR" || code === "EACCES" || code === "ENOEXEC") return true;
+  if (process.platform !== "win32") return false;
+  // A Windows invalid image can throw synchronously as "spawn UNKNOWN";
+  // the owned-Job helper preserves the message under its EOWNERSHIP code.
+  return code === "UNKNOWN"
+    || (code === "EOWNERSHIP" && /^spawn (?:ENOENT|ENOTDIR|EACCES|ENOEXEC|UNKNOWN)$/u.test(result.error.message));
 }
 
 // The single fold-child deadline lives at the shared exec boundary
@@ -161,34 +154,37 @@ export async function runFirstAvailableCommand(
       continue;
     }
 
-    const resolved = resolveCandidate(root, candidate);
-    if (!resolved) {
-      continue;
+    for (const command of resolveCommandPaths(root, candidate.command)) {
+      if (!isUsableFile(command, constants.X_OK)) continue;
+
+      const resolved = { ...candidate, command };
+      const spawnTarget = toSpawnTuple(resolved);
+      const result = await runTrackedAsync(
+        [spawnTarget.command, ...spawnTarget.args],
+        {
+          cwd: root,
+          encoding: "utf8",
+          timeout: TRACKED_CHILD_DEADLINE_MS,
+        },
+      );
+
+      // A file can disappear or fail to load after the probe. Only fall
+      // through on a known launch error, not a tool exit or runner failure.
+      if (isUnusableLaunch(result)) continue;
+      return {
+        candidate: {
+          ...resolved,
+          display:
+            candidate.display ?? [candidate.command, ...candidate.args].join(" "),
+        },
+        exitCode: result.status,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        error: result.error
+          ? new Error(result.error.message, { cause: result.error })
+          : undefined,
+      };
     }
-
-    const spawnTarget = toSpawnTuple(resolved);
-    const result = await runTrackedAsync(
-      [spawnTarget.command, ...spawnTarget.args],
-      {
-        cwd: root,
-        encoding: "utf8",
-        timeout: TRACKED_CHILD_DEADLINE_MS,
-      },
-    );
-
-    return {
-      candidate: {
-        ...resolved,
-        display:
-          candidate.display ?? [candidate.command, ...candidate.args].join(" "),
-      },
-      exitCode: result.status,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      error: result.error
-        ? new Error(result.error.message, { cause: result.error })
-        : undefined,
-    };
   }
 
   return lastDecline
@@ -214,7 +210,7 @@ export function resolveNodeTool(
 ): LocalCommandCandidate[] {
   const localToolPath = join(root, relativePath);
   const candidates: LocalCommandCandidate[] = [];
-  if (existsSync(localToolPath)) {
+  if (isUsableFile(localToolPath, constants.R_OK)) {
     candidates.push({
       command: process.execPath,
       args: [localToolPath, ...args],

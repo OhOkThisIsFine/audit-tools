@@ -51,7 +51,7 @@ import {
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import type { RunLogger } from "../../shared/observability/runLog.js";
 import { ARTIFACT_DEFINITIONS, archiveRunDiagnostics, refreshEndedQuestionReport } from "./artifacts.js";
-import { removeRunSnapshot } from "./runSnapshot.js";
+import { forceCleanupCommand, removeRunSnapshot } from "./runSnapshot.js";
 import { CHARTER_PACKET_ARCHIVE_DIRNAME } from "../orchestrator/charterPacketArchive.js";
 import { SNAPSHOT_DIRNAME } from "../orchestrator/designReviewSnapshot.js";
 import { graphEdgeCachePath } from "../orchestrator/graphEdgeCache.js";
@@ -133,7 +133,8 @@ export async function rollOverFinishedRun(artifactsDir: string, root?: string, r
       // contract with no promoted copy is the only copy: keep the dir.
       if (existsSync(auditFindingsPath(artifactsDir)) && !existsSync(promotedAuditFindingsPath(artifactsDir))) {
         warn(`the finished audit in ${artifactsDir} was not rolled over: ${AUDIT_FINDINGS_FILENAME} has no promoted copy ` +
-          `at ${promotedAuditFindingsPath(artifactsDir)}; copy it there, or run \`audit-code cleanup --force\` to discard it`);
+          `at ${promotedAuditFindingsPath(artifactsDir)}; copy it there` +
+          (root === undefined ? "." : `, or run \`${forceCleanupCommand(root, artifactsDir)}\` to discard it`));
         return false;
       }
       const { lost } = await archiveRunDiagnostics({ artifactsDir });
