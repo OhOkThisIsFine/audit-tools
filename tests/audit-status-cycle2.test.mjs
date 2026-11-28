@@ -97,12 +97,12 @@ test("status projects the current bound operator decision, not the ready publica
   assert.equal((await status()).functional_preflight.status, "degraded");
 
   // Resuming can publish another preflight even after audit state exists.
-  await put("audit_state.json", { status: "in_progress" });
+  await put("audit_state.json", { status: "active" });
   await put("functional-preflight.json", report);
   const paths = { functional_preflight: reportPath };
   await step("functional_preflight", id, paths, { summary: "Blocked when published." }, "blocked");
   const resumed = await status();
-  assert.equal(resumed.status, "in_progress");
+  assert.equal(resumed.status, "active");
   assert.equal(resumed.functional_preflight.status, "blocked");
   assert.match(resumed.functional_preflight.summary, /operator stopped/);
 
@@ -132,7 +132,7 @@ test("ordinary questions wait while only the exact current independent systemic 
     ...identity, assignment_id: "ordinary-answer", authorized_scope: { include: [], exclude: [] },
     suggested_sources: [], available_evidence_ids: [],
   };
-  await put("audit_state.json", { status: "in_progress" });
+  await put("audit_state.json", { status: "active" });
   await put("review_session.json", { schema_version: "audit-tools/question-review-session/v1", run_id: runId });
   const review_plan = {
     schema_version, snapshot_id: identity.snapshot_id, questions: [question], inventory: [], omissions: [], lens_decisions: [],

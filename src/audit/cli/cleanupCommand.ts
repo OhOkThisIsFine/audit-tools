@@ -47,9 +47,8 @@ export async function cmdCleanup(argv: string[]): Promise<void> {
         action: "skipped",
         // Do NOT advise --force here. This fallback covers the
         // status="unknown" branch — a directory with no audit_state.json
-        // marker — and that is the one case --force does NOT waive: the
-        // marker check above refuses a forced delete outright. Force waives
-        // the run's STATUS evidence, never its IDENTITY evidence.
+        // marker. Force waives status evidence, not identity; the cleanup
+        // implementation separately verifies any terminal-tail recovery.
         reason:
           result.reason ??
           "no audit_state.json found — the directory carries no audit-run marker, so it is not provably an audit artifacts dir; --force does not waive this (force waives run STATUS evidence, never IDENTITY evidence)",
