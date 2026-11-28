@@ -6,8 +6,8 @@
  * CE-206 (total-encoding-failure check too coarse — single bad clause blocks
  * all encodable clauses). Satisfies OBL-S10 / OBL-X07.
  *
- * Key invariant: ANY clause that cannot be encoded independently triggers a
- * blocking checkpoint question; encodable clauses proceed regardless.
+ * Key invariant: Unknown clauses trigger a blocking checkpoint question. A recognized
+ * preservation directive can be retained as prose without supplying any planning signal.
  *
  * All logic is pure and synchronous — no I/O, no LLM calls.
  */
@@ -19,8 +19,8 @@ import { splitIntentClauses } from "./clauseBoundaries.js";
 // Public types
 // ---------------------------------------------------------------------------
 
-/** The three signal kinds a clause can encode to. */
-export type IntentClauseKind = "lens_weight" | "priority_signal" | "scope_emphasis";
+/** The planning signal kinds, plus one non-executable prose classification. */
+export type IntentClauseKind = "lens_weight" | "priority_signal" | "scope_emphasis" | "preservation_directive";
 
 /** Result of decomposing and assessing a single clause. */
 export interface IntentClause {
@@ -36,7 +36,7 @@ export interface IntentClause {
   clause_id: string;
   /** The original clause text (trimmed). */
   text: string;
-  /** Whether this clause maps to at least one recognised signal. */
+  /** Whether this clause maps to a signal or a known prose directive. */
   encodable: boolean;
   /** Present when encodable is true. */
   encoded_as?: {
@@ -45,6 +45,8 @@ export interface IntentClause {
   };
   /** Present when encodable is false — a human/host-answerable blocking question. */
   checkpoint_question?: string;
+  /** An unresolved handling condition is not a request for keyword-based signals. */
+  suppress_planning_signals?: true;
 }
 
 /** Output of interpretIntent — the top-level clause-aware result. */
@@ -66,7 +68,8 @@ export interface ClauseInterpretResult {
 
 /**
  * Split a compound free-form intent string into discrete single-purpose
- * clauses. Splits on " and ", newlines, and sentence boundaries (a `.` followed
+ * clauses. Splits on "and" except within recognized continuations, on newlines,
+ * and at sentence boundaries (a `.` followed
  * by whitespace or end-of-input); a `;` splits at bracket depth 0 and never
  * inside a parenthetical aside (see `clauseBoundaries.ts` for the positional
  * rule and the fragments it prevents). Returns an empty array for
@@ -83,7 +86,7 @@ export interface ClauseInterpretResult {
  * That function splits on commas because it processes brief hint lists where
  * commas are the primary separator (e.g. "security, performance"). Its output
  * is a set of keyword-match inputs, not independently assessable directives.
- * It also does NOT split on " and ".
+ * It also does NOT split coordinated directives introduced by "and".
  *
  * Comma-vs-`and` is the ONLY intentional difference between the two; every
  * other boundary (including the `;` rule above) is the shared
@@ -168,8 +171,25 @@ export function assessClauseEncodability(clause: string): {
   kind?: IntentClauseKind;
   detail?: string;
   checkpoint_question?: string;
+  suppress_planning_signals?: true;
 } {
   const text = clause.trim();
+
+  // Recognize the handling object separately from the whole passive form.
+  // A non-passive condition must not fall through to keyword matching:
+  // "unless security requests a rewrite" is a condition, not a lens request.
+  const preservationLead = /^(?:use the structured audit and\s+)?(?:preserve|keep|retain)\s+(?:(?:the|its|original|existing|current|audit|source|report)\s+)*(?:inputs?|narrative)\b/i.exec(text);
+  if (preservationLead || /^use the structured audit and\s+/i.test(text)) {
+    if (preservationLead &&
+        /^(?:\s+and\s+(?:(?:the|its|original|existing|current|audit|source|report)\s+)*(?:inputs?|narrative))?(?:\s+(?:intact|unchanged|as[- ]is))?$/i.test(text.slice(preservationLead[0].length))) {
+      return { encodable: true, kind: "preservation_directive", detail: text };
+    }
+    return {
+      encodable: false,
+      checkpoint_question: generateCheckpointQuestion(text),
+      suppress_planning_signals: true,
+    };
+  }
 
   const lenses = matchLenses(text);
   if (lenses.length > 0) {
@@ -219,6 +239,7 @@ function assessClauseEncodabilityAsClause(text: string): IntentClause {
     text,
     encodable: false,
     checkpoint_question: result.checkpoint_question,
+    ...(result.suppress_planning_signals && { suppress_planning_signals: true }),
   };
 }
 

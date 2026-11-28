@@ -20,12 +20,10 @@ import { interpretFreeFormIntent, interpretIntent, constraintClausesFromIntent, 
 
 /** Sidecar artifact recording the deterministic interpretation of free_form_intent. */
 export const INTENT_INTERPRETATION_FILENAME = "intent-interpretation.json";
-// v1alpha2: unencodable_clauses carries identity-keyed records (clause_id +
-// checkpoint_question), not bare strings — the shape the blocking consumer
-// reads. A v1alpha1 sidecar (string[]) is stale and is repaired by
-// re-derivation; it had no readers, so no migration path is owed.
+// v1alpha3: repair older sidecars whose clause boundaries could have
+// produced orphan questions, and record passive directives alongside signals.
 export const INTENT_INTERPRETATION_SCHEMA_VERSION =
-  "remediate-code-intent-interpretation/v1alpha2";
+  "remediate-code-intent-interpretation/v1alpha3";
 
 export interface PersistedIntentInterpretation {
   schema_version: typeof INTENT_INTERPRETATION_SCHEMA_VERSION;
@@ -39,6 +37,8 @@ export interface PersistedIntentInterpretation {
    * `constraint_clauses` entry on the checkpoint (CE-004, identity-keyed).
    */
   unencodable_clauses: ConstraintClauseRecord[];
+  /** Operator-readable only; never a scope or authorization signal. */
+  preservation_directives: string[];
   created_at: string;
 }
 
@@ -73,16 +73,25 @@ export async function interpretConfirmedCheckpointIntent(
   const raw = confirmedFreeFormIntent(checkpoint);
   if (raw === null) return null;
 
-  const interpreted = interpretFreeFormIntent(raw);
-  // The clause pipeline (interpretIntent) owns identity + blocking questions;
-  // the hint interpreter above owns lens/priority/scope signals. Both are
-  // deterministic draws over the same input.
+  // The clause pipeline owns identity, blocking questions and readable prose.
+  // Only the remaining clauses may contribute to signal extraction (e.g.
+  // "structured audit" inside a preservation instruction is not a lens request).
   const clauseResult = interpretIntent(raw);
   const unencodable_clauses = constraintClausesFromIntent(clauseResult.clauses);
+  const preservation_directives: string[] = [];
+  const signalClauses: string[] = [];
+  for (const clause of clauseResult.clauses) {
+    if (clause.encoded_as?.kind === "preservation_directive") {
+      preservation_directives.push(clause.text);
+    } else if (!clause.suppress_planning_signals) {
+      signalClauses.push(clause.text);
+    }
+  }
   const persisted: PersistedIntentInterpretation = {
     schema_version: INTENT_INTERPRETATION_SCHEMA_VERSION,
-    interpreted,
+    interpreted: interpretFreeFormIntent(signalClauses.length === clauseResult.clauses.length ? raw : signalClauses.join("\n")),
     unencodable_clauses,
+    preservation_directives,
     created_at: new Date().toISOString(),
   };
   try {
@@ -148,6 +157,8 @@ function parsePersistedIntentInterpretation(
   if (
     isRecord(parsed) &&
     parsed.schema_version === INTENT_INTERPRETATION_SCHEMA_VERSION &&
+    Array.isArray(parsed.preservation_directives) &&
+    parsed.preservation_directives.every((text) => typeof text === "string") &&
     Array.isArray(parsed.unencodable_clauses) &&
     parsed.unencodable_clauses.every(
       (c): c is ConstraintClauseRecord =>

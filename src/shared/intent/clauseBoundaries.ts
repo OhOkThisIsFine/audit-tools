@@ -10,7 +10,7 @@
  *   - `clauseInterpreter.decomposeIntent` — the blocking-checkpoint pipeline,
  *     where every clause must be INDEPENDENTLY assessable, so a comma inside a
  *     clause ("focus on modules A, B, and C") is part of the directive and
- *     " and " is a separator instead.
+ *     " and " is a separator except within a recognized noun list or source directive.
  *
  * That comma/`and` difference is the ONLY intentional one, and it is what
  * legacy tests/shared/maintainability-split-rules.test.ts guards. Everything else
@@ -64,7 +64,7 @@ export interface ClauseBoundaryOptions {
    */
   splitOnCommas: boolean;
   /**
-   * Split on the word `and`. True for the blocking-checkpoint interpreter,
+   * Split on `and` unless it is part of a recognized whole directive. True for the blocking-checkpoint interpreter,
    * false for the hint interpreter.
    */
   splitOnAnd: boolean;
@@ -97,6 +97,13 @@ export function splitIntentClauses(
 
   for (let index = 0; index < text.length; index++) {
     const char = text[index] as string;
+
+    const quoteEnd = closingQuote(text, index);
+    if (quoteEnd !== -1) {
+      current += text.slice(index, quoteEnd + 1);
+      index = quoteEnd;
+      continue;
+    }
 
     if (OPENING.includes(char)) {
       depth += 1;
@@ -132,7 +139,9 @@ export function splitIntentClauses(
     if (
       options.splitOnAnd &&
       depth === 0 &&
-      isWordAnd(text, index)
+      (char === "a" || char === "A") &&
+      isWordAnd(text, index) &&
+      !continuesDirective(current, text.slice(index + 3))
     ) {
       index += 2; // consume "and"
       flush();
@@ -151,15 +160,40 @@ function isSentenceEnd(text: string, index: number): boolean {
   return next === undefined || /\s/.test(next);
 }
 
-/**
- * True when `text` at `index` spells the standalone word `and` (word-boundary
- * on both sides), so `demand` and `Android` are never split points.
- */
+
+/** The legacy word-boundary split keeps unknown independent actions visible. */
 function isWordAnd(text: string, index: number): boolean {
-  if (text.slice(index, index + 3).toLowerCase() !== "and") return false;
-  const before = index === 0 ? "" : (text[index - 1] as string);
-  const after = text[index + 3];
-  return (
-    !/[A-Za-z0-9_]/.test(before) && (after === undefined || !/[A-Za-z0-9_]/.test(after))
-  );
+  return /^and$/i.test(text.slice(index, index + 3)) &&
+    !/[A-Za-z0-9_]/.test(text[index - 1] ?? "") &&
+    !/[A-Za-z0-9_]/.test(text[index + 3] ?? "");
+}
+
+// Exempt only known continuations. An unknown action after "and" must still
+// be assessed independently; an earlier lens keyword must not conceal it.
+function continuesDirective(lead: string, tail: string): boolean {
+  if (!/\s$/.test(lead) || !/^\s/.test(tail)) return false;
+  const left = lead.trim();
+  const right = tail.trimStart();
+  // "Its" binds to the source introduced by the first half.
+  if (/^use the structured audit$/i.test(left) && /^(?:preserve|keep|retain)\s+its\s/i.test(right)) {
+    return true;
+  }
+  if (/^(?:use the structured audit and\s+)?(?:preserve|keep|retain)\s+(?:[^,.;]*\s)?inputs?$/i.test(left) &&
+      /^(?:(?:the|its)\s+)?(?:original\s+)?narrative(?=$|[,.!?;\n]|\s+(?:and|intact|unchanged|as[- ]is|if|unless|only\s+if)\b)/i.test(right)) {
+    return true;
+  }
+  // A final list member ("A, B, and C" / "build, checks, hooks and unit
+  // topology,") is not a separate action. Do not infer other parts of speech
+  // from arbitrary words following the conjunction.
+  return left.includes(",") &&
+    /^(?:[A-Z]|unit topology)(?=\s*(?:$|[,.;!?\n]|and\s))/u.test(right);
+}
+
+// Do not tokenize punctuation or conjunctions inside quoted paths. A single
+// quote inside a word is an apostrophe, not the beginning of a quoted span.
+function closingQuote(text: string, index: number): number {
+  const char = text[index];
+  if (char !== '"' && char !== "'" && char !== "`") return -1;
+  if (char === "'" && index > 0 && /[\p{L}\p{N}]/u.test(text[index - 1]!)) return -1;
+  return text.indexOf(char, index + 1);
 }
