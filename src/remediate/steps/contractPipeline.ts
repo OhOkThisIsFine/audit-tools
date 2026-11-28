@@ -128,9 +128,13 @@ async function reviewStep(options: ContractPipelineStepOptions, canonical: Canon
   const prior = await readPlanReview(options.artifactsDir, role, canonical.revision_sha256);
   const { adversarialDepth } = await resolveAdversarialDepth(options.artifactsDir);
   const requirement = reviewRequirementForRole(role, adversarialDepth);
+  const requiredCounterexampleIds = new Set(role === "judge" ? [
+    ...history.accepted_ids,
+    ...CriticSchema.parse(dependencies[1]?.result).counterexamples.map(entry => entry.id),
+  ] : []);
   const body = renderPlanReviewPrompt({ role, root: options.root, sourcePath: paths.source, planPath: paths.canonical,
     canonical, history, priorReviewPaths: REVIEW_DEPENDENCIES[role].map(dependency => paths.review(dependency).accepted), requirement,
-    graphHint: await options.planningGraph?.() });
+    requiredCounterexampleIds, graphHint: await options.planningGraph?.() });
   const bound = bindWorkerPrompt(body + `\nInput binding: ${inputSha}`, prompt_sha256 => JSON.stringify({
     contract_version: "review-submission/v1", prompt_sha256,
     review: { mode: requirement === "independent" ? "independent" : "degraded", reason: "<how the context meets the review policy>" },
@@ -165,10 +169,8 @@ async function reviewStep(options: ContractPipelineStepOptions, canonical: Canon
         }
         if (role === "judge") {
           const judge = PlanJudgeSchema.parse(payload);
-          const critic = CriticSchema.parse(dependencies[1]?.result);
-          const ids = new Set([...history.accepted_ids, ...critic.counterexamples.map(entry => entry.id)]);
           const given = judge.classifications.map(entry => entry.counterexample_id);
-          if (given.length !== ids.size || new Set(given).size !== given.length || given.some(id => !ids.has(id))) errors.push("Judge must classify every current/previously accepted counterexample exactly once.");
+          if (given.length !== requiredCounterexampleIds.size || new Set(given).size !== given.length || given.some(id => !requiredCounterexampleIds.has(id))) errors.push("Judge must classify every current/previously accepted counterexample exactly once.");
           const assessed = judge.requirement_assessments.map(entry => entry.requirement_id);
           if (assessed.length !== reqIds.size || new Set(assessed).size !== assessed.length || assessed.some(id => !reqIds.has(id))) errors.push("Judge must assess every requirement exactly once.");
           const disposed = new Set(canonical.plan.source_dispositions.map(entry => entry.finding_id));

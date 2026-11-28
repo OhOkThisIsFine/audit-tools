@@ -58,6 +58,7 @@ export function renderPlanReviewPrompt(params: {
   role: PlanReviewRole; root: string; sourcePath: string; planPath: string;
   canonical: CanonicalPlan; history: PlanReviewHistory; priorReviewPaths: string[];
   requirement: ReviewRequirement;
+  requiredCounterexampleIds: ReadonlySet<string>;
   graphHint?: string;
 }): string {
   const tasks = {
@@ -66,6 +67,12 @@ export function renderPlanReviewPrompt(params: {
     judge: `Independently judge every current or previously accepted counterexample, and assess every requirement and source disposition against concrete evidence. Return {verdict:"approved"|"needs_repair",classifications:[{counterexample_id,classification:"accepted"|"repaired"|"invalid"|"out_of_scope"|"duplicate"|"residual_risk",rationale}],requirement_assessments:[{requirement_id,verdict:"satisfied"|"insufficient",evidence:[...]}],disposition_assessments:[{finding_id,verdict:"satisfied"|"insufficient",evidence:[...]}]}. Approved means every requirement/disposition is sufficient and no accepted counterexample remains. For an empty request, include request_disposition_assessment:{verdict:"satisfied"|"insufficient",evidence:[...]}. Use repaired only with concrete evidence that the plan now addresses a previously accepted counterexample. A claimed repair must actually address the counterexample; merely listing its ID is not proof.`,
   };
   const scope = [...new Set(params.canonical.plan.units.flatMap(unit => [...unit.read_paths, ...unit.allowed_files]))];
+  const counterexamples = params.role === "judge"
+    ? `Required counterexample classification IDs: ${JSON.stringify([...params.requiredCounterexampleIds])}.
+${params.requiredCounterexampleIds.size ? "Classify exactly these IDs once each." : "No IDs are required; return classifications: []."}
+Active counterexamples carried from earlier reviews: ${JSON.stringify(params.history.counterexamples.filter(entry => params.requiredCounterexampleIds.has(entry.id)))}.
+Historical counterexamples (reference only; do not classify): ${JSON.stringify(params.history.counterexamples.filter(entry => !params.requiredCounterexampleIds.has(entry.id)))}.`
+    : `Historical counterexamples: ${JSON.stringify(params.history.counterexamples)}.`;
   return `# Executable plan ${params.role}
 
 ${tasks[params.role]}
@@ -75,7 +82,7 @@ You may inspect the affected repository files and their immediate callers/tests 
 ${params.graphHint ?? ""}
 
 Review the exact executable units, not a future planner's interpretation. Revision: ${params.canonical.revision_sha256}.
-Historical counterexamples: ${JSON.stringify(params.history.counterexamples)}.
+${counterexamples}
 Review requirement: ${params.requirement}. ${params.requirement === "independent" ? "Use an independent context that did not author this plan and cannot see its author's reasoning. Unavailable independence must be declared; it cannot be replaced with self-review." : "A declared lightweight self-review is allowed for this low-risk lane."}
 Independence is a host declaration; binding does not prove reviewer identity.
 `;
