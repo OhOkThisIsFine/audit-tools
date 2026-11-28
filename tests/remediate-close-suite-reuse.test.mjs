@@ -31,6 +31,9 @@ async function closeFixture(t, changes = {}) {
   for (const dir of ["src/shared","src/audit","src/remediate","scripts/shared","tests","node_modules/.bin"]) {
     await mkdir(join(root,dir), { recursive: true });
   }
+  const fullLanding = changes.landing === "full";
+  const lint = fullLanding || changes.landing === "lint";
+  const glossary = fullLanding || changes.landing === "glossary";
   const scripts = {
     prebuild: "node scripts/shared/guard-no-suite-running.mjs",
     build: "node scripts/shared/clean-dist.mjs && tsc -p tsconfig.json",
@@ -39,12 +42,12 @@ async function closeFixture(t, changes = {}) {
     test: "npm run build && npm run test:built",
     "test:built": "node scripts/shared/run-contract-tests.mjs",
     "verify:guards": "npm run test:built",
-    "check:invariant-glossary": "node scripts/check-invariant-glossary.mjs",
-    ...(changes.nativeLanding ? {
+    ...(glossary ? { "check:invariant-glossary": "node scripts/check-invariant-glossary.mjs" } : {}),
+    ...(fullLanding ? {
       "check:deadcode": "knip --no-config-hints",
       "check:depgraph": "depcruise --config .dependency-cruiser.cjs src",
-      "check:lint": "eslint .",
     } : {}),
+    ...(lint ? { "check:lint": "eslint ." } : {}),
     ...changes.scripts,
   };
   const log = (label) => `import { appendFileSync } from "node:fs"; appendFileSync(".git/fixture-trace", ${JSON.stringify(label + "\n")});`;
@@ -76,7 +79,7 @@ async function closeFixture(t, changes = {}) {
     `${log("build")} import { mkdirSync, writeFileSync } from "node:fs"; mkdirSync("dist",{recursive:true}); writeFileSync("dist/built.js","start");`);
   const leaf = `import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"; import {resolve} from "node:path"; const raw = process.argv.slice(2); const label = raw[0] === "--check" ? "check:tests" : "suite:" + (process.env.npm_lifecycle_event === "test:built" && resolve(process.env.npm_package_json ?? "") === resolve("package.json") ? "test:built" : "node") + ":" + readFileSync("dist/built.js", "utf8"); appendFileSync(".git/fixture-trace", label + "\\n"); if(raw[0] !== "--check") { mkdirSync(".claude/hooks/.state/suite-green",{recursive:true}); writeFileSync(".claude/hooks/.state/suite-green/latest.json","fixture"); if(${Boolean(changes.leafMutates)}) writeFileSync("dist/built.js","changed in suite"); if(${Boolean(changes.red)}) process.exitCode=1; }`;
   await writeFile(join(root,"scripts/shared/run-contract-tests.mjs"), leaf);
-  await writeFile(join(root,"scripts/check-invariant-glossary.mjs"), `${log("glossary")} ${changes.mutate ? 'import {writeFileSync} from "node:fs"; writeFileSync("dist/built.js","changed");' : ""}`);
+  if (glossary) await writeFile(join(root,"scripts/check-invariant-glossary.mjs"), `${log("glossary")} ${changes.mutate ? 'import {writeFileSync} from "node:fs"; writeFileSync("dist/built.js","changed");' : ""}`);
   await writeFile(join(root,"scripts/hook.mjs"),log("hook"));
   if (changes.failingSuite) {
     await writeFile(join(root, "scripts/failure.mjs"), `${log(changes.failingSuite)} process.exitCode = 1;`);
@@ -85,10 +88,10 @@ async function closeFixture(t, changes = {}) {
   await writeFile(join(root,"node_modules/fixture-runtime.mjs"), "original");
   await writeFile(join(root,"node_modules/.bin/tsc"), '#!/bin/sh\nnode tsc-fixture.mjs "$@"\n', { mode: 0o755 });
   await writeFile(join(root,"node_modules/.bin/tsc.cmd"), '@node tsc-fixture.mjs %*\r\n');
-  if (changes.nativeLanding) {
+  if (lint) {
     // Real npm command discovery and lifecycle, with local synthetic stand-ins
     // for the tool executables so the test does not invoke this repo's gates.
-    const shims = { knip: "deadcode", depcruise: "depgraph", eslint: "lint" };
+    const shims = { ...(fullLanding ? { knip: "deadcode", depcruise: "depgraph" } : {}), eslint: "lint" };
     await writeFile(join(root,"landing-fixture.mjs"), `
       import { appendFileSync, writeFileSync } from "node:fs";
       const [role, ...args] = process.argv.slice(2);
@@ -167,9 +170,12 @@ async function closeFixture(t, changes = {}) {
   }
   if (changes.failingSuite) {
     const failure = "node scripts/failure.mjs";
-    state.plan.test_command = changes.failingSuite === "combined" ? failure : "node scripts/hook.mjs";
-    state.plan.test_command_source = "explicit";
-    if (changes.failingSuite === "e2e") {
+    if (changes.failingSuite === "combined") {
+      state.plan.test_command = failure;
+      state.plan.test_command_source = "explicit";
+    } else {
+      delete state.plan.test_command;
+      delete state.plan.test_command_source;
       state.plan.e2e_command = failure;
       state.plan.e2e_command_source = "explicit";
     }
@@ -185,7 +191,7 @@ async function closeFixture(t, changes = {}) {
 }
 
 test("the native default close observes one npm-context suite after guarded build and both checks", async t => {
-  const {result, trace, report} = await closeFixture(t,{nativeLanding:true});
+  const {result, trace, report} = await closeFixture(t,{landing:"full"});
   assert.equal(result.status, "complete");
   assert.deepEqual(trace, [
     "prebuild", "build", "check", "check:tests", "suite:test:built:start",
@@ -198,37 +204,37 @@ test("the native default close observes one npm-context suite after guarded buil
 });
 
 test("an inherited npm prefix does not redirect the verified project root", async t => {
-  const {trace, report} = await closeFixture(t,{inheritPrefix:true});
+  const {trace, report} = await closeFixture(t,{inheritPrefix:true,landing:"glossary"});
   assert.deepEqual(trace, ["prebuild","build","check","check:tests","suite:test:built:start","glossary"]);
   assert.match(report, /Reused observation from final floor/);
 });
 
 test("a preceding check changes ignored build output, so the advisory guard runs independently", async t => {
-  const {trace, report} = await closeFixture(t,{mutate:true});
+  const {trace, report} = await closeFixture(t,{mutate:true,landing:"glossary"});
   assert.deepEqual(trace.filter(s=>s.startsWith("suite:")), ["suite:test:built:start","suite:test:built:changed"]);
   assert.doesNotMatch(report,/Reused observation/);
 });
 
 test("even exact lint cannot lend guard green after changing installed runtime bytes", async t => {
-  const {trace, report} = await closeFixture(t,{nativeLanding:true,mutateDependency:true});
+  const {trace, report} = await closeFixture(t,{landing:"lint",mutateDependency:true});
   assert.deepEqual(trace.slice(-2), ["lint:.","suite:test:built:start"]);
   assert.doesNotMatch(report,/Reused observation/);
 });
 
 test("a changed lint invocation runs but never lends guard green", async t => {
-  const {trace, report} = await closeFixture(t,{nativeLanding:true,scripts:{"check:lint":"eslint --no-cache ."}});
+  const {trace, report} = await closeFixture(t,{landing:"lint",scripts:{"check:lint":"eslint --no-cache ."}});
   assert.deepEqual(trace.slice(-2), ["lint:--no-cache .","suite:test:built:start"]);
   assert.doesNotMatch(report,/Reused observation/);
 });
 
 test("a lint lifecycle hook runs and requires an independent guard", async t => {
-  const {trace, report} = await closeFixture(t,{nativeLanding:true,scripts:{"precheck:lint":"node scripts/hook.mjs"}});
+  const {trace, report} = await closeFixture(t,{landing:"lint",scripts:{"precheck:lint":"node scripts/hook.mjs"}});
   assert.deepEqual(trace.slice(-3), ["hook","lint:.","suite:test:built:start"]);
   assert.doesNotMatch(report,/Reused observation/);
 });
 
 test("an advisory wrapper with a hook is not borrowed", async t => {
-  const {trace, report} = await closeFixture(t,{scripts:{"preverify:guards":"node scripts/hook.mjs"}});
+  const {trace, report} = await closeFixture(t,{landing:"glossary",scripts:{"preverify:guards":"node scripts/hook.mjs"}});
   assert.deepEqual(trace.slice(-3), ["glossary","hook","suite:test:built:start"]);
   assert.doesNotMatch(report,/Reused observation/);
 });
