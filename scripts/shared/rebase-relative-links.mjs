@@ -36,7 +36,7 @@ function rebaseTarget(target, fromDirAbs, toDirAbs) {
 
   const absolute = resolve(fromDirAbs, pathPart);
   let rebased = relative(toDirAbs, absolute).split(/[\\/]/).join(posix.sep);
-  if (!rebased) return target;
+  if (!rebased) return "./" + fragment;
   // <!-- comment-citation-exempt: illustrative example path -->
   // Keep it explicitly relative — a bare `spec/x.md` is ambiguous to some readers
   // and a leading `./` is how the rest of the docs write a sibling path.
