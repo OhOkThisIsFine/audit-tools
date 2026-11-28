@@ -190,8 +190,8 @@ async function closeFixture(t, changes = {}) {
   return { result, trace, floor, report };
 }
 
-test("the native default close observes one npm-context suite after guarded build and both checks", async t => {
-  const {result, trace, report} = await closeFixture(t,{landing:"full"});
+test("the native default close ignores an inherited npm prefix and observes one project-local suite after guarded build and checks", async t => {
+  const {result, trace, report} = await closeFixture(t,{landing:"full",inheritPrefix:true});
   assert.equal(result.status, "complete");
   assert.deepEqual(trace, [
     "prebuild", "build", "check", "check:tests", "suite:test:built:start",
@@ -201,12 +201,6 @@ test("the native default close observes one npm-context suite after guarded buil
   assert.match(report, /Combined evidence: guarded build and terminal `npm run test:built` from the final floor/);
   assert.match(report, /Landing Gates \(advisory\)/);
   assert.match(report, /Reused observation from final floor: npm run test:built; wrapper not rerun/);
-});
-
-test("an inherited npm prefix does not redirect the verified project root", async t => {
-  const {trace, report} = await closeFixture(t,{inheritPrefix:true,landing:"glossary"});
-  assert.deepEqual(trace, ["prebuild","build","check","check:tests","suite:test:built:start","glossary"]);
-  assert.match(report, /Reused observation from final floor/);
 });
 
 test("a preceding check changes ignored build output, so the advisory guard runs independently", async t => {
