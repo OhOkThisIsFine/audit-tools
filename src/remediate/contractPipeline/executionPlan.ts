@@ -10,7 +10,6 @@ import { ContractReviewProvenanceSchema, reviewIndependenceIssue } from "../../s
 import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../../shared/tooling/exec.js";
 import { errorMessage } from "../../shared/io/json.js";
 import { intakePaths } from "../intake.js";
-import type { RemediationState } from "../state/store.js";
 
 const text = z.string().trim().min(1);
 const digest = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -456,20 +455,6 @@ export async function captureExecutionContext(root:string,plan:ExecutableChangeP
   };
   for(const path of new Set(plan.units.flatMap(unit=>[...unit.read_paths,...unit.allowed_files])))await collect(path);
   return [...files].sort(([a],[b])=>compareCodeUnits(a,b)).map(([path,sha256])=>({path,sha256}));
-}
-
-/** Accepted changes explain context drift for both revision authoring and fresh host dispatch. */
-export function acceptedExecutionContext(state: Pick<RemediationState, "plan" | "items" | "wave_simplifications">) {
-  const accepted = (state.plan?.units ?? []).flatMap(unit => {
-    const item = state.items?.[unit.id];
-    return item?.host_landed_commit ? [{ allowed_files: [...unit.allowed_files], landed_commit: item.host_landed_commit }] : [];
-  });
-  for (const wave of state.wave_simplifications ?? []) {
-    if (wave.response?.disposition === "applied" && wave.applied_files) accepted.push({
-      landed_commit: wave.response.commit, allowed_files: wave.applied_files,
-    });
-  }
-  return accepted;
 }
 
 /** Preparation checks reviewed premises; result ingestion instead checks its bound baseline. */

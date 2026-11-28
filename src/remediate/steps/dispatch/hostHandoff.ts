@@ -12,8 +12,8 @@ import { readIntentCheckpoint } from "../../../shared/types/intentCheckpoint.js"
 import { checkContractConformance, conformanceIssue, conformanceReviewPaths, type ConformanceReviewCheck } from "./contractConformanceReview.js";
 import type { ExecutionUnit, ExecutionRequirement } from "../../../shared/types/executionPlan.js";
 import { executionPlanReferenceIssues } from "../../../shared/types/executionPlan.js";
-import { acceptedExecutionContext, executionPlanContextIssues } from "../../contractPipeline/executionPlan.js";
-import { assertApprovedRuntimePlan as assertCurrentPlanAuthority, RemediationPlanAuthorityError } from "../../contractPipeline/runtimePlanAuthority.js";
+import { executionPlanContextIssues } from "../../contractPipeline/executionPlan.js";
+import { acceptedExecutionContext, assertApprovedRuntimePlan as assertCurrentPlanAuthority, RemediationPlanAuthorityError } from "../../contractPipeline/runtimePlanAuthority.js";
 // sites-pinned: tests/remediate/host-handoff-corroboration.test.ts, tests/remediate/host-handoff-corroboration-required-test-runner.test.ts, tests/remediate/host-handoff.test.ts
 //   host-handoff-corroboration-required-test-runner: the bounded required-test failure message.
 //   host-handoff: the "landing gates" block fails when the close-owns-the-gates prompt line

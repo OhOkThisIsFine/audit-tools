@@ -1,7 +1,8 @@
+import { acceptedExecutionContext } from "../contractPipeline/runtimePlanAuthority.js";
 import { QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION } from "../../shared/types/questionReviewReport.js";
 import { STATE_FILENAME, type RemediationState } from "../state/store.js";
 import type { ExecutionUnit } from "../../shared/types/executionPlan.js";
-// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs, tests/remediate-mixed-guidance.test.mjs
+// sites-pinned: tests/plan-authority.test.mjs
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,7 +21,7 @@ import {
   readPlanReviewHistory, readPlanReview, readApprovedExecutionPlan,
   CritiqueSchema, CriticSchema, PlanJudgeSchema, PlanRiskDecisionSchema, PLAN_REVIEW_ROLES, executionPlanContextIssues,
   PlanReviewReceiptSchema, readExecutionIntent, type PlanSource, type PlanReviewRole, type CanonicalPlan, type PlanReviewReceipt,
-  acceptedExecutionContext, readPendingReplan, readReplanBase, type PlanReviewHistory,
+  readPendingReplan, readReplanBase, type PlanReviewHistory,
 } from "../contractPipeline/executionPlan.js";
 
 export { readApprovedExecutionPlan } from "../contractPipeline/executionPlan.js";

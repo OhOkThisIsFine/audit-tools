@@ -58,3 +58,18 @@ export async function verifyPersistedRuntimePlan(artifactsDir: string, state: Re
     );
   }
 }
+
+// sites-pinned: tests/plan-authority.test.mjs
+/** Accepted changes explain context drift for both revision authoring and fresh host dispatch. */
+export function acceptedExecutionContext(state: Pick<RemediationState, "plan" | "items" | "wave_simplifications">) {
+  const accepted = (state.plan?.units ?? []).flatMap(unit => {
+    const item = state.items?.[unit.id];
+    return item?.host_landed_commit ? [{ allowed_files: [...unit.allowed_files], landed_commit: item.host_landed_commit }] : [];
+  });
+  for (const wave of state.wave_simplifications ?? []) {
+    if (wave.response?.disposition === "applied" && wave.applied_files) accepted.push({
+      landed_commit: wave.response.commit, allowed_files: wave.applied_files,
+    });
+  }
+  return accepted;
+}

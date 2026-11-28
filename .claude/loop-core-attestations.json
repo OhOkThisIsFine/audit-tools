@@ -832,6 +832,24 @@
         "src/audit/orchestrator/questionPlanning.ts": "041cd15a2e1f9d0c2ac65146b453d6e38d285880"
       }
     },
+    "e09950eff69f8991": {
+      "reviewed_by": "release_review_legacy_rem",
+      "attester_class": "agent",
+      "checked": "Independent exact staged-tree review verified unchanged helper body, both and only callers, removal of dependency cycle, and preservation of live site pins and membership. Dependency check and exact-stage contract suite pass.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "03df7fc920a4839ba8a974fb3e8572822a0f70ff",
+        "ran_at": "2026-11-28T18:14:07.529Z"
+      },
+      "attested_at": "2026-11-28T18:14:13.839Z",
+      "vouches": {
+        "src/remediate/contractPipeline/runtimePlanAuthority.ts": "9306a6b1975e436577ad75ef7e1a7ee86d943501",
+        "src/remediate/steps/contractPipeline.ts": "620df5c4b268e441877d6f1e58ae9181969e68a7",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "58e9c097b2ff5d5844d1f7a81713c08e6f593d8e"
+      }
+    },
     "e27b7c336e51764b": {
       "reviewed_by": "agent:ad6fa6c7fef1d8cd9-independent-diff-review,agent:p08-file-group-reviewers-and-refuter",
       "attester_class": "agent",
@@ -1305,7 +1323,7 @@
       "review": "380a3e547fdf760b"
     },
     "src/remediate/contractPipeline/runtimePlanAuthority.ts": {
-      "review": "05f8b80e6a4a4b67"
+      "review": "e09950eff69f8991"
     },
     "src/remediate/droppedFindingsRecord.ts": {
       "review": "74f5fdb4c95e9366"
@@ -1329,7 +1347,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/contractPipeline.ts": {
-      "review": "05f8b80e6a4a4b67"
+      "review": "e09950eff69f8991"
     },
     "src/remediate/steps/contractPipelinePrompts.ts": {
       "review": "05f8b80e6a4a4b67"
@@ -1344,7 +1362,7 @@
       "review": "6f07c78126b62f66"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "05f8b80e6a4a4b67"
+      "review": "e09950eff69f8991"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "6f07c78126b62f66"
