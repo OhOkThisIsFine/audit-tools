@@ -280,14 +280,47 @@ test("explicit cleanup proves owned custom targets before dry-run and refuses un
   await refuse(copied, /source_root is not the owned source directory/);
   await t.test("refuses a junction or symbolic-link escape", async child => {
     const onDiskAlias = join(root, "link");
+    const outsideEvidence = join(outside, "keep.txt");
+    await writeFile(outsideEvidence, "outside remains untouched");
+    let launch = () => clean(onDiskAlias);
     try {
       await symlink(outside, onDiskAlias, process.platform === "win32" ? "junction" : "dir");
     } catch (error) {
       if (process.platform !== "win32" || error?.code !== "EPERM") throw error;
-      child.skip("Windows runner does not permit creating a fixture junction");
-      return;
+      await mkdir(onDiskAlias);
+      child.diagnostic("Windows runner denied fixture junction creation; simulated the reparse/link bit for this path only.");
+      const entry = `
+        import fs from "node:fs/promises";
+        import { syncBuiltinESMExports } from "node:module";
+        const [cli, root, alias] = process.argv.slice(1);
+        const lstat = fs.lstat;
+        fs.lstat = async (path, ...args) => {
+          const stats = await lstat(path, ...args);
+          if (path === alias) stats.isSymbolicLink = () => true;
+          return stats;
+        };
+        syncBuiltinESMExports();
+        try {
+          const { runCli } = await import(cli);
+          await runCli([process.execPath, "audit-code", "cleanup", "--force", "--dry-run", "--root", root, "--artifacts-dir", alias]);
+        } finally {
+          fs.lstat = lstat;
+          syncBuiltinESMExports();
+        }
+      `;
+      launch = () => promisify(execFile)(process.execPath,
+        ["--input-type=module", "-e", entry, "--", pathToFileURL(join(checkout, "dist/audit/cli.js")).href, root, onDiskAlias],
+        { cwd: root, env, windowsHide: true, timeout: 15000 });
     }
-    await refuse(onDiskAlias, /unsafe directory topology/);
+    await assert.rejects(launch(), error => {
+      assert.equal(error.code, 1);
+      assert.deepEqual(JSON.parse(error.stdout), {
+        artifacts_dir: onDiskAlias, action: "refused", dry_run: true,
+        reason: `Refusing cleanup: unsafe directory topology at ${onDiskAlias}.`,
+      });
+      return true;
+    });
+    assert.equal(await readFile(outsideEvidence, "utf8"), "outside remains untouched");
   });
   await refuse(outside, /not strictly inside/);
   await refuse(root, /not strictly inside/);
