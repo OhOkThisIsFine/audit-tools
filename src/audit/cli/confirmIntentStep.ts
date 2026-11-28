@@ -147,17 +147,25 @@ export function renderConfirmIntentPrompt(
   const unresolvedClauses = opts.unresolvedConstraintClauses ?? [];
   const hasBlockingClauses = unresolvedClauses.length > 0;
   const proposedDepth = proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent, preDigest.mode);
+  const proposedLenses = preDigest.lens_propositions
+    .filter((p) => p.disposition === "recommend_include")
+    .map((p) => p.lens);
 
   return [
     "# Prepared evidence: stop or continue?",
     "",
-    "In one message, ask whether to stop here with the analyzer and graph evidence or continue with the proposed scope, lenses, and design-review depth below. Present both choices together; do not ask whether to continue and then ask about scope and lenses in a second round. Honor choices the user has already made.",
-    "If stopping, use or present the evidence and its limitations. Do not write intent_checkpoint.json, choose lenses, or run the continuation. This is not a completed audit.",
+    "Ask once: stop with the prepared analyzer and graph evidence, or continue with the proposal below? A reply choosing to continue without changes confirms that proposal. Honor any choices already made and include any requested changes in the same confirmation.",
+    "",
+    `- **Scope:** ${preDigest.mode}${preDigest.since ? ` (since ${preDigest.since})` : ""}, ${preDigest.files_in_scope} file(s). See [included directories](#in-scope-top-level-directories) and [exclusions](#already-excluded-deterministic-disposition).`,
+    `- **Lenses:** let the planner choose applicable lenses, unless the operator selects an exact set. See [lens recommendations](#lens-proposition)${proposedLenses.length ? `: ${proposedLenses.join(", ")} recommended` : ""}.`,
+    `- **Design-review depth:** **${proposedDepth}** proposed; record the approved depth, including any change. See [depth options](#conceptual-design-review-depth).`,
+    "",
+    "If stopping, present the evidence and its limitations. Do not write a checkpoint or run the continuation. This is not a completed audit.",
+    "",
+    "## Prepared evidence and scope details",
     ...(opts.analyzerCoverageGaps?.length ? ["", "Unresolved analyzer coverage:", ...opts.analyzerCoverageGaps.map(gap => "- " + gap)] : []),
     ...(opts.evidenceGraphStatus ? [opts.evidenceGraphStatus] : []),
     ...(opts.evidenceGraphCommand ? ["Query admitted files using: " + opts.evidenceGraphCommand] : []),
-    "",
-    `## If continuing: confirm audit scope and intent\n\nConceptual review depth proposed for this intent: **${proposedDepth}**. Confirm or change it; this choice is fresh for each run.`,
     "",
     ...(hasBlockingClauses
       ? [
@@ -184,9 +192,6 @@ export function renderConfirmIntentPrompt(
     "discovered deterministically from intake. Your job is to **confirm it** and,",
     "if needed, **prune scope pollution** the automatic disposition missed (build",
     "output, vendored code, fixtures, generated files, scratch directories).",
-    "",
-    `**Mode:** ${preDigest.mode}${preDigest.since ? ` (since ${preDigest.since})` : ""}`,
-    `**Files in scope:** ${preDigest.files_in_scope}`,
     "",
     ...(preDigest.mis_scope_smells.length > 0
       ? [
@@ -263,7 +268,7 @@ export function renderConfirmIntentPrompt(
     "|--------------------|-----------------------|-----|",
     lensTableRows,
     "",
-    "Use this prepared table as the proposal for the operator's choices.",
+    "Use this table to explain the proposal; recommendations do not create explicit inclusions or exclusions.",
     "The operator can narrow the selection or request a materially different custom question; do not start separate code research during confirmation.",
     "",
     "Canonical lens meanings (for your review; you need not show these to the user):",
@@ -289,16 +294,6 @@ export function renderConfirmIntentPrompt(
     "This records *how much* conceptual review to do. Execution details remain",
     "entirely with the host that receives the review workload.",
     "",
-    "## Ask the user (single round)",
-    "",
-    "Give the user the evidence summary and one decision: stop here, or continue with the proposed scope, lenses, and depth. Put the proposal in that same message or native question. A reply choosing to continue with no changes confirms the proposal; let the user name any changes in that reply.",
-    "For targeted work, record the exact selected lenses and any reasons the user gives for omissions. Add a custom lens only when it represents a materially different question.",
-    `The proposed conceptual design-review depth is **${proposedDepth}**. Include it with the scope and lens proposal; do not ask for it separately.`,
-    "",
-    "Record a deliberate `lens_selection.include` as an exact list, not an addition to a default set.",
-    "Use `exclude` to remove named lenses from otherwise applicable planning, and record operator reasons in `omission_reasons`.",
-    "Omit the selection if the operator asked the planner to choose all applicable lenses. Do not infer an explicit omission from weak evidence.",
-    "",
     "## What to do",
     "",
     "After the user confirms, write `intent_checkpoint.json` to:",
@@ -308,7 +303,7 @@ export function renderConfirmIntentPrompt(
     `Required fields: ${Object.entries(IntentCheckpointSchema.shape)
       .filter(([, field]) => !field.isOptional())
       .map(([key]) => `\`${key}\``).join(", ")}.`,
-    "Use this shape; add the optional fields to constrain the run:",
+    "Replace the placeholders with confirmed values. In particular, write the approved `shallow` or `deep` explicitly; do not omit depth or copy the proposal over an explicit change.",
     "",
     "```json",
     "{",
@@ -316,26 +311,8 @@ export function renderConfirmIntentPrompt(
     '  "confirmed_at": "<ISO-8601 timestamp>",',
     '  "confirmed_by": "host",',
     '  "scope_summary": "<what is in scope>",',
-    '  "intent_summary": "<the goal, e.g. full-audit / security-focused>",',
-    '  "free_form_intent": "<optional: what to focus on; interpreted into lens/priority signals at planning, never threaded verbatim into review prompts>",',
-    // The clause shape points back at the Blocking section, so it renders only
-    // when that section does; without blocking clauses it is a dangling
-    // reference to text that is not in the prompt.
-    ...(hasBlockingClauses
-      ? [
-          '  "constraint_clauses": [{ "clause_id": "<the clause_id from the Blocking section>", "text": "<the clause text>", "checkpoint_question": "<the Question from the Blocking section>", "host_answer": "<how to apply it>" }],',
-        ]
-      : []),
-    '  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],',
-    '  "must_not_touch": ["<glob>"],',
-    `  "disposition_overrides": [{ "path": "<path>", "status": "<${FileDispositionStatusSchema.options.join("|")}>", "reason": "<why>" }],`,
-    '  "lens_selection": { "include": ["behavior"], "exclude": ["performance"], "omission_reasons": {"performance":"not needed for this retry-focused review"} },',
-    // The example carries the PROPOSED depth; on deep it carries the default
-    // perspective count the prose above promises, and on shallow it omits
-    // `perspectives` (the bullet below says to), so copying it is never wrong.
-    `  "design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "${proposedDepth}"${
-      proposedDepth === "deep" ? `, "perspectives": ${DEFAULT_CONCEPTUAL_PERSPECTIVES}` : ""
-    } }`,
+    '  "intent_summary": "<the confirmed goal>",',
+    '  "design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "<approved shallow or deep>" }',
     "}",
     "```",
     "",
@@ -349,11 +326,15 @@ export function renderConfirmIntentPrompt(
           "  re-fires and planning is held.",
         ]
       : []),
-    "- `excluded_scope` entries are pruned from planning so excluded files never",
+    "- Add `free_form_intent` for confirmed focus or constraints; planning interprets it rather than passing it verbatim into review prompts.",
+    "- Add `must_not_touch` as a list of confirmed globs.",
+    "- Add `excluded_scope` entries with a path or prefix and a reason. They are pruned from planning so excluded files never",
     "  become audit tasks, and they are listed in the final report under",
     '  "Excluded / Out-of-Scope".',
-    "- `disposition_overrides` patches the file disposition before coverage",
+    `- Add \`disposition_overrides\` entries with a path, status (${FileDispositionStatusSchema.options.join(", ")}), and reason. This patches file disposition before coverage`,
     "  initialization — overridden files never enter coverage at all.",
+    "- Record a deliberate `lens_selection.include` as an exact list, not an addition to defaults. Use `exclude` for named exclusions and `omission_reasons` only for reasons the operator supplied.",
+    "  Leave out `lens_selection` when the operator wants the planner to choose applicable lenses.",
     "- Lens IDs are the seven above or `custom:<slug>`. Reconfirm archived or invalid IDs instead of silently translating them.",
     "  A custom name alone does not establish a reviewable question or grant access to files.",
     "- `design_review.answered_at` MUST repeat this run's `confirmed_at` verbatim.",
@@ -361,9 +342,7 @@ export function renderConfirmIntentPrompt(
     "  confirmation that supplied them, so the next audit asks again rather than",
     "  silently re-applying this run's choice. A block without a matching",
     "  `answered_at` requires confirmation again before review can proceed.",
-    "- `design_review.conceptual_depth` is `shallow` (schema default) or `deep`; on `deep`,",
-    "  `perspectives` selects the parallel reviewers. Omit for shallow.",
-    "- Leave the optional fields out to audit the full discovered scope.",
+    "- On `deep`, leave `perspectives` unset for the default reviewers, or record the operator's explicit choice. Omit perspectives for shallow.",
     "",
     `Then run: ${opts.continueCommand}`,
     "",
