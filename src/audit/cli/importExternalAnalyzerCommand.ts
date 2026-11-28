@@ -30,7 +30,7 @@ export async function cmdImportExternalAnalyzer(argv: string[]): Promise<void> {
       {
         artifacts_dir: artifactsDir,
         tool: externalAnalyzerResults.tool,
-        imported_count: externalAnalyzerResults.results.length,
+        received_count: externalAnalyzerResults.results.length,
         selected_executor: result.selected_executor,
       },
       null,

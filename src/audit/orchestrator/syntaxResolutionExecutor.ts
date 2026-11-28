@@ -316,66 +316,94 @@ async function runEslint(
     return commandErrorResult("eslint", command, results);
   }
 
-  const output = [command.stdout, command.stderr].filter(Boolean).join("\n").trim();
-  if (output.length === 0) {
+  const stdout = command.stdout.trim();
+  const stderrSnippet = snippet(command.stderr);
+  const base = {
+    tool: "eslint",
+    command: command.candidate.display,
+    resolved: true,
+    exit_code: command.exitCode,
+    ...(stderrSnippet ? { stderr_snippet: stderrSnippet } : {}),
+  };
+  if (!stdout) {
+    return { results, status: { ...base, status: "failed", error: "Missing ESLint JSON report." } };
+  }
+
+  let report: unknown;
+  try {
+    report = JSON.parse(stdout);
+  } catch {
+    // Classified alongside other invalid top-level reports below.
+  }
+  if (!Array.isArray(report)) {
     return {
       results,
       status: {
-        tool: "eslint",
-        command: command.candidate.display,
-        resolved: true,
-        status: "success",
-        exit_code: command.exitCode,
+        ...base,
+        status: "parse_error",
+        error: "Expected an ESLint JSON array of file results.",
+        output_snippet: snippet(stdout),
       },
     };
   }
 
-  try {
-    const parsed = JSON.parse(output);
-    for (const fileResult of parsed) {
-      for (const msg of fileResult.messages) {
-        results.push({
-          id: `eslint-${results.length}`,
-          category: "maintainability",
-          // Canonical severity vocabulary (critical|high|medium|low|info) —
-          // eslint error (2) -> "high", warning (1) -> "medium" (COR-5d9f2421),
-          // mirroring normalizeExternalSeverity rather than persisting raw
-          // "error"/"warning" out-of-vocabulary values.
-          severity: msg.severity === 2 ? "high" : "medium",
-          path: fileResult.filePath
-            .replace(/\\/g, "/")
-            .replace(root.replace(/\\/g, "/") + "/", ""),
-          line_start: msg.line,
-          summary: msg.message,
-          rule: msg.ruleId || "eslint-error",
-        });
-      }
+  const rootPrefix = root.replace(/\\/g, "/") + "/";
+  let droppedRows = 0;
+  for (const file of report) {
+    if (!file || typeof file.filePath !== "string" || !file.filePath.trim() || !Array.isArray(file.messages)) {
+      droppedRows++;
+      continue;
     }
-  } catch {
-    const outputSnippet = snippet(output);
-    process.stderr.write(
-      `[syntax-resolution] eslint output could not be parsed: ${outputSnippet} (root=${root}, exit_code=${command.exitCode}, ts=${new Date().toISOString()})\n`,
-    );
+    for (const msg of file.messages) {
+      if (
+        !msg ||
+        typeof msg.message !== "string" || !msg.message.trim() ||
+        (msg.severity !== 1 && msg.severity !== 2) ||
+        (msg.line !== undefined && !Number.isInteger(msg.line)) ||
+        (msg.ruleId !== null && msg.ruleId !== undefined && typeof msg.ruleId !== "string")
+      ) {
+        droppedRows++;
+        continue;
+      }
+      results.push({
+        id: `eslint-${results.length}`,
+        category: "maintainability",
+        severity: msg.severity === 2 ? "high" : "medium",
+        path: file.filePath.replace(/\\/g, "/").replace(rootPrefix, ""),
+        line_start: msg.line,
+        summary: msg.message,
+        rule: msg.ruleId || "eslint-error",
+      });
+    }
+  }
+
+  if (droppedRows > 0) {
     return {
       results,
       status: {
-        tool: "eslint",
-        command: command.candidate.display,
-        resolved: true,
+        ...base,
         status: "parse_error",
-        exit_code: command.exitCode,
-        output_snippet: outputSnippet,
+        error: "Malformed ESLint file or message rows.",
+        dropped_rows: droppedRows,
+        output_snippet: snippet(stdout),
       },
     };
+  }
+  // ESLint uses 1 for a completed lint run with errors or too many warnings.
+  // Other nonzero exits and a missing exit status do not certify coverage.
+  if (results.length > 0 && (command.exitCode === 0 || command.exitCode === 1)) {
+    return { results, status: { ...base, status: "findings" } };
+  }
+  if (command.exitCode === 0) {
+    return { results, status: { ...base, status: "success" } };
   }
   return {
     results,
     status: {
-      tool: "eslint",
-      command: command.candidate.display,
-      resolved: true,
-      status: results.length > 0 ? "findings" : "success",
-      exit_code: command.exitCode,
+      ...base,
+      status: "failed",
+      error: "ESLint did not complete with a clean report or a finding exit.",
+      output_snippet: snippet(stdout),
     },
   };
 }
