@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -10,6 +10,11 @@ import { prepareConceptualDispatch } from "../dist/audit/cli/conceptualDispatch.
 import { functionalPreflightPath, functionalPreflightStep } from "../dist/audit/cli/functionalPreflight.js";
 import { writeCurrentStep } from "../dist/audit/cli/steps.js";
 import { readExistingRunConsentUnlocked } from "../dist/shared/analyzerRunConsent.js";
+import { publishAuditReviewBindings } from "../dist/audit/cli/auditReviewBindings.js";
+import { publishAuditQuestionWorkload } from "../dist/audit/cli/dispatch/hostHandoff.js";
+import { AUDIT_GATE_SUBMISSION_SCOPE, laneSubmissionId, laneSubmissionPath, systemicChallengeLane } from "../dist/audit/cli/laneSubmissions.js";
+import { systemicPremiseToken, systemicReviewInputRevision } from "../dist/audit/orchestrator/systemicChallengeExecutor.js";
+import { hashContent } from "../dist/shared/hash.js";
 
 const cli = fileURLToPath(new URL("../audit-code.mjs", import.meta.url));
 const exec = promisify(execFile);
@@ -109,4 +114,122 @@ test("active conceptual state retains its summary without inventing progress fro
       await rm(stepPath, { recursive: true });
     });
   }
+});
+
+test("systemic status follows its own round with or without a co-published question workload", async t => {
+  const { root, artifactsDir, stepPath, status } = await fixture(t);
+  const put = (path, value) => writeFile(path, JSON.stringify(value));
+  const statePath = join(artifactsDir, "audit_state.json");
+  const registerPath = join(artifactsDir, "systemic_challenge.json");
+  const promptPath = join(artifactsDir, "systemic-prompt.md");
+  const register = {
+    generated_at: new Date().toISOString(), target: "systemic_challenge", ceiling: { rung: "deep" },
+    rounds: [], converged: false, findings: [], validation_issues: [], round_token: systemicPremiseToken({}),
+  };
+  const lane = systemicChallengeLane(register.rounds);
+  const resultPath = laneSubmissionPath(artifactsDir, lane);
+  const paths = { systemic_challenge_prompt: promptPath, systemic_challenge_results: resultPath };
+  const publish = (runId = null, artifactPaths = paths) => put(stepPath, {
+    contract_version: "audit-code-step/v1alpha1", status: "ready", step_kind: "systemic_challenge",
+    run_id: runId, artifacts_dir: artifactsDir, repo_root: root, artifact_paths: artifactPaths,
+    prompt_path: join(artifactsDir, "unused.md"), allowed_commands: [], stop_condition: "Synthetic fixture",
+    ...(runId ? { progress: { summary: "Published with one question", pending_tasks: 1 } } : {}),
+  });
+  await put(statePath, { status: "active" });
+  await put(registerPath, register);
+  await writeFile(promptPath, "Synthetic systemic prompt");
+  await publish();
+  const binding = {
+    requirement: "independent", promptSha256: hashContent("fixture digest"),
+    promptContentSha256: hashContent(await readFile(promptPath)), promptPath,
+    semanticInputRevision: systemicReviewInputRevision({ systemic_challenge: register }),
+    submissionId: laneSubmissionId(lane), runId: AUDIT_GATE_SUBMISSION_SCOPE, inputs: [],
+  };
+  const bind = value => publishAuditReviewBindings(artifactsDir, new Map([[lane, value]]));
+  await bind(binding);
+  const inventory = async () => {
+    const entries = await readdir(join(root, ".audit-tools"), { recursive: true, withFileTypes: true });
+    return Object.fromEntries(await Promise.all(entries.filter(entry => entry.isFile()).map(async entry => {
+      const path = join(entry.parentPath, entry.name);
+      return [relative(root, path), await readFile(path)];
+    })));
+  };
+  const inspect = async () => {
+    const before = await inventory();
+    const report = await status(0);
+    assert.deepEqual(await inventory(), before, "status must not write evidence or consume results");
+    return report;
+  };
+  const systemic = async () => (await inspect()).systemic_challenge_continuation;
+  const waiting = await inspect();
+  assert.equal(waiting.question_review, null);
+  assert.equal(waiting.question_review_handoff, null);
+  assert.equal(waiting.systemic_challenge_continuation.state, "await_result");
+
+  await mkdir(dirname(resultPath), { recursive: true });
+  const answer = {
+    contract_version: "review-submission/v1", prompt_sha256: binding.promptSha256,
+    review: { mode: "independent", reason: "Synthetic independent review" }, result: { findings: [] },
+  };
+  await put(resultPath, answer);
+  assert.equal((await systemic()).state, "ready");
+  assert.equal((await systemic()).action, "continue");
+  await publish(null, { ...paths, systemic_challenge_results: promptPath });
+  assert.equal((await systemic()).state, "stale");
+  await publish(null, { ...paths, systemic_challenge_prompt: resultPath });
+  assert.equal((await systemic()).state, "stale");
+  await publish();
+  for (const invalid of [{ prompt_sha256: hashContent("different prompt") }, { result: { findings: [null] } }]) {
+    await put(resultPath, { ...answer, ...invalid });
+    assert.equal((await systemic()).state, "unavailable");
+  }
+  await put(resultPath, answer);
+  await bind({ ...binding, semanticInputRevision: "obsolete" });
+  assert.equal((await systemic()).state, "stale");
+  await bind(binding);
+  await put(registerPath, { ...register, round_token: "obsolete" });
+  assert.equal((await systemic()).state, "stale");
+  await put(registerPath, {
+    ...register, folded_submission_hashes: [hashContent(lane + "\n" + hashContent(await readFile(resultPath)))],
+  });
+  assert.equal((await systemic()).state, "stale");
+  await put(registerPath, register);
+  await put(statePath, { status: "complete" });
+  assert.equal(await systemic(), null);
+  await put(statePath, { status: "active" });
+
+  const runId = "question-review-fixture";
+  const schema_version = "audit-tools/question-review/v1";
+  const identity = { schema_version, snapshot_id: "snapshot", revision_id: "revision", question_id: "question" };
+  const question = {
+    ...identity, lens: "operability", inventory_item_ids: ["inventory"], expected_outcome: "Fixture continues",
+    requested_parts: [{ part_id: "part", expectation: "Review fixture" }],
+    source_dependencies: [], evidence_dependencies: [], plan_status: "active",
+  };
+  const assignment = {
+    ...identity, assignment_id: "ordinary-answer", authorized_scope: { include: [], exclude: [] },
+    suggested_sources: [], available_evidence_ids: [],
+  };
+  const review_plan = {
+    schema_version, snapshot_id: identity.snapshot_id, questions: [question], inventory: [], omissions: [], lens_decisions: [],
+  };
+  await put(join(artifactsDir, "review_plan.json"), review_plan);
+  await put(join(artifactsDir, "review_session.json"), { schema_version: "audit-tools/question-review-session/v1", run_id: runId });
+  const currentRegister = { ...register, round_token: systemicPremiseToken({ review_plan }) };
+  await put(registerPath, currentRegister);
+  await bind({ ...binding, semanticInputRevision: systemicReviewInputRevision({ review_plan, systemic_challenge: currentRegister }) });
+  assert.equal((await systemic()).state, "ready", "an existing ordinary run does not invalidate a standalone publication");
+  const { workload_path } = await publishAuditQuestionWorkload({
+    root, sourceRoot: root, artifactsDir, runId,
+    bindings: [{ question, assignment, dependencies: [], evidence: [], sourceFiles: [] }],
+  });
+  const combined = { ...paths, host_workload: workload_path };
+  await publish(runId, combined);
+  const report = await inspect();
+  assert.equal(report.question_review_handoff.action, "await_results");
+  assert.equal(report.question_review_handoff.pending_answers, 1);
+  assert.equal(report.systemic_challenge_continuation.state, "ready");
+  await publish("obsolete-run", combined);
+  assert.notEqual((await inspect()).question_review_handoff.state, "current");
+  assert.equal(await systemic(), null);
 });

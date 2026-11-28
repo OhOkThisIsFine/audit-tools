@@ -86,9 +86,11 @@ async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: st
 
 // Inspect the same persisted round, prompt and answer that next-step would
 // consume, without decoding through its ledger-writing submission path.
-async function systemicContinuation(artifactsDir: string, step: StepArtifact, runId: string, loadBundle: LoadBundle) {
+async function systemicContinuation(artifactsDir: string, step: StepArtifact, ordinaryRunId: string | null, loadBundle: LoadBundle) {
   if (step.step_kind !== "systemic_challenge" || step.status !== "ready" ||
-      step.run_id !== runId || resolve(step.artifacts_dir) !== resolve(artifactsDir)) return null;
+      resolve(step.artifacts_dir) !== resolve(artifactsDir)) return null;
+  // Only a combined publication is tied to the ordinary question session.
+  if (step.run_id !== null && step.run_id !== ordinaryRunId) return null;
   try {
     const bundle = await loadBundle();
     const register = bundle.systemic_challenge;
@@ -224,7 +226,6 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
   let bundle: ReturnType<LoadBundle> | undefined;
   const loadBundle: LoadBundle = () => bundle ??= loadArtifactBundle(artifactsDir, {});
   let handoff: Awaited<ReturnType<typeof questionHandoff>> | null = null;
-  let systemic: Awaited<ReturnType<typeof systemicContinuation>> = null;
   let questionReview: { run_id: string | null; snapshot_id: string; planned_questions: number } | null = null;
   let questionReviewUnreadable = false;
   try {
@@ -235,7 +236,6 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     if (runId && auditState.status !== "complete") {
       if (step) {
         handoff = await questionHandoff(artifactsDir, plan, runId, step, loadBundle);
-        systemic = await systemicContinuation(artifactsDir, step, runId, loadBundle);
       } else {
         handoff = { state: "unavailable" };
       }
@@ -248,6 +248,9 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
   } catch (error) {
     questionReviewUnreadable = !isFileMissingError(error);
   }
+  const systemic = step && auditState.status !== "complete"
+    ? await systemicContinuation(artifactsDir, step, questionReview?.run_id ?? null, loadBundle)
+    : null;
 
   let conceptual: Awaited<ReturnType<typeof inspectPublishedConceptualProgress>> | undefined;
   if (step && (step.step_kind === "design_review_conceptual" || step.step_kind === "design_review_parallel")) {
