@@ -991,8 +991,9 @@ async function handleComplete(
   root: string,
   artifactsDir: string,
   state: RemediationState | null,
+  assertOwnership?: AssertLockOwnership,
 ): Promise<RemediationStep> {
-  return presentReportStep(root, artifactsDir, state);
+  return presentReportStep(root, artifactsDir, state, assertOwnership);
 }
 
 type PlanActivationOutcome =
@@ -1000,8 +1001,8 @@ type PlanActivationOutcome =
   | { kind: "blocked"; reason: string; archivePath?: string };
 
 /** Render the step that STATES a discard, rather than asking for an input again. */
-async function emitPlanRevisionBlockedStep(root:string,artifactsDir:string,blocked:{reason:string}):Promise<RemediationStep>{
-  return writeCurrentStep({stepKind:"contract_pipeline",status:"blocked",runId:null,repoRoot:root,artifactsDir,
+async function emitPlanRevisionBlockedStep(root:string,artifactsDir:string,blocked:{reason:string},assertOwnership?:AssertLockOwnership):Promise<RemediationStep>{
+  return writeCurrentStep({assertOwnership,stepKind:"contract_pipeline",status:"blocked",runId:null,repoRoot:root,artifactsDir,
     prompt:`# Executable plan requires attention\n\n${blocked.reason}\nThe current plan and accepted execution history are preserved. Revise the plan through its tool-issued submission and obtain fresh review before continuing.`,
     allowedCommands:[loaderCommand("next-step")],stopCondition:"Resolve the named plan/review issue before implementation.",artifactPaths:{execution_plan:executionPlanPaths(artifactsDir).canonical}});
 }
@@ -1931,6 +1932,7 @@ async function handleImplementing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
+  assertCloseOwnership: AssertLockOwnership,
 ): Promise<RemediateOutcome> {
   const triageStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
@@ -1950,7 +1952,7 @@ async function handleImplementing(
   }
   // Triage may enter closing directly: the close itself owns mandatory final
   // acceptance, so a status transition cannot bypass it.
-  if (triaged.status === "closing") return handleAllTerminalTransition(triaged, store, root, artifactsDir);
+  if (triaged.status === "closing") return handleAllTerminalTransition(triaged, store, root, artifactsDir, assertCloseOwnership);
   await store.saveState(triaged);
   return { kind: "transition", state: triaged };
 }
@@ -2005,6 +2007,7 @@ async function emitFinalGateRedStep(ctx: {
   /** Close has already recorded its red before presentation. */
   recordedPath?: string;
   closingActionWithheld?: boolean;
+  assertOwnership?: AssertLockOwnership;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, scope, gate, runLogger } = ctx;
   admitRemediationDirtyBaseline(state);
@@ -2065,6 +2068,7 @@ async function emitFinalGateRedStep(ctx: {
   return {
     kind: "emit",
     step: await writeCurrentStep({
+      assertOwnership: ctx.assertOwnership,
       stepKind: "final_gate_red",
       status: "blocked",
       runId: stateRunId(state),
@@ -2293,6 +2297,7 @@ async function handleAllTerminalTransition(
   store: StateStore,
   root: string,
   artifactsDir: string,
+  assertOwnership: AssertLockOwnership,
 ): Promise<RemediateOutcome> {
   // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
   if (!(await reopenStaleTriageSuccesses(root, artifactsDir, state))) {
@@ -2300,7 +2305,7 @@ async function handleAllTerminalTransition(
     // pauses. A transition carries no executable verification verdict.
     state.status = "closing";
   }
-  await store.saveState(state);
+  await store.saveState(state, assertOwnership);
   return { kind: "transition", state };
 }
 
@@ -2311,18 +2316,21 @@ async function handleClosing(
   runLogger: RunLogger,
   store: StateStore,
   options: NextStepOptions,
+  assertOwnership: AssertLockOwnership,
 ): Promise<RemediateOutcome> {
   // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
   if (await reopenStaleTriageSuccesses(root, artifactsDir, state)) {
-    await store.saveState(state);
+    await store.saveState(state, assertOwnership);
     return { kind: "transition", state };
   }
   const priorBindings = Object.values(state.items ?? {}).map(item => item.conformance_review?.binding);
+  await assertOwnership();
   const refreshIssues = await refreshReplannedHostConformance(root, artifactsDir, state);
   if (Object.values(state.items ?? {}).some((item, index) => item.conformance_review?.binding !== priorBindings[index])) {
-    await store.saveState(state);
+    await store.saveState(state, assertOwnership);
   }
   if (refreshIssues.length) return { kind: "emit", step: await writeCurrentStep({
+    assertOwnership,
     stepKind: "review_contract_conformance",
     status: refreshIssues.some(issue => issue.code !== "conformance_review_required") ? "blocked" : "ready",
     runId: stateRunId(state), repoRoot: root, artifactsDir,
@@ -2342,10 +2350,14 @@ async function handleClosing(
   // reflection is owned by this repository's sprint closeout; captured run
   // diagnostics are still archived by runClosePhase before cleanup.
   let paused: RemediateOutcome | undefined;
+  let terminalStep: RemediationStep | undefined;
   let closed: RemediationState;
   try {
     closed = await runClosePhase(state, {
-      root, artifactsDir,
+      root, artifactsDir, assertOwnership,
+      publishReport: async (complete, assertCurrent) => {
+        terminalStep = await handleComplete(root, artifactsDir, complete, assertCurrent);
+      },
       skipFinalGate: options.skipFinalGate,
       finalGateRunner: options.finalGateRunner,
       closingCommandRunner: options.closingCommandRunner,
@@ -2354,23 +2366,24 @@ async function handleClosing(
         paused = await emitFinalGateRedStep({
           root, artifactsDir, state, scope: "all-terminal final gate",
           where: "Before completing the close phase", gate, runLogger, closingActionWithheld: true,
+          assertOwnership,
           recordedPath: finalGateRecordPath(artifactsDir),
         });
       },
     }, runLogger);
   } catch (error) {
     if (error instanceof UnresolvedClosingActionError) {
-      return { kind: "emit", step: await emitUnresolvedClosingStep(root, artifactsDir, state, error) };
+      return { kind: "emit", step: await emitUnresolvedClosingStep(root, artifactsDir, state, error, assertOwnership) };
     }
     if (!(error instanceof RemediationPlanAuthorityError)) throw error;
     return { kind: "emit", step: await emitPlanRevisionBlockedStep(root, artifactsDir, {
       reason: `Closing is paused before any closing action. ${error.message}`,
-    }) };
+    }, assertOwnership) };
   }
   if (paused) return paused;
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
   if (closed.status !== "complete") {
-    await store.saveState(closed);
+    await store.saveState(closed, assertOwnership);
     const preview = closed.closing_plan?.closing_action_preview;
     if (closed.status === "closing" && preview && (preview.delivery || !closed.closing_plan?.pre_authorized)) {
       const approveCommand = loaderCommand("next-step --finalize-closing");
@@ -2379,6 +2392,7 @@ async function handleClosing(
       return {
         kind: "emit",
         step: await writeCurrentStep({
+          assertOwnership,
           stepKind: "close_run", status: "ready", runId: stateRunId(closed),
           repoRoot: root, artifactsDir,
           prompt: [
@@ -2406,18 +2420,8 @@ async function handleClosing(
     // Re-blocked to triage: persist and re-scan.
     return { kind: "transition", state: closed };
   }
-  // Close-complete CROSSES the engine boundary: `complete` is a pre-intake
-  // obligation, unreachable from a main-engine transition. Emit the durable
-  // report directly, passing exactly what the original recursion reloaded — the
-  // artifact dir is DELETED on a fully-green close (reload → null, and a null
-  // state renders no friction block) and PRESERVED on a not-green complete
-  // (reload → the saved complete state → its plan_id). `store.loadState()`
-  // reproduces both, so present_report is identical to the cascade.
-  // (Regression-locked in next-step-implement-dispatch.)
-  return {
-    kind: "emit",
-    step: await handleComplete(root, artifactsDir, await store.loadState()),
-  };
+  if (!terminalStep) throw new Error("Close completed without publishing its report step.");
+  return { kind: "emit", step: terminalStep };
 }
 
 async function handleZeroDocumentableFindings(
@@ -3271,7 +3275,7 @@ Then run:
       },
       execute: async (state, c) => ({
         kind: "emit",
-        step: await handleComplete(c.root, c.artifactsDir, state),
+        step: await handleComplete(c.root, c.artifactsDir, state, c.assertPhaseOwnership),
       }),
     },
     {
@@ -3281,7 +3285,7 @@ Then run:
         await c.countStep(state);
         return {
           kind: "emit",
-          step: await handleComplete(c.root, c.artifactsDir, state),
+          step: await handleComplete(c.root, c.artifactsDir, state, c.assertPhaseOwnership),
         };
       },
     },
@@ -3325,6 +3329,7 @@ Then run:
 // sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false): RemediateObligation[] {
   const { root, artifactsDir, options, runLogger, store, assertPhaseOwnership } = ctx;
+  const assertCloseOwnership = () => store.assertActivePhaseOwnership(assertPhaseOwnership);
   const clarificationResolutionPath = join(
     artifactsDir,
     CLARIFICATION_RESOLUTION_FILENAME,
@@ -3513,14 +3518,14 @@ export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false):
           await store.saveState(s);
           return { kind: "transition", state: s };
         }
-        return handleImplementing(root, artifactsDir, s, runLogger, store);
+        return handleImplementing(root, artifactsDir, s, runLogger, store, assertCloseOwnership);
       },
     },
     {
       id: "triage",
       derive: (state) => (state?.status === "triage" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleImplementing(root, artifactsDir, requireState(state), runLogger, store),
+        handleImplementing(root, artifactsDir, requireState(state), runLogger, store, assertCloseOwnership),
     },
     {
       // planning with zero documentable findings is a user question, not a
@@ -3549,13 +3554,13 @@ export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false):
           ? "missing"
           : "satisfied",
       execute: async (state) =>
-        handleAllTerminalTransition(requireState(state), store, root, artifactsDir),
+        handleAllTerminalTransition(requireState(state), store, root, artifactsDir, assertCloseOwnership),
     },
     {
       id: "closing",
       derive: (state) => (state?.status === "closing" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleClosing(root, artifactsDir, requireState(state), runLogger, store, options),
+        handleClosing(root, artifactsDir, requireState(state), runLogger, store, options, assertCloseOwnership),
     },
     {
       // Catch-all: reached only when no specific obligation matched. Always
@@ -3624,6 +3629,7 @@ async function emitUnresolvedClosingStep(
   artifactsDir: string,
   state: RemediationState | null,
   error: UnresolvedClosingActionError,
+  assertOwnership?: AssertLockOwnership,
 ): Promise<RemediationStep> {
   const resolution = error.reconciliation;
   const prompt = ["# Closing action needs reconciliation", error.message, "Receipt: " + error.receiptPath];
@@ -3637,6 +3643,7 @@ async function emitUnresolvedClosingStep(
     );
   }
   return writeCurrentStep({
+    assertOwnership,
     stepKind: "close_run", status: "blocked", runId: stateRunId(state),
     repoRoot: root, artifactsDir,
     prompt: prompt.join("\n\n"),
@@ -3661,6 +3668,17 @@ async function advanceUnderPhaseLock(deps: {
   assertPhaseOwnership: AssertLockOwnership;
 }): Promise<RemediationStep> {
   const { root, artifactsDir, store, options, runLogger, assertPhaseOwnership } = deps;
+  const assertCloseOwnership = () => store.assertActivePhaseOwnership(assertPhaseOwnership);
+  const retryClosing = async (current: RemediationState): Promise<RemediationStep | undefined> => {
+    let terminalStep: RemediationStep | undefined;
+    await retryIncompleteCloseReport(current, {
+      root, artifactsDir, assertOwnership: assertCloseOwnership,
+      publishReport: async (complete, assertCurrent) => {
+        terminalStep = await handleComplete(root, artifactsDir, complete, assertCurrent);
+      },
+    }, runLogger);
+    return terminalStep;
+  };
   // Loaded FRESH under the mutex: a peer may have advanced and persisted state
   // between the entry read and this process winning the lock.
   let state = await store.loadState();
@@ -3671,14 +3689,14 @@ async function advanceUnderPhaseLock(deps: {
     let unresolved = error;
     if (state) {
       try {
-        const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
-        if (completed) return handleComplete(root, artifactsDir, await store.loadState());
+        const completed = await retryClosing(state);
+        if (completed) return completed;
       } catch (reconcileError) {
         if (!(reconcileError instanceof UnresolvedClosingActionError)) throw reconcileError;
         unresolved = reconcileError;
       }
     }
-    return emitUnresolvedClosingStep(root, artifactsDir, state, unresolved);
+    return emitUnresolvedClosingStep(root, artifactsDir, state, unresolved, assertPhaseOwnership);
   }
   const noOtherRequest = options.severity === undefined && options.findingIds === undefined &&
     options.guidanceFile === undefined && options.guidanceText === undefined && options.verificationCommand === undefined &&
@@ -3698,8 +3716,7 @@ async function advanceUnderPhaseLock(deps: {
     noOtherRequest && inputValues(options.input).length === 0 && options.finalizeClosing === true;
   // sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
   if (state && reportOnlyRequest && unchangedPlan) {
-    await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
-    return handleComplete(root, artifactsDir, state);
+    return (await retryClosing(state)) ?? handleComplete(root, artifactsDir, state, assertPhaseOwnership);
   }
   if (state && reportOnlyRequest) admitRemediationDirtyBaseline(state);
   if (state) await store.reconcileDecisionApplications(state);
@@ -3716,11 +3733,11 @@ async function advanceUnderPhaseLock(deps: {
   }
   if (state?.status === "closing" && bareRequest && unchangedPlan) {
     try {
-      const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
-      if (completed) return handleComplete(root, artifactsDir, await store.loadState());
+      const completed = await retryClosing(state);
+      if (completed) return completed;
     } catch (error) {
       if (!(error instanceof UnresolvedClosingActionError)) throw error;
-      return emitUnresolvedClosingStep(root, artifactsDir, state, error);
+      return emitUnresolvedClosingStep(root, artifactsDir, state, error, assertCloseOwnership);
     }
   }
   if (options.guidanceFile && options.guidanceText !== undefined) throw new Error("Choose --guidance or --guidance-file, not both.");

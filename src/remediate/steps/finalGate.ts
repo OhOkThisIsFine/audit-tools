@@ -232,6 +232,7 @@ export async function runToolOwnedFinalGate(
      */
     terminalUnit?: { argv: string[]; execute: GateRunner };
     /** Select the exact native npm leaf at the unit slot, after the guarded build and checks. */
+    assertOwnership?: () => Promise<void>;
     nativeCloseUnit?: () => Promise<{ argv: string[]; execute: GateRunner } | undefined>;
   } = {},
 ): Promise<ToolOwnedFinalGateResult> {
@@ -300,6 +301,7 @@ export async function runToolOwnedFinalGate(
       spec.argv.every((arg, i) => arg === terminal.argv[i]) ? terminal : undefined;
     const selected = native ?? shared;
     const argv = selected?.argv ?? spec.argv;
+    await opts.assertOwnership?.();
     const { status, stdout, stderr, ran, error } = await (selected?.execute ?? runner)(argv, root, spec.package_dir);
     const cmdPassed = ran !== false && status === 0 && error === undefined;
     const stdoutTail = cmdPassed ? undefined : outputTail(stdout);
@@ -449,6 +451,7 @@ export async function writeFinalGateVerdict(
     results: FinalGateCommandResult[];
     binding?: string;
   },
+  assertOwnership?: () => Promise<void>,
 ): Promise<string> {
   const path = finalGateVerdictPath(artifactsDir);
   const record: FinalGateVerdictRecord = {
@@ -462,6 +465,7 @@ export async function writeFinalGateVerdict(
     binding: verdict.binding,
     recorded_at: new Date().toISOString(),
   };
+  await assertOwnership?.();
   try {
     await writeJsonFile(path, record);
   } catch {
@@ -581,6 +585,7 @@ export async function writeFinalGateRedRecord(
   scope: string,
   failed: FinalGateCommandResult | undefined,
   attributionInput?: { root: string; state: RemediationGateState },
+  assertOwnership?: () => Promise<void>,
 ): Promise<string> {
   if (attributionInput) admitRemediationDirtyBaseline(attributionInput.state);
   const path = finalGateRecordPath(artifactsDir);
@@ -612,6 +617,7 @@ export async function writeFinalGateRedRecord(
       : { stderr_tail: failed.stderr_tail }),
     ...(attribution === undefined ? {} : { attribution }),
   };
+  await assertOwnership?.();
   await writeJsonFile(path, record);
   return path;
 }
@@ -629,8 +635,10 @@ export async function recordFinalGateOutcome(ctx: {
   commandsRun: number;
   reason?: string;
   durationMs?: number;
+  assertOwnership?: () => Promise<void>;
 }): Promise<void> {
   const verdict = carriesGateVerdict(ctx.outcome);
+  await ctx.assertOwnership?.();
   await writeFinalGateOutcomeRecord(ctx.artifactsDir, {
     scope: ctx.scope,
     outcome: ctx.outcome,

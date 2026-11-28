@@ -10,6 +10,7 @@ import { join } from "node:path";
 // sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 import {
   type AssertLockOwnership,
+  FileLockOwnershipLostError,
   type LockedJsonStore,
   createLockedJsonStore,
   SchemaVersionMismatchError,
@@ -412,11 +413,21 @@ export class StateStore {
     }
   }
 
-  /** Recovery writers share the advance mutex, then take the state lock. */
-  async withActiveOperator<T>(body: () => Promise<T>): Promise<T> {
-    return withFileLock(join(this.artifactsDir, PHASE_LOCK_FILENAME), async () => {
+  async assertActivePhaseOwnership(assertToken: AssertLockOwnership): Promise<void> {
+    try {
       await this.assertOperatorActive();
-      return body();
+    } catch (error) {
+      throw new FileLockOwnershipLostError(join(this.artifactsDir, PHASE_LOCK_FILENAME), error);
+    }
+    await assertToken();
+  }
+
+  /** Recovery writers share the advance mutex, then take the state lock. */
+  async withActiveOperator<T>(body: (assertOwnership: AssertLockOwnership) => Promise<T>): Promise<T> {
+    return withFileLock(join(this.artifactsDir, PHASE_LOCK_FILENAME), async (assertToken) => {
+      await this.assertOperatorActive();
+      await assertToken();
+      return body(() => this.assertActivePhaseOwnership(assertToken));
     });
   }
 
@@ -528,18 +539,35 @@ export class StateStore {
    * transitions; use this only when the caller holds an external guarantee
    * that no concurrent writer exists (e.g. single-agent close phase).
    */
-  async saveState(state: RemediationState): Promise<void> {
+  async saveState(state: RemediationState, assertOwnership?: AssertLockOwnership): Promise<void> {
     // Same node-worktree guard as `mutate` — the unconditional-write recovery
     // path must not be the one door a worker-context write can still use.
     assertNotNodeWorktreeCwd("a remediation state.json write");
-    await this.store.replace(stampedState(state));
-    await this.reconcileDecisionApplications(state);
+    await this.replaceState(state, assertOwnership);
+    await this.reconcileDecisionApplications(state, assertOwnership);
+  }
+
+  private async replaceState(state: RemediationState, assertOwnership?: AssertLockOwnership): Promise<void> {
+    const stamped = stampedState(state);
+    if (!assertOwnership) {
+      await this.store.replace(stamped);
+      return;
+    }
+    await assertOwnership();
+    await this.store.mutate(async () => {
+      await assertOwnership();
+      return stamped;
+    });
   }
   /** Caller holds the existing phase lock, including startup before ordinary decisions. */
-  async reconcileDecisionApplications(state: RemediationState): Promise<void> {
+  async reconcileDecisionApplications(state: RemediationState, assertOwnership?: AssertLockOwnership): Promise<void> {
+    await assertOwnership?.();
     if (await reconcileDecisionCleanup(state, this.artifactsDir)) {
-      try { await this.store.replace(stampedState(state)); }
-      catch (error) { throw new Error("Operator decision is committed; pending cleanup receipt persistence. Resume to reconcile before continuing.", { cause: error }); }
+      try { await this.replaceState(state, assertOwnership); }
+      catch (error) {
+        if (error instanceof FileLockOwnershipLostError) throw error;
+        throw new Error("Operator decision is committed; pending cleanup receipt persistence. Resume to reconcile before continuing.", { cause: error });
+      }
     }
   }
 

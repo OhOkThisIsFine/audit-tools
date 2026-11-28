@@ -10,9 +10,12 @@ import { readContractReviewOutcomes } from "./closeReviewProvenance.js";
 //   The landing-gate close leg (run once per declared gate, folded into
 //   `fullyGreen`, rendered in the report) is pinned by the landing-gates suite;
 //   the existing close behaviour around it is pinned by phase-close.
-import { RemediationState } from "../state/store.js";
+import { StateStore, type RemediationState } from "../state/store.js";
+import { presentReportStep } from "../steps/frictionCloseout.js";
+import { FRICTION_CAPTURE_DIRNAME } from "../../shared/io/frictionCapture.js";
+import { cp, rm } from "node:fs/promises";
 import { OrchestratorOptions } from "../types/options.js";
-import { extname, isAbsolute, join, relative } from "node:path";
+import { basename, extname, isAbsolute, join, relative } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -177,26 +180,8 @@ const DEFAULT_REASON_BY_OUTCOME: Partial<
  * byte-identical to a clean one. The facts were durable and unreadable at the
  * same time.
  *
- * Read once, here, and THREADED into both the outcomes contract and the
- * markdown render rather than re-read by either: {@link
- * cleanupTempBranchesAndArtifacts} deletes the artifacts directory (and the
- * ledger under it) on a green close, so a builder that re-read would be reading
- * a deleted file.
- *
- * Scoped to this run by `state.plan.plan_id` — the SAME id the remediate host
- * handoff mints its ledger events under (`stateRunId` in
- * `src/remediate/steps/nextStep.ts`), so the scope is the producer's own
- * identity rather than a second spelling of it. `submissions/` sits under the
- * artifacts directory and is removed with it on a green close, but a preserved
- * (non-green) directory may outlive a later run, and another run's recovery
- * must never mark this one.
- *
- * An absent ledger reads as NO recovery rather than throwing: this is
- * bookkeeping on a reporting path, and a run that recorded no ledger recorded
- * no drift. A READ FAILURE is not laundered into that same empty answer —
- * `readSubmissionLedger` documents that it never throws, and the `catch` here
- * exists only so that a future change to that guarantee cannot turn an
- * unreadable ledger into a clean-looking run.
+ * Read once and shared by the outcomes contract and Markdown so they cite
+ * the same recovery facts. The submission ledger remains with the run.
  */
 export async function readRunRecoveryFacts(
   artifactsDir: string,
@@ -894,7 +879,11 @@ async function runTrackedCommand(
 }
 
 export type ClosingCommandRunner = typeof runTrackedCommand;
-type ClosingOptions = OrchestratorOptions & { closingCommandRunner?: ClosingCommandRunner };
+type ClosingOwnership = {
+  assertOwnership?: () => Promise<void>;
+  publishReport?: (state: RemediationState, assertOwnership: () => Promise<void>) => Promise<unknown>;
+};
+type ClosingOptions = OrchestratorOptions & ClosingOwnership & { closingCommandRunner?: ClosingCommandRunner };
 function closingRunner(options: ClosingOptions): ClosingCommandRunner {
   return options.closingCommandRunner ?? runTrackedCommand;
 }
@@ -1380,7 +1369,7 @@ export async function executeClosingAction(
  */
 export async function runCombinedTestSuite(
   state: RemediationState,
-  options: OrchestratorOptions,
+  options: ClosingOptions,
 ): Promise<CombinedTestResult> {
   console.log("Running full test suite on combined post-remediation state...");
   if (!state.plan?.test_command) {
@@ -1400,6 +1389,7 @@ export async function runCombinedTestSuite(
 
   const startedAt = Date.now();
   if (state.plan.test_command_source === "project_facts") {
+    await options.assertOwnership?.();
     const admitted = await runAdmittedProjectTestCommand(parseCommandString(suiteName), options.root, {
       timeoutMs: CLOSING_CHILD_DEADLINE_MS,
     });
@@ -1419,6 +1409,7 @@ export async function runCombinedTestSuite(
   // argv, never a shell string: the shape gate admits only single invocations,
   // and `resolveExecArgv` inside the shared runner is what makes an `npm`/`npx`
   // shim resolve on win32 without one.
+  await options.assertOwnership?.();
   const result = await runTrackedAsync(parseCommandString(suiteName), {
     cwd: options.root,
     windowsHide: true,
@@ -1579,7 +1570,7 @@ export interface E2eTestResult {
  */
 async function runE2eTests(
   state: RemediationState,
-  options: OrchestratorOptions,
+  options: ClosingOptions,
 ): Promise<E2eTestResult> {
   if (!state.plan?.e2e_command) {
     return { ran: false, passed: true, output: "" };
@@ -1595,6 +1586,7 @@ async function runE2eTests(
 
   console.log("Running end-to-end tests on combined post-remediation state...");
   if (state.plan.e2e_command_source === "project_facts") {
+    await options.assertOwnership?.();
     const admitted = await runAdmittedProjectE2eCommand(parseCommandString(state.plan.e2e_command), options.root, {
       timeoutMs: CLOSING_CHILD_DEADLINE_MS,
     });
@@ -1606,6 +1598,7 @@ async function runE2eTests(
       output: passed ? "" : admittedFailureOutput(admitted, "default e2e command", CLOSING_CHILD_DEADLINE_MS),
     };
   }
+  await options.assertOwnership?.();
   const e2eResult = await runTrackedAsync(
     parseCommandString(state.plan.e2e_command),
     {
@@ -1995,78 +1988,19 @@ export function buildRemediationReportMarkdown(
   return reportContent;
 }
 
-/**
- * {@link cleanupTempBranchesAndArtifacts}'s result — lets a caller observe a
- * cleanup residue programmatically rather than only through console/log
- * output. Absent (`{}`) on a clean removal, a not-fully-green close (nothing
- * was attempted), or a final-state-persist failure alone.
- */
-export interface CleanupResult {
-  /**
-   * Set to the artifacts directory path when its recursive removal failed
-   * after an otherwise fully-green close — the caller must remove it
-   * manually. The same fact is also written to the durable structured run log
-   * (`runLogger`) and to the console; this field is what surfaces it in the
-   * function's OWN returned result too, so a caller does not have to parse
-   * log/console output to detect the residue.
-   */
-  artifacts_residue?: string;
-}
-
-/**
- * Persist the completed state and clean up the artifact directory.
- *
- * The artifacts directory is only deleted on a fully-green close (no blocked
- * items, combined + e2e tests passed, EVERY declared landing gate passed, and
- * the closing action genuinely completed — succeeded, or was the
- * `action === "none"` no-op). When the run is not fully green — e2e failed,
- * combined test failed, a landing gate failed, an item is blocked, or the
- * closing action failed OR was skipped without completing — the artifacts
- * directory is preserved for diagnosis.
- *
- * A repository that declares NO landing gate leaves `landingGates.passed` at
- * its vacuous `true`, so the leg narrows nothing for a target it does not
- * apply to — the same rule the combined-suite leg follows for a run with no
- * configured suite.
- */
-export async function cleanupTempBranchesAndArtifacts(
-  options: OrchestratorOptions,
+/** On a fully-green close, remove only transient evidence that was archived. */
+async function cleanupArchivedCloseScratch(
+  options: ClosingOptions,
   completeState: RemediationState,
   combinedTest: CombinedTestResult,
   e2eResult: E2eTestResult,
   closingResult: ClosingResult,
-  runLogger?: RunLogger,
-  landingGates: LandingGateVerifyOutcome = { commands: [], gates: [], passed: true },
-  sourceOutcomes: RemediationOutcomesReport = buildRemediationOutcomesReport(completeState, closingResult),
-): Promise<CleanupResult> {
-  // Write final state before deleting the artifacts directory so the completion
-  // is durable even if cleanup partially fails.
-  try {
-    const { StateStore } = await import("../state/store.js");
-    const store = new StateStore(options.artifactsDir);
-    await store.saveState(completeState);
-  } catch (error) {
-    // Non-fatal — we still return complete. But NEVER silently (OBS-89a57cbd):
-    // a failed final-state persist means a restart resumes from the PRE-close
-    // state and re-runs closing actions (re-commit/re-push) with no operator
-    // clue why. Surface it on the console and in the structured run log.
-    // kind:"error": this is a run-level diagnostic (the final-state persist
-    // itself failed), never a per-finding outcome, so it does not use the
-    // "outcome" kind.
-    const reason = errorMessage(error);
-    console.warn(
-      `Failed to persist the final remediation state — a resumed run may re-execute closing actions: ${reason}`,
-    );
-    runLogger?.event({
-      phase: "close",
-      kind: "error",
-      obligation: "closing",
-      note: `Final state persist FAILED (run still reported complete): ${reason}`,
-    });
-  }
-
-  // Only delete artifacts on a fully-green close. When any test or closing
-  // action failed, preserve the directory for diagnosis.
+  runLogger: RunLogger | undefined,
+  landingGates: LandingGateVerifyOutcome,
+  sourceOutcomes: RemediationOutcomesReport,
+): Promise<void> {
+  // Only clean archived scratch on a fully-green close. When any test or
+  // closing action failed, preserve the original evidence for diagnosis.
   //
   // Force-close guard: a `blocked` or `abandoned` item means the run did NOT
   // fully succeed. It reaches close that way through triage exhausting an item's
@@ -2074,12 +2008,7 @@ export async function cleanupTempBranchesAndArtifacts(
   // still-non-terminal item — NOT through the tool-owned gate, which no longer
   // mutates item statuses at all (a red pauses the run instead of re-blocking or
   // abandoning). The guard is unchanged and still needed; only its causes are.
-  // Such a run must never be "landed green" (artifacts deleted as if complete); a
-  // vacuous/unset plan.test_command (combinedTest vacuously passing) cannot mask
-  // it. Preserve
-  // the artifacts so the partial outcome is diagnosable. The predicate is
-  // single-sourced in itemStatus so this guard cannot drift from the seam that
-  // produces the statuses it defends against.
+  // An unset combined test command cannot mask blocked or abandoned items.
   const anyBlocked = Object.values(completeState.items ?? {}).some((it) =>
     isUnsuccessfulEndStatus(it.status),
   );
@@ -2112,67 +2041,65 @@ export async function cleanupTempBranchesAndArtifacts(
       artifact: options.artifactsDir,
       note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, landingGates.passed=${landingGates.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked}, unresolvedSources=${unresolvedSources}, unresolvedRequest=${Boolean(unresolvedRequest)}, unresolvedUnits=${unresolvedUnits}, recoveryReadError=${sourceOutcomes.recovery.read_error ?? "none"})`,
     });
-    return {};
+    return;
   }
 
-  // Archive the friction close-out record with the promoted deliverables BEFORE
-  // deleting the artifacts dir — same property as the audit side's
-  // promoteFinalAuditReport: the record must outlive the run it walked.
-  //
-  // AN ARCHIVE THAT DID NOT HAPPEN MUST NOT LICENSE THE DELETE. `archiveFrictionRecords`
-  // deliberately PROPAGATES an unlistable directory rather than reporting it as an
-  // empty one (see `listFrictionRecordFilenames`), because `[]` reads as "nothing
-  // to archive" — and the rm below would then destroy records the archive never
-  // saw. The two sides were built the same errno-blind way once (the CP-NODE-3
-  // residual); the audit promote walk refuses the delete outright, and so does
-  // this one. The difference is what "refuse" costs here: this is the run's own
-  // scratch under `.audit-tools/`, deleted only on a fully-green close, and a
-  // non-green close already preserves it — so the answer is to KEEP the
-  // directory and say why, not to abort a close that has already written its
-  // report.
-  let archiveFailure = "friction archive listing failed";
+  // Do not remove records if either archive fails, including a failed
+  // per-file friction copy (best effort in the shared helper).
+  const archiveFailed = (operation: string, error: unknown): void => {
+    const reason = errorMessage(error);
+    console.warn(`Close-out archive/cleanup could not finish; remaining artifacts are kept: ${reason}`);
+    runLogger?.event({
+      phase: "close",
+      kind: "artifact_write",
+      obligation: "closing",
+      artifact: options.artifactsDir,
+      note: `${operation} failed - artifacts preserved: ${reason}`,
+    });
+  };
+  await options.assertOwnership?.();
+  let archived: string[];
+  let copyFailure: string | undefined;
+  let lostOwnership: { error: unknown } | undefined;
   try {
-    await archiveFrictionRecords({
+    archived = await archiveFrictionRecords({
       artifactsDir: options.artifactsDir,
       destDir: outputDirFor(options.artifactsDir),
       prefix: "remediation-friction",
+      copyFile: async (...args) => {
+        if (lostOwnership) throw lostOwnership.error;
+        try {
+          await options.assertOwnership?.();
+        } catch (error) {
+          lostOwnership = { error };
+          throw error;
+        }
+        await cp(...args);
+      },
+      warn: message => { copyFailure ??= message; },
     });
-    archiveFailure = "conformance evidence archive failed";
+  } catch (error) {
+    return archiveFailed("friction archive", error);
+  }
+  if (lostOwnership) throw lostOwnership.error;
+  if (copyFailure) return archiveFailed("friction archive", copyFailure);
+  await options.assertOwnership?.();
+  try {
     await archiveConformanceSubjects(options.artifactsDir, outputDirFor(options.artifactsDir));
   } catch (error) {
-    const reason = errorMessage(error);
-    console.warn(
-      "Close-out evidence could not be archived, so the artifacts " +
-        "directory is kept rather than deleted: " +
-        reason,
-    );
-    runLogger?.event({
-      phase: "close",
-      kind: "artifact_write",
-      obligation: "closing",
-      artifact: options.artifactsDir,
-      note: `${archiveFailure} - artifacts dir preserved (records may exist and were NOT archived): ${reason}`,
-    });
-    return { artifacts_residue: options.artifactsDir };
+    return archiveFailed("conformance evidence archive", error);
   }
-  try {
-    const { rm } = await import("node:fs/promises");
-    await rm(options.artifactsDir, { recursive: true, force: true });
-  } catch (error) {
-    const reason = errorMessage(error);
-    console.warn(
-      "Failed to clean up artifacts directory — manual removal may be needed.",
-    );
-    runLogger?.event({
-      phase: "close",
-      kind: "artifact_write",
-      obligation: "closing",
-      artifact: options.artifactsDir,
-      note: `Failed to clean up artifacts directory (manual removal may be needed): ${reason}`,
-    });
-    return { artifacts_residue: options.artifactsDir };
+  // Remove only copies proven archived. Never remove the root, live lock,
+  // published steps, receipts, or unknown files under the friction path.
+  for (const destination of archived) {
+    const original = basename(destination).slice("remediation-friction-".length);
+    await options.assertOwnership?.();
+    try {
+      await rm(join(options.artifactsDir, FRICTION_CAPTURE_DIRNAME, original), { force: true });
+    } catch (error) {
+      return archiveFailed("archived friction scratch cleanup", error);
+    }
   }
-  return {};
 }
 
 /**
@@ -2253,6 +2180,10 @@ export async function runClosePhase(
   options: ClosingOptions,
   runLogger?: RunLogger,
 ): Promise<RemediationState> {
+  if (!options.assertOwnership) {
+    return new StateStore(options.artifactsDir).withActiveOperator(async assertOwnership =>
+      runClosePhase(state, { ...options, assertOwnership }, runLogger));
+  }
   const resumed = await retryIncompleteCloseReport(state, options, runLogger);
   if (resumed) return resumed;
   if (state.status === "complete") return state;
@@ -2332,11 +2263,12 @@ export async function runClosePhase(
   // 2. Acceptance begins only after preview/host pauses. The floor owns its
   // failure: stop before the combined-suite triage branch can re-block items.
   const acceptance = await runCloseAcceptance({
-    state, options, runLogger,
+    state, options, runLogger, assertOwnership: options.assertOwnership,
     runCombined: () => runCombinedTestSuite(state, options),
   });
   if (acceptance.gate && !acceptance.gate.passed) {
     console.warn("Blocking final acceptance failed; the closing action was withheld.");
+    await options.assertOwnership();
     await options.onFinalGateRed?.(acceptance.gate);
     return state;
   }
@@ -2363,12 +2295,14 @@ export async function runClosePhase(
   // persisting lead re-blocks only ITS item (objective evidence to triage) —
   // never the whole resolved set the way a suite-level red must.
   const analyzerVerify = await verifyAnalyzerLeads({
+    assertOwnership: options.assertOwnership,
     state,
     root: options.root,
     ...(options.analyzerLeadVerifyOverrides
       ? { overrides: options.analyzerLeadVerifyOverrides }
       : {}),
   });
+  await options.assertOwnership();
   if (analyzerVerify.ran) {
     const now = new Date().toISOString();
     for (const [findingId, verdict] of Object.entries(analyzerVerify.verdicts)) {
@@ -2438,6 +2372,7 @@ export async function runClosePhase(
       ? { overrides: options.headEvidenceOverrides }
       : {}),
   });
+  await options.assertOwnership();
   reportHeadEvidence(headEvidence, runLogger);
 
   // 3. Run end-to-end tests on the fully merged post-remediation state. Mirrors
@@ -2477,6 +2412,7 @@ export async function runClosePhase(
   // below instead, which is what keeps the artifacts dir — the same treatment a
   // red `combinedTest` gets when it has no items to re-block.
   const landingGates = await verifyLandingGates({
+    assertOwnership: options.assertOwnership,
     root: options.root,
     timeoutMs: CLOSING_CHILD_DEADLINE_MS,
     ...(!analyzerVerify.ran && !options.analyzerLeadVerifyOverrides && !options.headEvidenceOverrides &&
@@ -2530,6 +2466,7 @@ export async function runClosePhase(
     const reportContext: CloseReportContext = {
       combinedTest, e2eResult, landingGates, contractReviews, endedAt: new Date().toISOString(),
     };
+    await options.assertOwnership!();
     await writePendingCloseReport(resultPath, closingResult, state, reportContext);
     return reportContext;
   };
@@ -2546,6 +2483,7 @@ export async function runClosePhase(
         ...(delivery ? { delivery } : {}),
       };
       const receiptSha256 = contentSha256(inProgress);
+      await options.assertOwnership!();
       await writeJsonFile(resultPath, { in_progress: { ...inProgress, sha256: receiptSha256 } });
       if (inFlight !== null && receipts.at(-1)?.exit_code === null) {
         throw new UnresolvedClosingActionError(resultPath, intent.action === "tag" ? undefined : {
@@ -2596,6 +2534,7 @@ export async function runClosePhase(
         candidate: candidate ?? "", receipts: local.commands };
       const checkpoint = { ...body, sha256: contentSha256(body) };
       if (candidate && matchesPreparation(state, options, checkpoint) && await candidateMatches(options, checkpoint)) {
+        await options.assertOwnership();
         await writeJsonFile(resultPath, { prepared_local: checkpoint });
         const next = await deliveryPreview(checkpoint);
         if (next) return withPreview(next);
@@ -2779,6 +2718,7 @@ function hasVerifiedPrReceipt(
 }
 
 async function closeCommand(options: ClosingOptions, argv: string[]): Promise<ClosingCommandResult> {
+  await options.assertOwnership?.();
   const receipt = await closingRunner(options)(options.root, argv[0]!, argv.slice(1));
   if (stableStringify(receipt.command) !== stableStringify(argv)) {
     throw new Error("Closing runner did not return a receipt for the dispatched command.");
@@ -2962,7 +2902,7 @@ function matchesClosingIntent(state: RemediationState, options: OrchestratorOpti
 
 async function reconcileClosingWithoutReplay(
   state: RemediationState,
-  options: OrchestratorOptions,
+  options: ClosingOptions,
   intent: ClosingIntent,
   runLogger?: RunLogger,
 ): Promise<RemediationState> {
@@ -3000,13 +2940,14 @@ async function reconcileClosingWithoutReplay(
     },
   };
   const context = { ...intent.report_inputs, endedAt: new Date().toISOString() };
+  await options.assertOwnership?.();
   await writePendingCloseReport(resultPath, result, verified, context);
   return reportRecordedClose(verified, options, result, context, runLogger, true);
 }
 
 async function reconcileClosingTag(
   state: RemediationState,
-  options: OrchestratorOptions,
+  options: ClosingOptions,
   intent: ClosingIntent,
   runLogger?: RunLogger,
 ): Promise<RemediationState> {
@@ -3027,6 +2968,7 @@ async function reconcileClosingTag(
   };
   const verified = intent.verified_state;
   const context = { ...intent.report_inputs, endedAt: new Date().toISOString() };
+  await options.assertOwnership?.();
   await writePendingCloseReport(path, result, verified, context);
   return reportRecordedClose(verified, options, result, context, runLogger, true);
 }
@@ -3034,9 +2976,13 @@ async function reconcileClosingTag(
 /** Resume after the authorized action, including when a report write failed before state became complete. */
 export async function retryIncompleteCloseReport(
   state: RemediationState,
-  options: OrchestratorOptions,
+  options: ClosingOptions,
   runLogger?: RunLogger,
 ): Promise<RemediationState | undefined> {
+  if (!options.assertOwnership) {
+    return new StateStore(options.artifactsDir).withActiveOperator(async assertOwnership =>
+      retryIncompleteCloseReport(state, { ...options, assertOwnership }, runLogger));
+  }
   const saved = await readClosingRecord(options.artifactsDir);
   if (saved && "in_progress" in saved) {
     const intent = saved.in_progress;
@@ -3066,36 +3012,44 @@ export async function retryIncompleteCloseReport(
 
 async function reportRecordedClose(
   state: RemediationState,
-  options: OrchestratorOptions,
+  options: ClosingOptions,
   closingResult: ClosingResult,
   context: CloseReportContext,
   runLogger: RunLogger | undefined,
   reportingRetry: boolean,
 ): Promise<RemediationState> {
   const recovery = await readRunRecoveryFacts(options.artifactsDir, state);
-  const completed = await finishCloseReport(state, options, closingResult, context, recovery, runLogger, reportingRetry);
-  const resultPath = join(options.artifactsDir, CLOSING_RESULT_FILENAME);
-  if (recovery.read_error === undefined && existsSync(resultPath)) {
-    // A preserved run can still have its old closing state if the final state write failed.
-    // Keep the action receipt available until a restart will see a completed state.
-    const { StateStore } = await import("../state/store.js");
-    const persisted = await new StateStore(options.artifactsDir).loadState();
-    if (persisted?.status === "complete") {
-      await writeJsonFile(resultPath, closingResult);
-    }
+  const { completeState: completed, outcomesReport } = await finishCloseReport(state, options, closingResult, context, recovery, runLogger, reportingRetry);
+  const assertOwnership = options.assertOwnership!;
+  // Keep the pending-report receipt until publication succeeds. A later owner
+  // can retry reporting without re-running the authorized closing action.
+  await assertOwnership();
+  await new StateStore(options.artifactsDir).saveState(completed, assertOwnership);
+  if (options.publishReport) {
+    await options.publishReport(completed, assertOwnership);
+  } else {
+    await presentReportStep(options.root, options.artifactsDir, completed, assertOwnership);
   }
+  if (recovery.read_error === undefined) {
+    await assertOwnership();
+    await writeJsonFile(join(options.artifactsDir, CLOSING_RESULT_FILENAME), closingResult);
+  }
+  await cleanupArchivedCloseScratch(
+    options, completed, context.combinedTest, context.e2eResult, closingResult,
+    runLogger, context.landingGates, outcomesReport,
+  );
   return completed;
 }
 
 async function finishCloseReport(
   state: RemediationState,
-  options: OrchestratorOptions,
+  options: ClosingOptions,
   closingResult: ClosingResult,
   { combinedTest, e2eResult, landingGates, contractReviews, endedAt }: CloseReportContext,
   recovery: RunRecovery,
   runLogger?: RunLogger,
   reportingRetry = false,
-): Promise<RemediationState> {
+): Promise<{ completeState: RemediationState; outcomesReport: RemediationOutcomesReport }> {
   // 5. Generate remediation-report.md and remediation-outcomes.json
   const entries = collectReportEntries(state);
 
@@ -3215,6 +3169,7 @@ async function finishCloseReport(
   const completeState: RemediationState = { ...state, status: "complete" };
 
   // Keep the phase lock until every in-flight write settles, including on a reporting retry.
+  await options.assertOwnership?.();
   const writes = await Promise.allSettled([
     writeTextFile(join(outputDir, REMEDIATION_REPORT_FILENAME), reportContent),
     writeJsonFile(join(outputDir, REMEDIATION_OUTCOMES_FILENAME), outcomesFile),
@@ -3246,17 +3201,5 @@ async function finishCloseReport(
   });
   console.log("Remediation report generated.");
 
-  // 7. Persist the final state, then delete the artifacts directory (only when fully green).
-  await cleanupTempBranchesAndArtifacts(
-    options,
-    completeState,
-    combinedTest,
-    e2eResult,
-    closingResult,
-    runLogger,
-    landingGates,
-    outcomesReport,
-  );
-
-  return completeState;
+  return { completeState, outcomesReport };
 }
