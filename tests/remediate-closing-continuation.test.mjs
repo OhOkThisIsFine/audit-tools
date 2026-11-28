@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,8 @@ import {
   buildStructuredAuditSourceManifest, intakePaths, INTAKE_SUMMARY_SCHEMA_VERSION,
 } from "../dist/remediate/intake.js";
 import { StateStore } from "../dist/remediate/state/store.js";
+import { closingActionCompleted } from "../dist/remediate/phases/close.js";
+import { decideNextStep } from "../dist/remediate/steps/nextStep.js";
 
 const entry = fileURLToPath(new URL("../dist/remediate/index.js", import.meta.url));
 const put = (path, value) => writeFile(path, JSON.stringify(value));
@@ -38,13 +40,13 @@ async function fixture(t) {
   return { root, artifactsDir, git, cli, next, store };
 }
 
-async function reviewedClosing({ root, artifactsDir, store }) {
+async function reviewedClosing({ root, artifactsDir, store }, action = "commit") {
   const paths = executionPlanPaths(artifactsDir);
   const { intentCheckpoint } = intakePaths(artifactsDir);
   await mkdir(paths.directory, { recursive: true });
   await put(intentCheckpoint, {
     schema_version: "intent-checkpoint/v1", confirmed_by: "host", confirmed_at: new Date().toISOString(),
-    scope_summary: "Fixture only", intent_summary: "Verify the fixture", closing_action: "commit",
+    scope_summary: "Fixture only", intent_summary: "Verify the fixture", closing_action: action,
   });
   const request = { id: "fixture-request", text: "Verify the fixture remains stable.", source_paths: [] };
   const plan = {
@@ -94,11 +96,254 @@ async function reviewedClosing({ root, artifactsDir, store }) {
   await store.saveState({
     status: "closing", run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     plan: { ...canonical.plan, request, review_revision_sha256: revision, findings: [],
-      project_type: "unknown", candidate_closing_actions: ["commit"] },
-    items: { fixture: { unit_id: "fixture", status: "resolved_no_change" } }, closing_plan: { action: "commit" },
+      project_type: "unknown", candidate_closing_actions: [action] },
+    items: { fixture: { unit_id: "fixture", status: "resolved_no_change" } }, closing_plan: { action },
   });
   return { approval, paths };
 }
+
+const address = "https://github.com/fixture-owner/fixture-repo.git";
+const ref = "refs/heads/topic";
+const httpsGit = ["git", "--no-replace-objects", "-c", "http.followRedirects=false", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always"];
+const oid = "[a-f0-9]{40}";
+const strayTip = "a".repeat(40);
+
+async function fakeDelivery(t, action = "push", { dirty = true, legacy = false, ...behavior } = {}) {
+  const f = await fixture(t);
+  const { root, artifactsDir, git, store } = f;
+  const ancestor = git("rev-parse", "HEAD");
+  git("commit", "--allow-empty", "-qm", "Already at remote");
+  await reviewedClosing(f, action);
+  const parent = git("rev-parse", "HEAD");
+  const report = join(root, ".audit-tools", "remediation-report.md");
+  if (dirty) await writeFile(report, "Existing run deliverable content.\n");
+  if (legacy) {
+    const state = await store.loadState();
+    state.closing_plan.pre_authorized = true;
+    await store.saveState(state);
+  }
+  const calls = { localCommits: 0, adds: 0, pushes: [], prs: [], reads: [] };
+  let tip = behavior.remoteInitiallyAtAncestor ? ancestor : parent;
+  let actionAfterRead;
+  const runner = async (_cwd, binary, args) => {
+    assert.equal(_cwd, root);
+    const argv = [binary, ...args];
+    const matches = expected => JSON.stringify(argv) === JSON.stringify(expected);
+    const result = (exit_code = 0, stdout = "") => ({ command: argv, exit_code, stdout });
+    const candidate = git("rev-parse", "HEAD");
+    if (matches(["git", "symbolic-ref", "--quiet", "HEAD"])) return result(0, ref);
+    if (matches(["git", "for-each-ref", "--format=%(upstream:remotename)%09%(upstream:remoteref)", "--", ref])) return result(0, `origin\t${ref}`);
+    if (matches(["git", "config", "--get-regexp", "^(url\\..*\\.(insteadof|pushinsteadof)$|remote\\.https://|http\\..*\\.followredirects$)"])) {
+      return behavior.rewrittenAddress ? result(0, "Synthetic rewrite present") : result(1);
+    }
+    if (matches(["git", "config", "--get-all", "branch.topic.remote"])) return result(0, "origin");
+    if (matches(["git", "config", "--get-all", "branch.topic.merge"])) return result(0, ref);
+    if (matches(["git", "config", "--get-all", "remote.pushDefault"]) && behavior.conflictingPushDefault) return result(0, "other");
+    if (matches(["git", "config", "--get-all", "remote.pushDefault"]) && behavior.extraBlankConfigValue) return result(0, "origin\n");
+    if (matches(["git", "config", "--get-all", "remote.origin.vcs"]) && behavior.customHelper) return result(0, "custom");
+    if (["branch.topic.pushRemote", "remote.pushDefault", "push.default", "remote.origin.push", "remote.origin.mirror",
+      "remote.origin.vcs", "remote.origin.receivepack"]
+      .some(key => matches(["git", "config", "--get-all", key]))) return result(1);
+    if (matches(["git", "remote", "get-url", "--all", "origin"]) ||
+        matches(["git", "remote", "get-url", "--push", "--all", "origin"])) return result(0, address);
+    if (matches([...httpsGit, "ls-remote", "--exit-code", "--symref", "--", address, "HEAD"])) {
+      return result(0, `ref: refs/heads/main\tHEAD\n${parent}\tHEAD`);
+    }
+    if (matches([...httpsGit, "ls-remote", "--exit-code", "--refs", "--", address, ref])) {
+      calls.reads.push(argv);
+      if (calls.pushes.length && behavior.unavailablePrHead) return result(null);
+      if (calls.pushes.length && behavior.driftPrHead) tip = strayTip;
+      return result(0, `${tip}\t${ref}`);
+    }
+    if (matches([...httpsGit, "push", "--porcelain", "--no-follow-tags", "--recurse-submodules=no",
+      `--force-with-lease=${ref}:${parent}`, "--", address, `${candidate}:${ref}`])) {
+      calls.pushes.push(argv);
+      assert.equal(git("rev-parse", "HEAD^"), parent);
+      assert.equal((await readReceipt()).in_progress.delivery.candidate, candidate);
+      await actionAfterRead?.();
+      if (behavior.race) tip = ancestor; // moves to an ancestor immediately before the CAS
+      if (behavior.alreadyCandidate) return result(0, `To ${address}\n=\t${candidate}:${ref}\t[up to date]\nDone`);
+      if (tip !== parent) return result(1);
+      tip = candidate;
+      const deliveredAddress = behavior.wrongReceiptDestination ? "https://github.com/other/repo.git" : address;
+      return result(0, `To ${deliveredAddress}\n \t${candidate}:${ref}\t${parent.slice(0, 7)}..${candidate.slice(0, 7)}\nDone`);
+    }
+    if (matches(["gh", "pr", "create", "--repo", "github.com/fixture-owner/fixture-repo",
+      "--head", "topic", "--base", "main", "--fill"])) {
+      calls.prs.push(argv);
+      assert.equal(tip, candidate);
+      assert.equal((await readReceipt()).in_progress.receipts.at(-1).stdout, `${candidate}\t${ref}`);
+      return result(0, "https://github.com/fixture-owner/fixture-repo/pull/123");
+    }
+    if (matches(["gh", "api", "--hostname", "github.com", "repos/fixture-owner/fixture-repo/pulls/123", "--jq",
+      "[.head.repo.full_name,.head.ref,.head.sha,.base.repo.full_name,.base.ref] | @tsv"])) {
+      return result(0, `fixture-owner/fixture-repo\ttopic\t${behavior.unverifiedPr ? strayTip : candidate}\tfixture-owner/fixture-repo\tmain`);
+    }
+    const isAdd = matches(["git", "--literal-pathspecs", "add", "--", ".audit-tools/remediation-report.md"]);
+    const isCommit = matches(["git", "--literal-pathspecs", "commit", "-m", "Fix: Verify fixture", "--", ".audit-tools/remediation-report.md"]);
+    const isCat = matches(["git", "--no-replace-objects", "cat-file", "commit", candidate]);
+    assert.ok(isAdd || isCommit || isCat || matches(["git", "rev-parse", "--verify", "HEAD"]),
+      `Unexpected argv (no fallback): ${JSON.stringify(argv)}`);
+    if (isAdd) calls.adds++;
+    if (isCommit) {
+      calls.localCommits++;
+      const { in_progress } = await readReceipt();
+      assert.equal(in_progress.preparation.parent, parent);
+      assert.deepEqual(in_progress.preparation.files, [".audit-tools/remediation-report.md"]);
+    }
+    const local = spawnSync(binary, args, { cwd: root, encoding: "utf8", windowsHide: true });
+    if (isCommit && behavior.unknownLocalCommit) return result(null);
+    return { ...result(local.status, isCat ? local.stdout.split("\n\n")[0] : local.stdout.trim()), stderr: local.stderr.trim() };
+  };
+  const next = (finalizeClosing = false) => decideNextStep({
+    root, artifactsDir, skipFinalGate: true, closingCommandRunner: runner, finalizeClosing,
+  });
+  const resultPath = join(artifactsDir, "remediation-closing-result.json");
+  const readReceipt = async () => JSON.parse(await readFile(resultPath, "utf8"));
+  const outcomes = async () => (JSON.parse(await readFile(join(root, ".audit-tools", "remediation-outcomes.json"), "utf8"))).closing_result;
+  return { ...f, next, calls, parent, readReceipt, resultPath, outcomes, report, afterPush: fn => { actionAfterRead = fn; } };
+}
+
+test("delivery approval is reconstructed solely from durable local preparation; matching approval conditionally pushes", async t => {
+  const f = await fakeDelivery(t);
+  const first = await f.next(true);
+  assert.match(await readFile(first.prompt_path, "utf8"), /local commit preparation only/);
+  const preCommitState = await f.store.loadState();
+  assert.equal(f.calls.localCommits, 0);
+  const second = await f.next(true);
+  const prompt = await readFile(second.prompt_path, "utf8");
+  const candidate = f.git("rev-parse", "HEAD");
+  assert.match(candidate, new RegExp(`^${oid}$`));
+  assert.match(prompt, new RegExp(candidate));
+  assert.match(prompt, new RegExp(f.parent));
+  assert.ok(prompt.includes(address) && prompt.includes(ref));
+  assert.equal(second.step_kind, "close_run");
+  assert.equal(f.calls.pushes.length, 0);
+  assert.equal(f.calls.localCommits, 1);
+  const journal = await f.readReceipt();
+  assert.deepEqual(Object.keys(journal), ["prepared_local"]);
+  assert.equal(journal.prepared_local.candidate, candidate);
+  assert.equal(journal.prepared_local.parent, f.parent);
+  assert.deepEqual(journal.prepared_local.receipts.map(receipt => receipt.exit_code), [0, 0]);
+
+  // Crash after checkpoint rename, before next-step persisted the second approval.
+  await f.store.saveState(preCommitState);
+  const bare = await f.next();
+  assert.equal(bare.step_kind, "close_run");
+  assert.equal(await readFile(bare.prompt_path, "utf8"), prompt);
+  assert.deepEqual(await f.readReceipt(), journal);
+  assert.equal(f.calls.localCommits, 1);
+  assert.equal(f.calls.adds, 1);
+  assert.equal(f.calls.pushes.length, 0);
+  const stale = await f.store.loadState();
+  stale.closing_plan.closing_action_preview.delivery.remote = "other";
+  stale.closing_plan.pre_authorized = true;
+  await f.store.saveState(stale);
+  assert.equal((await f.next(true)).step_kind, "close_run");
+  assert.equal(f.calls.pushes.length, 0);
+  assert.equal((await f.next(true)).step_kind, "present_report");
+  assert.equal(f.calls.pushes.length, 1);
+  assert.equal(f.calls.localCommits, 1);
+  const result = await f.outcomes();
+  assert.equal(closingActionCompleted(result), true);
+  assert.equal(closingActionCompleted({ ...result, commands: result.commands.slice(0, -1) }), false);
+});
+
+test("unattributed, unknown and raced delivery never produce successful remote evidence", async t => {
+  for (const [name, behavior, pushCount, attemptedCommit] of [
+    ["precommitted clean checkout", { dirty: false }, 0, 0],
+    ["unrelated earlier ahead history", { remoteInitiallyAtAncestor: true }, 0, 1],
+    ["ordinary Git selects a different push remote", { conflictingPushDefault: true }, 0, 1],
+    ["ordinary Git has an extra blank push remote", { extraBlankConfigValue: true }, 0, 1],
+    ["ordinary Git selects a custom transport helper", { customHelper: true }, 0, 1],
+    ["Git URL rewrite makes the effective address ambiguous", { rewrittenAddress: true }, 0, 1],
+    ["unknown tracked local commit", { unknownLocalCommit: true }, 0, 1],
+    ["tip moved backward at the update boundary", { race: true }, 1, 1],
+    ["tip already equals candidate at the update boundary", { alreadyCandidate: true }, 1, 1],
+    ["push receipt names a different destination", { wrongReceiptDestination: true }, 1, 1],
+  ]) await t.test(name, async t => {
+    const f = await fakeDelivery(t, "push", { ...behavior, legacy: true });
+    const first = await f.next(true);
+    if (behavior.unknownLocalCommit) {
+      assert.equal(first.step_kind, "close_run");
+      assert.equal(first.status, "blocked");
+      const unresolved = await f.readReceipt();
+      assert.equal(unresolved.in_progress.in_flight[2], "commit");
+      assert.equal(unresolved.in_progress.receipts.at(-1).exit_code, null);
+      assert.equal((await f.next()).status, "blocked");
+      await put(join(f.artifactsDir, "closing_reconciliation.json"), {
+        receipt_sha256: unresolved.in_progress.sha256, disposition: "observed", note: "Synthetic observed local commit.",
+      });
+      assert.equal((await f.next()).step_kind, "present_report");
+    } else if (first.step_kind === "close_run") {
+      assert.equal(f.calls.pushes.length, 0);
+      assert.equal((await f.next(true)).step_kind, "present_report");
+    } else {
+      assert.equal(first.step_kind, "present_report");
+    }
+    const result = await f.outcomes();
+    assert.equal(closingActionCompleted(result), false);
+    assert.equal(f.calls.pushes.length, pushCount);
+    assert.equal(f.calls.localCommits, attemptedCommit);
+    assert.equal(f.calls.prs.length, 0);
+  });
+});
+
+test("PR requires the successful exact update and corroborated candidate head; partial receipts are never green", async t => {
+  for (const [name, behavior] of [
+    ["matching post-push head", {}],
+    ["post-push head unavailable", { unavailablePrHead: true }],
+    ["post-push head drifted", { driftPrHead: true }],
+    ["created PR points at a different head OID", { unverifiedPr: true }],
+  ]) await t.test(name, async t => {
+    const success = Object.keys(behavior).length === 0;
+    const f = await fakeDelivery(t, "open-pr", { ...behavior, legacy: true });
+    const preview = await f.next(true);
+    assert.equal(preview.step_kind, "close_run");
+    assert.match(await readFile(preview.prompt_path, "utf8"), /fixture-owner\/fixture-repo, head topic, base main/);
+    assert.equal(f.calls.pushes.length, 0);
+    assert.equal((await f.next(true)).step_kind, "present_report");
+    assert.equal(f.calls.pushes.length, 1);
+    assert.equal(f.calls.prs.length, success || behavior.unverifiedPr ? 1 : 0);
+    const result = await f.outcomes();
+    assert.equal(closingActionCompleted(result), success);
+    assert.ok(result.commands.some(command => command.command.includes("push") && command.exit_code === 0));
+    assert.equal(closingActionCompleted({ ...result, commands: result.commands.slice(0, -1) }), false);
+    if (!success) {
+      assert.match(result.nondelivery_reason, behavior.unverifiedPr ? /candidate could not all be verified/
+        : /branch update succeeded, but no PR was created/);
+      assert.equal((await f.next()).step_kind, "present_report");
+      assert.equal(f.calls.pushes.length, 1);
+    }
+  });
+});
+
+test("terminal push receipt recovery is report-only; missing terminal receipts stay unresolved", async t => {
+  for (const incomplete of [false, true]) await t.test(incomplete ? "incomplete" : "exact", async t => {
+    const f = await fakeDelivery(t, "push", { legacy: true });
+    assert.equal((await f.next(true)).step_kind, "close_run");
+    // Make only report promotion fail after the fake push completes.
+    f.afterPush(async () => { await rm(f.report); await mkdir(f.report); });
+    await assert.rejects(f.next(true), /EISDIR|EPERM|EEXIST|ENOTDIR/);
+    await rm(f.report, { recursive: true });
+    const saved = await f.readReceipt();
+    assert.equal(closingActionCompleted(saved), true);
+    assert.ok(saved.pending_report);
+    if (incomplete) {
+      const { pending_report, ...result } = saved;
+      result.commands.pop();
+      pending_report.sha256 = hash([result, pending_report.verified_state, pending_report.context]);
+      await put(f.resultPath, { ...result, pending_report });
+      assert.equal((await f.next()).status, "blocked");
+      assert.equal((await f.next(true)).status, "blocked");
+    } else {
+      assert.equal((await f.next()).step_kind, "present_report");
+      assert.equal(closingActionCompleted(await f.outcomes()), true);
+    }
+    assert.equal(f.calls.pushes.length, 1);
+    assert.equal(f.calls.localCommits, 1);
+  });
+});
 
 test("the native emitted finalize command advances only a current, approved closing preview", async t => {
   const f = await fixture(t);
