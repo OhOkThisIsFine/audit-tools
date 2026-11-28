@@ -26,6 +26,15 @@ Preserve user arguments:
 - pass an existing path with `--input <path>`; pass conversational feedback directly
   with `--guidance <text>`. The tool creates and selects its intake file. Use
   `--guidance-file <path>` only for an existing guidance document.
+- To keep a structured audit report's confirmed findings and also pursue a
+  separate design change the operator explicitly requests, start the run with
+  both sources: `remediate-code next-step --input <report-path> --guidance \"<operator's requested change>\"`.
+  You can use `--guidance-file <path>` instead for a separate operator-provided
+  guidance document. Keep canonical finding provenance and obtain approval of
+  the distinct requested scope in the plan before implementing it. A suggestion
+  in the report, even if relevant, is not permission to write. If the current
+  run already bound report-only input, do not silently replace it; ask the
+  operator to explicitly start a new mixed run.
 
 Honor operator lifecycle intent through the backend: for “plan only,” add
 `--plan-only` to `next-step`; planning will finish at a persisted pause before
