@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /**
@@ -59,39 +60,51 @@ const moduleCache = new Map<string, Promise<ParserModule | undefined>>();
 const initCache = new Map<ParserModule, Promise<boolean>>();
 const languageCache = new Map<ParserModule, Map<string, TsLanguage | null>>();
 
+function selectedParserEntry(dependencyPath: string): string | undefined {
+  const packageDir = realpathSync(dependencyPath);
+  const manifestPath = join(packageDir, "package.json");
+  const manifest = requireFromHere(manifestPath) as {
+    exports?: unknown;
+    main?: string;
+    module?: string;
+  };
+  // Node selects the package's supported require export. For older packages
+  // without exports, retain their existing module/main entry precedence.
+  const entry = realpathSync(
+    manifest.exports !== undefined
+      ? createRequire(manifestPath).resolve("web-tree-sitter")
+      : resolve(packageDir, manifest.module ?? manifest.main ?? "index.js"),
+  );
+  const fromPackage = relative(packageDir, entry);
+  if (!fromPackage || fromPackage === ".." || fromPackage.startsWith(`..${sep}`) || isAbsolute(fromPackage)) {
+    return undefined;
+  }
+  return pathToFileURL(entry).href;
+}
+
 async function importParserModule(
   dependencyPath?: string,
 ): Promise<ParserModule | undefined> {
-  const specifiers: string[] = [];
-  if (dependencyPath) {
-    try {
-      const manifest = requireFromHere(
-        join(dependencyPath, "package.json"),
-      ) as { main?: string; module?: string };
-      const entry = manifest.module ?? manifest.main ?? "index.js";
-      specifiers.push(pathToFileURL(join(dependencyPath, entry)).href);
-    } catch {
-      // Fall through to the bare specifier.
+  let specifier = dependencyPath ?? "web-tree-sitter";
+  try {
+    if (dependencyPath !== undefined) {
+      const entry = selectedParserEntry(dependencyPath);
+      if (!entry) return undefined;
+      specifier = entry;
     }
-  }
-  specifiers.push("web-tree-sitter");
-
-  for (const specifier of specifiers) {
-    try {
-      const mod = (await import(specifier)) as Partial<ParserModule> & {
-        default?: Partial<ParserModule>;
-      };
-      const resolved = (mod.Parser ? mod : mod.default) as
-        | ParserModule
-        | undefined;
-      if (resolved?.Parser && resolved.Language) {
-        return resolved;
-      }
-    } catch (e) {
-      process.stderr.write(
-        `[audit-code] tree-sitter: failed to import '${specifier}': ${(e as Error).message ?? String(e)}\n`,
-      );
+    const mod = (await import(specifier)) as Partial<ParserModule> & {
+      default?: Partial<ParserModule>;
+    };
+    const resolved = mod.Parser && mod.Language ? mod : mod.default;
+    if (typeof resolved?.Parser === "function" &&
+        typeof resolved.Parser.init === "function" &&
+        typeof resolved.Language?.load === "function") {
+      return resolved as ParserModule;
     }
+  } catch (e) {
+    process.stderr.write(
+      `[audit-code] tree-sitter: failed to import '${specifier}': ${(e as Error).message ?? String(e)}\n`,
+    );
   }
   return undefined;
 }
