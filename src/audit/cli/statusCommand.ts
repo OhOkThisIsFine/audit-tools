@@ -31,12 +31,14 @@ export async function cmdStatus(argv: string[]): Promise<void> {
   await withArtifactTreeHold(artifactsDir, undefined, () => reportHeldStatus(artifactsDir));
 }
 
+type LoadBundle = () => ReturnType<typeof loadArtifactBundle>;
+
 function readCurrentStep(artifactsDir: string) {
   return readJsonFile<unknown>(join(artifactsDir, "steps", "current-step.json"))
     .then(raw => StepArtifactSchema.parse(raw));
 }
 
-async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: string, step: StepArtifact) {
+async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: string, step: StepArtifact, loadBundle: LoadBundle) {
   try {
     const boundPath = step.artifact_paths.host_workload;
     const alongsideChallenge = step.step_kind === "systemic_challenge";
@@ -47,7 +49,7 @@ async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: st
     const issued = await inspectAuditQuestionHandoff(boundary);
     let effectivePlan = plan;
     if (issued.questions.some(question => question.question_id.startsWith(FILE_INSPECTION_PREFIX))) {
-      const bundle = await loadArtifactBundle(artifactsDir, {});
+      const bundle = await loadBundle();
       const workload = await readAuditQuestionWorkload(boundary);
       const sourceRoot = await readRunSourceRoot(step.repo_root, artifactsDir);
       const cycle = await deriveQuestionCycleUnlocked({ ...boundary, bundle, sourceRoot,
@@ -79,11 +81,11 @@ async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: st
 
 // Inspect the same persisted round, prompt and answer that next-step would
 // consume, without decoding through its ledger-writing submission path.
-async function systemicContinuation(artifactsDir: string, step: StepArtifact, runId: string) {
+async function systemicContinuation(artifactsDir: string, step: StepArtifact, runId: string, loadBundle: LoadBundle) {
   if (step.step_kind !== "systemic_challenge" || step.status !== "ready" ||
       step.run_id !== runId || resolve(step.artifacts_dir) !== resolve(artifactsDir)) return null;
   try {
-    const bundle = await loadArtifactBundle(artifactsDir, {});
+    const bundle = await loadBundle();
     const register = bundle.systemic_challenge;
     if (!register || systemicChallengeEnded(register) ||
         register.round_token !== systemicPremiseToken(bundle)) return { state: "stale" };
@@ -123,10 +125,9 @@ async function systemicContinuation(artifactsDir: string, step: StepArtifact, ru
   }
 }
 
-async function publishedPreflight(artifactsDir: string) {
+async function publishedPreflight(artifactsDir: string, step: StepArtifact | undefined) {
   try {
-    const step = await readCurrentStep(artifactsDir);
-    if (step.step_kind !== "functional_preflight" || !step.run_id ||
+    if (step?.step_kind !== "functional_preflight" || !step.run_id ||
         (step.status !== "ready" && step.status !== "blocked") ||
         resolve(step.artifacts_dir) !== resolve(artifactsDir) ||
         !step.artifact_paths.functional_preflight ||
@@ -161,8 +162,9 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     }
   }
 
+  const step = await readCurrentStep(artifactsDir).catch(() => undefined);
+  const preflight = await publishedPreflight(artifactsDir, step);
   if (!auditState) {
-    const preflight = await publishedPreflight(artifactsDir);
     if (preflight) {
       outputJson({ artifacts_dir: artifactsDir, status: "preflight", functional_preflight: preflight });
       return;
@@ -190,6 +192,8 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
 
   // Planned questions are not outstanding answers. Only the published handoff
   // and accepted ledger can report answer status.
+  let bundle: ReturnType<LoadBundle> | undefined;
+  const loadBundle: LoadBundle = () => bundle ??= loadArtifactBundle(artifactsDir, {});
   let handoff: Awaited<ReturnType<typeof questionHandoff>> | null = null;
   let systemic: Awaited<ReturnType<typeof systemicContinuation>> = null;
   let questionReview: { run_id: string | null; snapshot_id: string; planned_questions: number } | null = null;
@@ -200,10 +204,9 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     ));
     const runId = await readQuestionReviewRunId(artifactsDir);
     if (runId && auditState.status !== "complete") {
-      const step = await readCurrentStep(artifactsDir).catch(() => undefined);
       if (step) {
-        handoff = await questionHandoff(artifactsDir, plan, runId, step);
-        systemic = await systemicContinuation(artifactsDir, step, runId);
+        handoff = await questionHandoff(artifactsDir, plan, runId, step, loadBundle);
+        systemic = await systemicContinuation(artifactsDir, step, runId, loadBundle);
       } else {
         handoff = { state: "unavailable" };
       }
@@ -248,6 +251,7 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
   outputJson({
     artifacts_dir: artifactsDir,
     status: auditState.status,
+    ...(preflight ? { functional_preflight: preflight } : {}),
     last_obligation: auditState.last_obligation ?? null,
     last_executor: auditState.last_executor ?? null,
     blockers: auditState.blockers ?? [],

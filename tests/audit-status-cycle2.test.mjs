@@ -27,9 +27,9 @@ async function fixture(t) {
     await writeFile(path, JSON.stringify(value));
     return path;
   };
-  const step = (step_kind, run_id, artifact_paths, progress = { summary: "Ready when published." }) =>
+  const step = (step_kind, run_id, artifact_paths, progress = { summary: "Ready when published." }, status = "ready") =>
     put("steps/current-step.json", {
-      contract_version: "audit-code-step/v1alpha1", status: "ready",
+      contract_version: "audit-code-step/v1alpha1", status,
       step_kind, run_id, progress, artifact_paths, repo_root: root, artifacts_dir: artifacts,
       prompt_path: join(artifacts, "unused.md"), allowed_commands: [], stop_condition: "Fixture",
     });
@@ -95,6 +95,21 @@ test("status projects the current bound operator decision, not the ready publica
     ...report, decision: "degraded", operator_approved_degraded: true, limitation: "Synthetic relationship coverage unavailable",
   });
   assert.equal((await status()).functional_preflight.status, "degraded");
+
+  // Resuming can publish another preflight even after audit state exists.
+  await put("audit_state.json", { status: "in_progress" });
+  await put("functional-preflight.json", report);
+  const paths = { functional_preflight: reportPath };
+  await step("functional_preflight", id, paths, { summary: "Blocked when published." }, "blocked");
+  const resumed = await status();
+  assert.equal(resumed.status, "in_progress");
+  assert.equal(resumed.functional_preflight.status, "blocked");
+  assert.match(resumed.functional_preflight.summary, /operator stopped/);
+
+  await step("functional_preflight", randomUUID(), paths);
+  assert.equal((await status()).functional_preflight, undefined, "stale publication cannot override resumed state");
+  await step("dispatch_review", id, {});
+  assert.equal((await status()).functional_preflight, undefined, "preflight is not the current step");
 });
 
 test("ordinary questions wait while only the exact current independent systemic result permits continuation", async t => {
