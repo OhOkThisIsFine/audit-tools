@@ -43,7 +43,9 @@ ${JSON.stringify({
         { kind: "positive", description: "<falsifiable success case>", scope_paths: ["<affected source/test>"] },
         { kind: "negative", description: "<falsifiable failure/regression case>", scope_paths: ["<affected source/test>"] },
       ] }],
-      units: [{ id: "UNIT-stable-name", title: "<cohesive change>", description: "<exact implementation intent>", source_finding_ids: findingIds, requirement_ids: ["REQ-stable-name"], dependencies: [], read_paths: ["<existing source/test>"], allowed_files: ["<every source/test/config file to edit or create>"], required_tests: ["<one executable command per entry>"], affected_interfaces: [], addresses_counterexample_ids: params.history.accepted_ids }],
+      units: [{ id: "UNIT-stable-name", title: "<cohesive change>", description: "<exact implementation intent>", source_finding_ids: findingIds, requirement_ids: ["REQ-stable-name"], dependencies: [], read_paths: ["<existing source/test>"], allowed_files: ["<every source/test/config file to edit or create>"], required_tests: ["<one executable command per entry>"], affected_interfaces: [
+        { name: "<affected interface name>", description: "<how this boundary is changed or endangered>" },
+      ], addresses_counterexample_ids: params.history.accepted_ids }],
       source_dispositions: [],
     },
     retired_requirements: [],
@@ -55,7 +57,7 @@ For question-report findings, keep every original source and its verification ob
 
 Each source finding must be covered by execution units OR one source_dispositions entry {finding_id,status:"already_fixed"|"refuted"|"deferred",reason,evidence:[...]}. Evidence must explain the actual source/test basis; these decisions are independently reviewed. Do not invent tasks for an already-fixed or empty scope. Requirements and units may both be empty when no implementation is appropriate. A conversation request with no units must carry request_disposition:{status:"already_satisfied"|"deferred",reason,evidence:[...]}; an objective alone is not a completion claim.
 
-Behavior changes need scoped positive and negative assertions; additions need at least one. Structural requirements still need an executable verification command or an explicit inapplicable_reason for independent assessment. An inapplicable requirement carries no assertions. Keep source and tests together. List actual dependencies explicitly; no module-token or separate obligation graph is authored. affected_interfaces is only for boundaries changed or endangered by this work, not every module interface.
+Behavior changes need scoped positive and negative assertions; additions need at least one. Structural requirements still need an executable verification command or an explicit inapplicable_reason for independent assessment. An inapplicable requirement carries no assertions. Keep source and tests together. List actual dependencies explicitly; no module-token or separate obligation graph is authored. affected_interfaces is only for boundaries changed or endangered by this work, not every module interface. Use affected_interfaces: [] when no boundary is changed or endangered.
 
 Choose focused required_tests for each unit. Leave repository-wide verification to the final check and declared landing gates to the merged-tree close. If a broad check is indispensable for a particular unit, explain what only it can verify instead of repeating it by default. Do not omit required evidence to save time.
 
