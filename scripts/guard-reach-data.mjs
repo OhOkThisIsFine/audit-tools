@@ -1435,24 +1435,12 @@ export const REACH = [
     area: 'executor→artifact producer relation',
     files: [
       'src/audit/orchestrator/executors.ts',
-      'scripts/shared/executor-write-sites.mjs',
       'scripts/shared/generate-executor-producers.mjs',
       'spec/audit/executor-producers.generated.md',
     ],
     guardedBy: ['check:executor-producers'],
-    uncovered:
-      'the extraction reads DECLARED write sites (scopes and CLI rules in executor-write-sites.mjs) — a ' +
-      'SOME-of-the-set relocation into a helper the site does not name is invisible to it, and the ' +
-      'declared-⊇-extracted direction then passes vacuously for the moved artifact (the declared side is ' +
-      'still caught by DECL-4). A renamed scope, and a relocation that empties the scope, both refuse loudly. ' +
-      'The design_review_contract and design_review_conceptual rows both check the design_assessment field ' +
-      'inside handleDesignReviewBranch. A field write in either pass satisfies both rows. ' +
-      'A `no-writes` site is checked in the writes-appeared direction only when it names a file+scope: ' +
-      'intent_equivalence_executor does, semantic_review_executor CANNOT (no deterministic runner exists — the ' +
-      'host returns results through the submission ledger), so if that executor ever started writing an artifact ' +
-      'nothing would extract it and its declared-⊇-extracted pin would stay vacuous. Within a `produces` entry only ' +
-      'the artifact name is checked against the code: the `role` (primary vs refresh) and `note` fields are ' +
-      'hand-authored and mechanically unchecked, so a wrong role or a stale note renders faithfully',
+    note: 'checks that the producer table matches EXECUTOR_REGISTRY[].produces and LIFECYCLE_PRODUCTIONS',
+    uncovered: 'does not verify that the declarations match actual source writes, roles, or notes',
   },
   {
     area: 'spec/audit registry mirrors',

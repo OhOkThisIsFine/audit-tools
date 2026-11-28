@@ -82,15 +82,14 @@ const SystemicStopSchema = z
 
 /**
  * One challenge round's submission from the second-order adversary agent: the
- * improvement findings it surfaced this round. An EMPTY `findings` array is the
- * loop-until-dry terminator — a round that surfaces nothing new converges the loop
- * (the review is done only when a round yields nothing, not when it first has an
- * answer). Findings carry their true lens; the deterministic loop grounds them,
+ * improvement findings it surfaced this round. The `findings` array is required.
+ * An empty array without a forced stop signals a quiet round. Findings carry
+ * their true lens; the deterministic loop grounds them,
  * dedupes them against prior rounds, and sets `systemic:true`.
  */
 export const SystemicChallengeSubmissionSchema = z
   .object({
-    findings: z.array(SystemicFindingSchema).default([]),
+    findings: z.array(SystemicFindingSchema),
     /**
      * Optional host-forced stop. Findings submitted WITH the stop are banked
      * normally — a stop never discards delivered work — but the round they arrived

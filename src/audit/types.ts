@@ -304,8 +304,8 @@ export type AuditTask = z.infer<typeof AuditTaskSchema>;
 export type Finding = SharedFinding;
 
 // contract-construction-sites: exempt — AuditVerification is authored by the HOST:
-// it answers the verification work item, and the tool only VALIDATES what arrives
-// (`validateAuditResults`). No producer in this repo constructs one, so there is
+// it answers the verification work item, and the tool only validates what arrives.
+// No producer in this repo constructs one, so there is
 // no site to mark — the absence is the design, not an oversight. The schema's own
 // required fields are still reconciled against the rendered worker schema.
 export const AuditVerificationSchema = z.object({
@@ -350,8 +350,8 @@ export const AuditResultSchema = z.object({
   /**
    * Worker-authored affirmation that an EMPTY `findings` array is a reviewed
    * result, not a silent failure. REQUIRED when `findings` is empty and refused
-   * otherwise (enforced at ingest by `validateResultFindings`, which is the gate
-   * workers actually hit — the zod contract only advertises the field).
+   * otherwise. This schema advertises the wire field; an ingest path must
+   * enforce the relationship between the field and the findings.
    *
    * Exists because a lane that errors, truncates, or returns an empty completion
    * produces output shaped exactly like a genuine clean review, and nothing

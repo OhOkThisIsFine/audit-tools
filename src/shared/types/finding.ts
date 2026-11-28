@@ -187,14 +187,17 @@ export function findingLocationLineIssues(location: {
   const issues: FindingLocationLineIssue[] = [];
   if (
     location.line_start !== undefined &&
-    !Number.isInteger(location.line_start)
+    (!Number.isInteger(location.line_start) || Number(location.line_start) < 1)
   ) {
     issues.push({
       field: "line_start",
       message: FINDING_LINE_START_INTEGER_RULE,
     });
   }
-  if (location.line_end !== undefined && !Number.isInteger(location.line_end)) {
+  if (
+    location.line_end !== undefined &&
+    (!Number.isInteger(location.line_end) || Number(location.line_end) < 1)
+  ) {
     issues.push({
       field: "line_end",
       message: FINDING_LINE_END_INTEGER_RULE,

@@ -12,7 +12,10 @@ import { buildDispositionMap } from "../extractors/disposition.js";
 import { buildPathLookup } from "../extractors/graph.js";
 import { uniqueSortedRoutes } from "../extractors/graphRoutes.js";
 import { mergeAnalyzerEdges } from "../extractors/analyzers/merge.js";
-import { ANALYZER_REGISTRY } from "../extractors/analyzers/registry.js";
+import {
+  ANALYZER_REGISTRY,
+  isGraphAnalyzerDependencyInstallable,
+} from "../extractors/analyzers/registry.js";
 import type {
   AnalyzerResolution,
   LanguageAnalyzer,
@@ -155,8 +158,8 @@ function buildEnrichedGraph(
 }
 
 /**
- * Resolve a dependency for actual execution (may install for ephemeral/permanent).
- * `auto`/`repo` with an absent dependency falls back to the regex floor.
+ * Resolve for execution; only versioned dependencies can be installed on opt-in.
+ * A missing lookup-only dependency always falls back to the regex floor.
  */
 async function resolveForRun(
   analyzer: LanguageAnalyzer,
@@ -172,7 +175,10 @@ async function resolveForRun(
   if (resolved.via === "repo" || resolved.via === "cache") {
     return { resolution: resolved.via, path: resolved.path };
   }
-  if (setting === "ephemeral" || setting === "permanent") {
+  if (
+    (setting === "ephemeral" || setting === "permanent") &&
+    isGraphAnalyzerDependencyInstallable(analyzer.dependency)
+  ) {
     const install = await installToCache(analyzer.dependency, options);
     if (install.ok && install.path) {
       return { resolution: "installed", path: install.path };
@@ -184,7 +190,7 @@ async function resolveForRun(
   }
   return {
     resolution: "absent",
-    note: `Dependency '${analyzer.dependency}' not resolvable; kept regex floor.`,
+    note: `Dependency '${analyzer.dependency}' not found in repo or cache; kept regex floor.`,
   };
 }
 

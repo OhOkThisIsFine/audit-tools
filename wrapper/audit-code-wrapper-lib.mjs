@@ -295,12 +295,15 @@ async function runDistCommand(commandName, argv) {
   // to an absolute path before the child sees it (CE-001), so a cwd-verbatim
   // default here would pin the wrong root no matter what dist resolves.
   const rootValue = resolveWrapperRoot(getFlag(commandArgs, '--root'));
-  const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
+  const artifactsDir = getFlag(commandArgs, '--artifacts-dir');
 
   // Overwrite (not default) so a user-supplied relative value is normalized to
   // the caller-cwd-resolved absolute path before it reaches the child (CE-001).
   setFlag(commandArgs, '--root', rootValue);
-  setFlag(commandArgs, '--artifacts-dir', artifactsDir);
+  // Keep the absent flag visible to sample-run, which owns a separate default.
+  if (artifactsDir !== undefined || commandName !== 'sample-run') {
+    setFlag(commandArgs, '--artifacts-dir', resolve(artifactsDir ?? join(rootValue, '.audit-tools', 'audit')));
+  }
 
   await ensureBuilt();
   await run(process.execPath, [distEntry, commandName, ...commandArgs], {

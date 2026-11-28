@@ -87,6 +87,7 @@ export function renderConfirmIntentPrompt(
     unresolvedConstraintClauses?: Array<{ clause_id: string; text: string; checkpoint_question: string }>;
     intentSummary?: string;
     freeFormIntent?: string;
+    degradedLimitation?: string;
   },
 ): string {
   const dirLines =
@@ -146,7 +147,8 @@ export function renderConfirmIntentPrompt(
   const hasOverrideProposals = preDigest.disposition_override_proposals.length > 0;
   const unresolvedClauses = opts.unresolvedConstraintClauses ?? [];
   const hasBlockingClauses = unresolvedClauses.length > 0;
-  const proposedDepth = proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent, preDigest.mode);
+  const degraded = opts.degradedLimitation !== undefined;
+  const proposedDepth = degraded ? "shallow" : proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent, preDigest.mode);
   const proposedLenses = preDigest.lens_propositions
     .filter((p) => p.disposition === "recommend_include")
     .map((p) => p.lens);
@@ -158,11 +160,14 @@ export function renderConfirmIntentPrompt(
     "",
     `- **Scope:** ${preDigest.mode}${preDigest.since ? ` (since ${preDigest.since})` : ""}, ${preDigest.files_in_scope} file(s). See [included directories](#in-scope-top-level-directories) and [exclusions](#already-excluded-deterministic-disposition).`,
     `- **Lenses:** let the planner choose applicable lenses, unless the operator selects an exact set. See [lens recommendations](#lens-proposition)${proposedLenses.length ? `: ${proposedLenses.join(", ")} recommended` : ""}.`,
-    `- **Design-review depth:** **${proposedDepth}** proposed; record the approved depth, including any change. See [depth options](#conceptual-design-review-depth).`,
+    degraded
+      ? "- **Design-review depth:** **shallow only**, as approved in functional preflight."
+      : `- **Design-review depth:** **${proposedDepth}** proposed; record the approved depth, including any change. See [depth options](#conceptual-design-review-depth).`,
     "",
     "If stopping, present the evidence and its limitations. Do not write a checkpoint or run the continuation. This is not a completed audit.",
     "",
     "## Prepared evidence and scope details",
+    ...(degraded ? ["", `Functional preflight limitation: ${opts.degradedLimitation}`] : []),
     ...(opts.analyzerCoverageGaps?.length ? ["", "Unresolved analyzer coverage:", ...opts.analyzerCoverageGaps.map(gap => "- " + gap)] : []),
     ...(opts.evidenceGraphStatus ? [opts.evidenceGraphStatus] : []),
     ...(opts.evidenceGraphCommand ? ["Query admitted files using: " + opts.evidenceGraphCommand] : []),
@@ -278,10 +283,13 @@ export function renderConfirmIntentPrompt(
     "## Conceptual design-review depth",
     "",
     "The audit runs a conceptual design-review pass (philosophy / alternatives /",
-    "better directions, distinct from the contract pass). Choose its depth:",
+    degraded
+      ? "better directions, distinct from the contract pass). Only shallow is available under the current degraded approval."
+      : "better directions, distinct from the contract pass). Choose its depth:",
     "",
     "- **shallow** — a single conceptual reviewer. Faster, cheaper.",
-    `- **deep** — fan out ${DEFAULT_CONCEPTUAL_PERSPECTIVES} independent reviewers, each with a maximally`,
+    ...(degraded ? [] : [
+    `- **deep** - fan out ${DEFAULT_CONCEPTUAL_PERSPECTIVES} independent reviewers, each with a maximally`,
     "  dissimilar value system, then compile via an independent judge. Surfaces more,",
     "  costs more. The default perspectives are:",
     ...CONCEPTUAL_PERSPECTIVES.slice(0, DEFAULT_CONCEPTUAL_PERSPECTIVES).map(
@@ -290,6 +298,7 @@ export function renderConfirmIntentPrompt(
     "  Set `design_review.perspectives` to a count, an exact list of built-in names,",
     '  or a list mixing names and custom {"name":"...","lens":"..."} perspectives.',
     "  Explicit lists select only those perspectives; use unique names and deep review.",
+    ]),
     "",
     "This records *how much* conceptual review to do. Execution details remain",
     "entirely with the host that receives the review workload.",
@@ -303,7 +312,9 @@ export function renderConfirmIntentPrompt(
     `Required fields: ${Object.entries(IntentCheckpointSchema.shape)
       .filter(([, field]) => !field.isOptional())
       .map(([key]) => `\`${key}\``).join(", ")}.`,
-    "Replace the placeholders with confirmed values. In particular, write the approved `shallow` or `deep` explicitly; do not omit depth or copy the proposal over an explicit change.",
+    degraded
+      ? "Replace the placeholders with confirmed values. Write `shallow` explicitly and omit `perspectives`."
+      : "Replace the placeholders with confirmed values. In particular, write the approved `shallow` or `deep` explicitly; do not omit depth or copy the proposal over an explicit change.",
     "",
     "```json",
     "{",
@@ -312,7 +323,7 @@ export function renderConfirmIntentPrompt(
     '  "confirmed_by": "host",',
     '  "scope_summary": "<what is in scope>",',
     '  "intent_summary": "<the confirmed goal>",',
-    '  "design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "<approved shallow or deep>" }',
+    `  "design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "${degraded ? "shallow" : "<approved shallow or deep>"}" }`,
     "}",
     "```",
     "",
@@ -342,7 +353,7 @@ export function renderConfirmIntentPrompt(
     "  confirmation that supplied them, so the next audit asks again rather than",
     "  silently re-applying this run's choice. A block without a matching",
     "  `answered_at` requires confirmation again before review can proceed.",
-    "- On `deep`, leave `perspectives` unset for the default reviewers, or record the operator's explicit choice. Omit perspectives for shallow.",
+    ...(degraded ? [] : ["- On `deep`, leave `perspectives` unset for the default reviewers, or record the operator's explicit choice. Omit perspectives for shallow."]),
     "",
     `Then run: ${opts.continueCommand}`,
     "",

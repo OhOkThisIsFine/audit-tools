@@ -29,45 +29,17 @@
 //   3. Generic targets run their declared gates. A target with no commands has
 //      a blocking non-verdict (`scoped_out`, `passed: false`), never a vacuous
 //      green. A missing monorepo marker must not suppress valid generic gates.
-import "../shared/hermetic-state-dir.mjs";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
-import { pathToFileURL } from "url";
+import { dirname, join, resolve } from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 import { tmpdir } from "os";
 
 const pkgRoot = dirname(dirname(import.meta.dirname));
 const distGatePath = join(pkgRoot, "dist", "remediate", "steps", "finalGate.js");
 
-let passed = 0;
-let failed = 0;
-const smokeStart = Date.now();
-
-async function check(label, fn) {
-  try {
-    await fn();
-    console.log(`  PASS ${label}`);
-    passed++;
-  } catch (err) {
-    console.error(`  FAIL ${label}: ${/** @type {any} */ (err).message}`);
-    failed++;
-  }
-}
-
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
-
-console.log("smoke:remediate-gate");
-
-// sites-pinned: tests/self-remediation-gate.test.mjs
-const gateFile = statSync(distGatePath, { throwIfNoEntry: false });
-if (!gateFile?.isFile() || gateFile.size === 0) {
-  console.error(`  FAIL the built gate module is missing or empty at ${distGatePath} — run npm run build from ${pkgRoot}`);
-  process.exit(1);
-}
-const { runToolOwnedFinalGate, toolOwnedFinalGateCommands, writeFinalGateRedRecord } = await import(
-  pathToFileURL(distGatePath).href
-);
 
 /**
  * A repository shaped exactly like the audit-tools monorepo — the five layout
@@ -127,175 +99,225 @@ function writeState(root, state) {
   writeFileSync(join(root, "state.json"), JSON.stringify(state, null, 2) + "\n");
 }
 
-const fixtureRoot = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-"));
-
-try {
-  writeFixture(fixtureRoot);
-
-  // ── 0. the derivation itself is non-vacuous on this shape ──────────────────
-  const specs = toolOwnedFinalGateCommands(fixtureRoot);
-  await check("the gate derives a non-vacuous command list on an audit-tools-shaped tree", () => {
-    assert(specs.length >= 4, `expected the build/check/check:tests/unit floor, got ${specs.length} commands`);
-    const layers = specs.map((s) => s.layer);
-    for (const layer of ["build", "check", "unit"]) {
-      assert(layers.includes(layer), `the floor is missing its ${layer} layer: ${JSON.stringify(layers)}`);
-    }
-    assert(
-      specs.every((s) => !JSON.stringify(s.argv).includes("test_command")),
-      "the floor must be independent of any plan.test_command (INV-RS-10)",
-    );
-    // Every unit command must be build-free — a unit leg that rebuilds dist races
-    // the layer above it (CE-001 single-flight).
-    for (const spec of specs.filter((s) => s.layer === "unit")) {
-      assert(spec.build_free === true, `unit command ${spec.argv.join(" ")} is not build_free`);
-    }
-  });
-
-  // ── 1. GREEN on a healthy tree ─────────────────────────────────────────────
-  const green = await runToolOwnedFinalGate(fixtureRoot);
-  await check("a HEALTHY tree goes green — a gate that cannot pass on a clean tree fails the release", () => {
-    assert(green.passed === true, `expected a green gate, got passed=${green.passed}`);
-    assert(green.outcome === "executed", `expected outcome "executed", got "${green.outcome}"`);
-    assert(green.scoped_out === false, "an audit-tools-shaped tree must not scope out");
-    assert(
-      green.results.length === specs.length,
-      `expected all ${specs.length} commands to run, got ${green.results.length}`,
-    );
-    assert(
-      green.results.every((r) => r.exit_code === 0),
-      `every command must exit 0: ${JSON.stringify(green.results.map((r) => [r.argv.join(" "), r.exit_code]))}`,
-    );
-  });
-
-  // ── 2. RED, named and short-circuited, on a broken tree ────────────────────
-  writeState(fixtureRoot, { build: "pass", check: "fail", "check:tests": "pass", unit: "pass" });
-  const red = await runToolOwnedFinalGate(fixtureRoot);
-  await check("a BROKEN check layer goes red, NAMES the command, and short-circuits the floor", () => {
-    assert(red.passed === false, "a failing layer must fail the gate");
-    assert(red.outcome === "executed", `a real verdict keeps outcome "executed", got "${red.outcome}"`);
-    const failing = red.results.filter((r) => !r.passed);
-    assert(failing.length === 1, `exactly one command should be reported as failing, got ${failing.length}`);
-    assert(
-      failing[0].argv.join(" ").includes("check"),
-      `the failing command must be named: ${failing[0].argv.join(" ")}`,
-    );
-    assert(
-      // The order is the floor's, and the fail-fast is the point: layers below a
-      // broken one are meaningless.
-      red.results.length === 2,
-      `the floor must stop at the first failure (ran ${red.results.length} commands)`,
-    );
-    assert(
-      typeof failing[0].stderr_tail === "string" && failing[0].stderr_tail.includes("fixture-check-layer-failed"),
-      "the failing command's output must ride into the record — a red that names nothing is unattributable",
-    );
-  });
-
-  // The red record the run pauses on must carry the same attribution.
-  await check("the persisted red record carries the failing command and its output tail", async () => {
-    const artifactsDir = join(fixtureRoot, "artifacts");
-    mkdirSync(artifactsDir, { recursive: true });
-    const path = await writeFinalGateRedRecord(
-      artifactsDir,
-      "smoke",
-      red.results.find((r) => !r.passed),
-    );
-    const record = JSON.parse(readFileSync(path, "utf8"));
-    assert(record.failing_command.includes("check"), `unexpected failing_command: ${record.failing_command}`);
-    assert(record.exit_code !== 0, "the record must carry a non-zero exit code");
-    assert(
-      typeof record.stderr_tail === "string" && record.stderr_tail.includes("fixture-check-layer-failed"),
-      "the record must carry the failing layer's output tail",
-    );
-  });
-
-  // ── 3. the UNIT layer is really executed, not assumed ──────────────────────
-  writeState(fixtureRoot, { build: "pass", check: "pass", "check:tests": "pass", unit: "fail" });
-  const unitRed = await runToolOwnedFinalGate(fixtureRoot);
-  await check("a broken UNIT layer is caught by the last command of the floor (the node:test-bug shape)", () => {
-    assert(unitRed.passed === false, "a failing unit suite must fail the gate");
-    const failing = unitRed.results.filter((r) => !r.passed);
-    assert(failing.length === 1, `expected one failing command, got ${failing.length}`);
-    assert(
-      failing[0].argv.join(" ").includes("run-contract-tests.mjs"),
-      `the unit leg must run the vitest gate script, got: ${failing[0].argv.join(" ")}`,
-    );
-    assert(
-      unitRed.results.length === specs.length,
-      "the unit layer is LAST, so every earlier layer must have run",
-    );
-  });
-
-  // ── 4. no declared commands means a BLOCKING non-verdict ─────────────────
-  const bare = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-bare-"));
+/** Exercise the built gate with real subprocesses; the calling contract suite owns the outer deadline. */
+export async function runRemediationGateSmoke() {
+  const stateDir = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-state-"));
+  const previous = process.env.AUDIT_CODE_STATE_DIR;
+  process.env.AUDIT_CODE_STATE_DIR = stateDir;
   try {
-    writeFileSync(join(bare, "README.md"), "# not a monorepo\n");
-    const scoped = await runToolOwnedFinalGate(bare);
-    await check("a target with no declared commands is blocked, never a vacuous green", () => {
-      assert(scoped.outcome === "scoped_out", `expected scoped_out, got "${scoped.outcome}"`);
-      assert(scoped.scoped_out === true, "scoped_out must be stated");
-      assert(scoped.passed === false, "a no-command target must block completion, never pass");
-      assert(scoped.results.length === 0, "a scoped-out gate runs nothing");
-    });
+    return await runFixtureSmoke();
   } finally {
-    rmSync(bare, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.AUDIT_CODE_STATE_DIR;
+    else process.env.AUDIT_CODE_STATE_DIR = previous;
+    rmSync(stateDir, { recursive: true, force: true });
   }
-
-  // Missing the monorepo-only gate script selects generic discovery. All four
-  // explicitly declared legs still run, without inferring that `check` means
-  // typechecking or attempting to execute a nonexistent monorepo script.
-  const partial = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-partial-"));
-  try {
-    writeFixture(partial);
-    rmSync(join(partial, "scripts"), { recursive: true, force: true });
-    const manifest = JSON.parse(readFileSync(join(partial, "package.json"), "utf8"));
-    for (const role of ["typecheck", "lint", "test"]) {
-      manifest.scripts[role] = `node stub-layer.mjs ${role}`;
-    }
-    writeFileSync(join(partial, "package.json"), JSON.stringify(manifest) + "\n");
-    const healthy = { build: "pass", typecheck: "pass", lint: "pass", test: "pass" };
-    writeState(partial, healthy);
-    const genericSpecs = toolOwnedFinalGateCommands(partial);
-    const generic = await runToolOwnedFinalGate(partial);
-    await check("a target WITHOUT the monorepo gate script executes every declared generic gate", () => {
-      const roles = ["build", "typecheck", "lint", "test"];
-      assert(generic.outcome === "executed" && generic.scoped_out === false,
-        "declared generic gates must execute instead of scoping out");
-      assert(generic.passed === true, "healthy declared commands must pass");
-      assert(genericSpecs.length === roles.length && generic.results.length === roles.length,
-        "all four declared legs must run, without undeclared monorepo commands");
-      // Successful gate results deliberately omit output tails. The spawned
-      // fixture records the same bytes it writes to stdout, so execution/output
-      // evidence does not depend on a failure-only result field.
-      const observedOutput = readFileSync(join(partial, "successful-output.log"), "utf8");
-      assert(observedOutput === roles.map(role => `fixture-${role}-layer-passed\n`).join(""),
-        "each declared command must actually produce its expected output in order");
-      for (const [index, role] of roles.entries()) {
-        const result = generic.results[index];
-        assert(result.argv.join(" ") === genericSpecs[index].argv.join(" "),
-          "executed command must match its declaration");
-        assert(result.exit_code === 0 && result.passed === true,
-          `declared ${role} leg must actually execute successfully in order`);
-      }
-    });
-    writeState(partial, { ...healthy, typecheck: "fail" });
-    const genericRed = await runToolOwnedFinalGate(partial);
-    await check("a failed generic typecheck blocks completion and short-circuits later declared gates", () => {
-      assert(genericRed.outcome === "executed" && genericRed.passed === false,
-        "a failed declared command must never become a green or a non-verdict");
-      assert(genericRed.results.length === 2, "build runs, typecheck fails, lint and test must not run");
-      const failure = genericRed.results[1];
-      assert(failure.exit_code !== 0 && failure.stderr_tail.includes("fixture-typecheck-layer-failed"),
-        "the generic failure must preserve its attributable output");
-    });
-  } finally {
-    rmSync(partial, { recursive: true, force: true });
-  }
-} finally {
-  rmSync(fixtureRoot, { recursive: true, force: true });
 }
 
-// A stray child would keep this process alive after the checks; the smoke's own
-// exit code is the verdict the gate step reads.
-console.log(`\n${passed} passed, ${failed} failed (${Date.now() - smokeStart}ms total)`);
-if (failed > 0) process.exit(1);
+async function runFixtureSmoke() {
+  let passed = 0;
+  let failed = 0;
+  const smokeStart = Date.now();
+
+  async function check(label, fn) {
+    try {
+      await fn();
+      console.log(`  PASS ${label}`);
+      passed++;
+    } catch (err) {
+      console.error(`  FAIL ${label}: ${/** @type {any} */ (err).message}`);
+      failed++;
+    }
+  }
+
+  console.log("smoke:remediate-gate");
+
+  // sites-pinned: tests/self-remediation-gate.test.mjs
+  const gateFile = statSync(distGatePath, { throwIfNoEntry: false });
+  if (!gateFile?.isFile() || gateFile.size === 0) {
+    throw new Error(`The built gate module is missing or empty at ${distGatePath}; run npm run build from ${pkgRoot}`);
+  }
+  const { runToolOwnedFinalGate, toolOwnedFinalGateCommands, writeFinalGateRedRecord } = await import(
+    pathToFileURL(distGatePath).href
+  );
+
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-"));
+
+  try {
+    writeFixture(fixtureRoot);
+
+    // ── 0. the derivation itself is non-vacuous on this shape ──────────────────
+    const specs = toolOwnedFinalGateCommands(fixtureRoot);
+    await check("the gate derives a non-vacuous command list on an audit-tools-shaped tree", () => {
+      assert(specs.length >= 4, `expected the build/check/check:tests/unit floor, got ${specs.length} commands`);
+      const layers = specs.map((s) => s.layer);
+      for (const layer of ["build", "check", "unit"]) {
+        assert(layers.includes(layer), `the floor is missing its ${layer} layer: ${JSON.stringify(layers)}`);
+      }
+      assert(
+        specs.every((s) => !JSON.stringify(s.argv).includes("test_command")),
+        "the floor must be independent of any plan.test_command (INV-RS-10)",
+      );
+      // Every unit command must be build-free — a unit leg that rebuilds dist races
+      // the layer above it (CE-001 single-flight).
+      for (const spec of specs.filter((s) => s.layer === "unit")) {
+        assert(spec.build_free === true, `unit command ${spec.argv.join(" ")} is not build_free`);
+      }
+    });
+
+    // ── 1. GREEN on a healthy tree ─────────────────────────────────────────────
+    const green = await runToolOwnedFinalGate(fixtureRoot);
+    await check("a HEALTHY tree goes green — a gate that cannot pass on a clean tree fails the release", () => {
+      assert(green.passed === true, `expected a green gate, got passed=${green.passed}`);
+      assert(green.outcome === "executed", `expected outcome "executed", got "${green.outcome}"`);
+      assert(green.scoped_out === false, "an audit-tools-shaped tree must not scope out");
+      assert(
+        green.results.length === specs.length,
+        `expected all ${specs.length} commands to run, got ${green.results.length}`,
+      );
+      assert(
+        green.results.every((r) => r.exit_code === 0),
+        `every command must exit 0: ${JSON.stringify(green.results.map((r) => [r.argv.join(" "), r.exit_code]))}`,
+      );
+    });
+
+    // ── 2. RED, named and short-circuited, on a broken tree ────────────────────
+    writeState(fixtureRoot, { build: "pass", check: "fail", "check:tests": "pass", unit: "pass" });
+    const red = await runToolOwnedFinalGate(fixtureRoot);
+    await check("a BROKEN check layer goes red, NAMES the command, and short-circuits the floor", () => {
+      assert(red.passed === false, "a failing layer must fail the gate");
+      assert(red.outcome === "executed", `a real verdict keeps outcome "executed", got "${red.outcome}"`);
+      const failing = red.results.filter((r) => !r.passed);
+      assert(failing.length === 1, `exactly one command should be reported as failing, got ${failing.length}`);
+      assert(
+        failing[0].argv.join(" ").includes("check"),
+        `the failing command must be named: ${failing[0].argv.join(" ")}`,
+      );
+      assert(
+        // The order is the floor's, and the fail-fast is the point: layers below a
+        // broken one are meaningless.
+        red.results.length === 2,
+        `the floor must stop at the first failure (ran ${red.results.length} commands)`,
+      );
+      assert(
+        typeof failing[0].stderr_tail === "string" && failing[0].stderr_tail.includes("fixture-check-layer-failed"),
+        "the failing command's output must ride into the record — a red that names nothing is unattributable",
+      );
+    });
+
+    // The red record the run pauses on must carry the same attribution.
+    await check("the persisted red record carries the failing command and its output tail", async () => {
+      const artifactsDir = join(fixtureRoot, "artifacts");
+      mkdirSync(artifactsDir, { recursive: true });
+      const path = await writeFinalGateRedRecord(
+        artifactsDir,
+        "smoke",
+        red.results.find((r) => !r.passed),
+      );
+      const record = JSON.parse(readFileSync(path, "utf8"));
+      assert(record.failing_command.includes("check"), `unexpected failing_command: ${record.failing_command}`);
+      assert(record.exit_code !== 0, "the record must carry a non-zero exit code");
+      assert(
+        typeof record.stderr_tail === "string" && record.stderr_tail.includes("fixture-check-layer-failed"),
+        "the record must carry the failing layer's output tail",
+      );
+    });
+
+    // ── 3. the UNIT layer is really executed, not assumed ──────────────────────
+    writeState(fixtureRoot, { build: "pass", check: "pass", "check:tests": "pass", unit: "fail" });
+    const unitRed = await runToolOwnedFinalGate(fixtureRoot);
+    await check("a broken UNIT layer is caught by the last command of the floor (the node:test-bug shape)", () => {
+      assert(unitRed.passed === false, "a failing unit suite must fail the gate");
+      const failing = unitRed.results.filter((r) => !r.passed);
+      assert(failing.length === 1, `expected one failing command, got ${failing.length}`);
+      assert(
+        failing[0].argv.join(" ").includes("run-contract-tests.mjs"),
+        `the unit leg must run the vitest gate script, got: ${failing[0].argv.join(" ")}`,
+      );
+      assert(
+        unitRed.results.length === specs.length,
+        "the unit layer is LAST, so every earlier layer must have run",
+      );
+    });
+
+    // ── 4. no declared commands means a BLOCKING non-verdict ─────────────────
+    const bare = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-bare-"));
+    try {
+      writeFileSync(join(bare, "README.md"), "# not a monorepo\n");
+      const scoped = await runToolOwnedFinalGate(bare);
+      await check("a target with no declared commands is blocked, never a vacuous green", () => {
+        assert(scoped.outcome === "scoped_out", `expected scoped_out, got "${scoped.outcome}"`);
+        assert(scoped.scoped_out === true, "scoped_out must be stated");
+        assert(scoped.passed === false, "a no-command target must block completion, never pass");
+        assert(scoped.results.length === 0, "a scoped-out gate runs nothing");
+      });
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+
+    // Missing the monorepo-only gate script selects generic discovery. All four
+    // explicitly declared legs still run, without inferring that `check` means
+    // typechecking or attempting to execute a nonexistent monorepo script.
+    const partial = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-partial-"));
+    try {
+      writeFixture(partial);
+      rmSync(join(partial, "scripts"), { recursive: true, force: true });
+      const manifest = JSON.parse(readFileSync(join(partial, "package.json"), "utf8"));
+      for (const role of ["typecheck", "lint", "test"]) {
+        manifest.scripts[role] = `node stub-layer.mjs ${role}`;
+      }
+      writeFileSync(join(partial, "package.json"), JSON.stringify(manifest) + "\n");
+      const healthy = { build: "pass", typecheck: "pass", lint: "pass", test: "pass" };
+      writeState(partial, healthy);
+      const genericSpecs = toolOwnedFinalGateCommands(partial);
+      const generic = await runToolOwnedFinalGate(partial);
+      await check("a target WITHOUT the monorepo gate script executes every declared generic gate", () => {
+        const roles = ["build", "typecheck", "lint", "test"];
+        assert(generic.outcome === "executed" && generic.scoped_out === false,
+          "declared generic gates must execute instead of scoping out");
+        assert(generic.passed === true, "healthy declared commands must pass");
+        assert(genericSpecs.length === roles.length && generic.results.length === roles.length,
+          "all four declared legs must run, without undeclared monorepo commands");
+        // Successful gate results deliberately omit output tails. The spawned
+        // fixture records the same bytes it writes to stdout, so execution/output
+        // evidence does not depend on a failure-only result field.
+        const observedOutput = readFileSync(join(partial, "successful-output.log"), "utf8");
+        assert(observedOutput === roles.map(role => `fixture-${role}-layer-passed\n`).join(""),
+          "each declared command must actually produce its expected output in order");
+        for (const [index, role] of roles.entries()) {
+          const result = generic.results[index];
+          assert(result.argv.join(" ") === genericSpecs[index].argv.join(" "),
+            "executed command must match its declaration");
+          assert(result.exit_code === 0 && result.passed === true,
+            `declared ${role} leg must actually execute successfully in order`);
+        }
+      });
+      writeState(partial, { ...healthy, typecheck: "fail" });
+      const genericRed = await runToolOwnedFinalGate(partial);
+      await check("a failed generic typecheck blocks completion and short-circuits later declared gates", () => {
+        assert(genericRed.outcome === "executed" && genericRed.passed === false,
+          "a failed declared command must never become a green or a non-verdict");
+        assert(genericRed.results.length === 2, "build runs, typecheck fails, lint and test must not run");
+        const failure = genericRed.results[1];
+        assert(failure.exit_code !== 0 && failure.stderr_tail.includes("fixture-typecheck-layer-failed"),
+          "the generic failure must preserve its attributable output");
+      });
+    } finally {
+      rmSync(partial, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+
+  console.log(`\n${passed} passed, ${failed} failed (${Date.now() - smokeStart}ms total)`);
+  return { passed, failed };
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const { failed } = await runRemediationGateSmoke();
+    if (failed) process.exitCode = 1;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+}

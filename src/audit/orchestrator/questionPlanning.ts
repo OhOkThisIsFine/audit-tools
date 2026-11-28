@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/question-planning.test.ts
+// sites-pinned: tests/review-evidence.test.mjs
 import { compareCodeUnits, hashContent, stableStringify } from "audit-tools/shared";
 import {
   BUILT_IN_REVIEW_LENSES, DISCONFIRMATION_PART_ID, REVIEW_QUESTION_CONTRACT_VERSION, ReviewLensSchema,
@@ -10,7 +10,7 @@ import type { AuditScopeManifest } from "../types/auditScope.js";
 import { EXTRACTOR_HEURISTIC_NOTE, isTestPath } from "../extractors/pathPatterns.js";
 import { getExternalSignalPaths } from "./requeueUtils.js";
 import { applicableProjectRulePaths } from "./projectRuleEvidence.js";
-import { fingerprintDiscoveredSet } from "./questionEvidence.js";
+import { fingerprintDiscoveredSet, reviewSourceRefContains } from "./questionEvidence.js";
 import { REVIEW_LENS_PLAYBOOKS } from "./reviewLensPlaybooks.js";
 import { resolveIntentLensSelection } from "./lensSelection.js";
 import { discoverTestSuites } from "./testSuiteSubjects.js";
@@ -115,8 +115,7 @@ function discoverOperationEntries(bundle: ArtifactBundle, { files, sourceStatus 
   };
   const byEntry = new Map<string, NonNullable<ArtifactBundle["critical_flows"]>["flows"]>();
   for (const flow of bundle.critical_flows?.flows ?? []) {
-    for (const entry of flow.entrypoints) {
-      const path = resolveRef(entry)?.path ?? entry;
+    for (const path of new Set(flow.entrypoints.map(entry => resolveRef(entry)?.path ?? entry))) {
       const related = byEntry.get(path) ?? [];
       related.push(flow);
       byEntry.set(path, related);
@@ -229,11 +228,27 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
   const provisional = new Map<string, {
     entries: string[]; paths: string[]; contracts: string[]; concerns: Set<string>; crossesOwners: boolean;
   }>();
-  for (const surface of entrySurfaces.sort((a, b) => compareCodeUnits(a.id, b.id))) {
+  const preciseEntries = (flow: NonNullable<ArtifactBundle["critical_flows"]>["flows"][number], path: string) =>
+    ordered(flow.entrypoints).map(resolveRef).filter((anchor): anchor is ReviewSourceRef => anchor !== undefined &&
+      anchor.path === path && (anchor.start_line !== undefined || anchor.symbol !== undefined));
+  // File-level discovery cannot distinguish operations that share a dispatcher
+  // or an omnibus entry module. Preserve explicit flow identities and their
+  // separate evidence when there is no more precise native registration.
+  const scopedSurfaces = entrySurfaces.flatMap(surface => {
+    const ref = resolveRef(surface.entrypoint);
+    const related = ref ? (byEntry.get(ref.path) ?? []) : [];
+    const named = related.filter(flow => !flow.notes?.includes(EXTRACTOR_HEURISTIC_NOTE));
+    if (surface.registered || !ref || sourceStatus(ref.path) !== undefined || declaredEntries.has(ref.path) || named.length < 2) {
+      return [{ surface, related, namedFlow: undefined as (typeof named)[number] | undefined }];
+    }
+    return named.map(flow => {
+      return { surface: { ...surface, id: `${surface.id}:${flow.id}` }, related: [flow], namedFlow: flow };
+    });
+  });
+  for (const { surface, related, namedFlow } of scopedSurfaces.sort((a, b) => compareCodeUnits(a.surface.id, b.surface.id))) {
     const ref = resolveRef(surface.entrypoint);
     const reason = ref ? sourceStatus(ref.path) : "The discovered surface has no unique source binding in the frozen snapshot.";
-    const related = ref ? (byEntry.get(ref.path) ?? []) : [];
-    const title = surface.registered ? surface.id : related[0]?.name ?? surface.id;
+    const title = namedFlow?.name ?? (surface.registered ? surface.id : related[0]?.name ?? surface.id);
     if (reason !== undefined || !ref) {
       const declared = !!ref && (files.has(ref.path) && dispositions.has(ref.path) || !!explicitScopeExclusion(ref.path, intent));
       const state = declared && ref && files.get(ref.path)?.hash ? "excluded" : "deferred";
@@ -261,14 +276,30 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
         edge.kind === "route-handler-link" && [ref.path, ...otherHandlers].includes(edge.to) ? [edge.from] : [])
       : [];
     const relatedPaths = [...related.flatMap((flow) => flow.paths), ...otherHandlers, ...registrationPaths, ...surface.registrationSources];
-    const refs = sourceRefs([ref.path, ...relatedPaths.filter((path) => sourceStatus(path) === undefined)]);
-    refs[refs.findIndex(({ path }) => path === ref.path)] = ref;
-    const goals = statements.filter((statement) => statement.files?.includes(ref.path) ||
-      statement.provenance.some((provenance) => resolveRef(provenance.ref)?.path === ref.path));
-    const contract = sourceRefs(goals.flatMap((goal) => goal.provenance.flatMap((provenance) => {
+    const ownEntries = namedFlow ? preciseEntries(namedFlow, ref.path) : [];
+    const start = ownEntries[0] ?? ref;
+    const refs = [...(ownEntries.length ? ownEntries : [ref]), ...sourceRefs(relatedPaths.filter(path => path !== ref.path && sourceStatus(path) === undefined))];
+    // On a shared entry file, an undifferentiated file reference cannot identify
+    // a flow's governing charter; prefer evidence unique to the scoped flow.
+    const competitors = namedFlow ? (byEntry.get(ref.path) ?? []).filter(flow => flow.id !== namedFlow.id) : [];
+    const competingPaths = new Set(competitors.flatMap(flow => flow.paths));
+    const competingEntries = competitors.flatMap(flow => preciseEntries(flow, ref.path));
+    const goalAnchors = new Set(namedFlow ? refs.map(({ path }) => path).filter(path => path !== ref.path && !competingPaths.has(path)) : [ref.path]);
+    const uniquelyBoundEntry = (anchor: ReviewSourceRef) => ownEntries.some(entry => reviewSourceRefContains(entry, anchor)) &&
+      !competingEntries.some(entry => reviewSourceRefContains(entry, anchor));
+    const goals = statements.filter((statement) => statement.files?.some(path => goalAnchors.has(path)) ||
+      statement.provenance.some((provenance) => {
+        const anchor = resolveRef(provenance.ref);
+        return anchor !== undefined && (goalAnchors.has(anchor.path) || uniquelyBoundEntry(anchor));
+      }));
+    const contractRefs = goals.flatMap((goal) => goal.provenance.flatMap((provenance) => {
       const match = resolveRef(provenance.ref);
-      return match && sourceStatus(match.path, true) === undefined ? [match.path] : [];
-    })));
+      if (!match || sourceStatus(match.path, true) !== undefined) return [];
+      if (namedFlow && match.path === ref.path) return uniquelyBoundEntry(match) ? [match] : [];
+      return [source(match.path)];
+    }));
+    const contract = [...new Map(contractRefs.map(match => [stableStringify(match), match])).values()]
+      .sort((a, b) => compareCodeUnits(locator(a), locator(b)));
     const expectation = surface.alternatives.length > 0
       ? "Resolve which registered implementation actually receives the operation and under what conditions; preserve conflicting or unresolved evidence."
       : goals.length === 1 && contract.length > 0
@@ -295,7 +326,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       provisional.set(directory, group);
       continue;
     }
-    const context = { start: ref, behavior: expectation };
+    const context = { start, behavior: expectation };
     add("behavior", op.id, "operation", op.title, refs, contract, expectation, {
       context, ...(surface.registered ? { membership: [surface.entrypoint, ...surface.alternatives] } : {}),
     });
@@ -401,6 +432,21 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
   const effective = resolveIntentLensSelection(intent?.lens_selection);
   const allowed = effective === undefined ? undefined : new Set<string>(effective);
   const excluded = intent?.lens_selection?.exclude ?? [];
+  // No detector hit is not a finding that the lens does not apply. For a
+  // specifically requested built-in, issue one discovery question, not a set
+  // of speculative per-file assignments. Reviewers retain the full scope index.
+  const discovered = new Set(subjects.map(({ lens }) => lens));
+  const discoveryAnchors = [...new Set([
+    ...operationRows.map(({ entry }) => entry), ...sourceScope.allowedSourcePaths,
+  ])].slice(0, 8).map(source);
+  for (const lens of requested ?? []) {
+    if (!isBuiltIn(lens) || discovered.has(lens) || discoveryAnchors.length === 0) continue;
+    add(lens, `lens-discovery:${lens}`, "operation", `Applicability of ${lens} across the project`, discoveryAnchors, [],
+      `The planner did not recognize a dedicated subject for this explicitly selected lens. ` +
+      `Use the starting sources and full scope index to identify and review applicable surfaces. ` +
+      `If none are established, state what you actually inspected and why; distinguish no applicable surface from missing evidence.`);
+    discovered.add(lens);
+  }
   const eligible = new Set(subjects.map(({ lens }) => lens));
   const lensDecisions: ReviewPlan["lens_decisions"] = [...BUILT_IN_REVIEW_LENSES,
     ...ordered([...subjects.map(({ lens }) => lens), ...(requested ?? []), ...excluded]

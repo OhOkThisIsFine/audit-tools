@@ -114,12 +114,14 @@ function buildQuoteOracle(
     .filter((p) => PATH_SHAPED_PROVENANCE_KINDS.has(p.kind) && p.quote !== undefined)
     .map((p, i) => ({ owner_id: `q${i}`, ref: p.ref, quote: p.quote! }));
   const result = checkCitations({ root, corpus: new Set<string>(), citations });
+  const verdictByOwner = new Map(result.checks.map((check) => [check.owner_id, check.verdict]));
   const verdictByKey = new Map<string, boolean>();
-  result.checks.forEach((check, i) => {
-    const source = citations[i];
-    if (!source) return;
-    verdictByKey.set(`${source.ref}\n${source.quote}`, check.verdict === "ok");
-  });
+  for (const source of citations) {
+    const verdict = verdictByOwner.get(source.owner_id);
+    if (verdict !== undefined) {
+      verdictByKey.set(`${source.ref}\n${source.quote}`, verdict === "ok");
+    }
+  }
   return (p) => {
     if (!PATH_SHAPED_PROVENANCE_KINDS.has(p.kind) || p.quote === undefined) return undefined;
     return verdictByKey.get(`${p.ref}\n${p.quote}`);

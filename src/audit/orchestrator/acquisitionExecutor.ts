@@ -1,3 +1,4 @@
+import { admitAnalyzerRows, analyzerManifestPathSet, analyzerPathMembership, analyzerScopeDiagnostic } from "../io/analyzerResultScope.js";
 import { isDegradedExternalAnalyzerStatus } from "../../shared/analyzers/types.js";
 // sites-pinned: tests/audit/acquisition-executor.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -199,12 +200,20 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   const { results, statuses } = await runAcquisitionEngine(runnable, root, {
     ...engineOptions, resolvedBinaries,
   });
+  const isAdmitted = analyzerPathMembership(analyzerManifestPathSet(bundle.repo_manifest));
+  const scopeOmissions = new Map<string, number>();
+  const admittedResults = results.map(report => {
+    const { admitted, omitted } = admitAnalyzerRows(report.results, isAdmitted);
+    if (omitted) scopeOmissions.set(report.tool, omitted);
+    return omitted ? { ...report, results: admitted } : report;
+  }).filter(report => report.results.length || report.graph_edges?.length || report.ownership_roots?.length);
   const candidateIds = new Set(candidates.map(candidate => candidate.id));
   const statusById = new Map<string, (typeof statuses)[number]>();
   for (const status of [...versionFailures, ...unresolvedStatuses, ...statuses]) {
     if (!candidateIds.has(status.tool)) throw new Error(`unregistered analyzer status producer: ${status.tool}`);
     if (statusById.has(status.tool)) throw new Error(`duplicate analyzer status producer: ${status.tool}`);
-    statusById.set(status.tool, status);
+    const omitted = scopeOmissions.get(status.tool);
+    statusById.set(status.tool, omitted ? { ...status, scope_omitted_rows: omitted } : status);
   }
   const orderedStatuses = candidates.map(candidate => {
     const status = statusById.get(candidate.id);
@@ -217,7 +226,7 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   });
 
   let mergedResults = bundle.external_analyzer_results;
-  for (const toolResults of results) {
+  for (const toolResults of admittedResults) {
     const prior = retrySet ? mergedResults?.find(entry => entry.tool === toolResults.tool) : undefined;
     // A calibration rerun can change the rules as well as the files scanned.
     // Current adapters can report some paths, but cannot prove that the prior
@@ -267,12 +276,13 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     ...bundle,
     external_analyzer_acquisition: marker,
   };
-  if (results.length > 0) {
+  if (admittedResults.length > 0) {
     updated.external_analyzer_results = mergedResults;
     artifactsWritten.push("external_analyzer_results.json");
   }
 
-  const findingCount = results.reduce((sum, r) => sum + r.results.length, 0);
+  const findingCount = admittedResults.reduce((sum, r) => sum + r.results.length, 0);
+  const omittedCount = [...scopeOmissions.values()].reduce((sum, omitted) => sum + omitted, 0);
   const ran = statuses.filter((s) => s.resolved).map((s) => s.tool);
   const failures = incompleteAnalyzerStatuses(updated);
   const failureSummary = failures.length === 0 ? "" :
@@ -285,6 +295,6 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     progress_summary:
       `External analyzer acquisition ran ${ran.length} tool(s)` +
       (ran.length > 0 ? ` (${ran.join(", ")})` : "") +
-      `, contributing ${findingCount} finding(s).` + failureSummary,
+      `, contributing ${findingCount} finding(s).` + analyzerScopeDiagnostic(omittedCount) + failureSummary,
   };
 }

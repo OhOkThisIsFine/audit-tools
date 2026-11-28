@@ -1,4 +1,5 @@
 import {
+  parseAnalyzerSpec,
   resolveAnalyzerDep,
   type AnalyzerSetting,
 } from "audit-tools/shared";
@@ -98,10 +99,8 @@ function makeEntry(
  *  - 0 supported in-scope files            → `not_applicable`
  *  - setting `skip`                         → `skip`
  *  - dependency resolves (repo|cache)       → `repo` | `cache`
- *  - dependency absent                      → `absent` (executor installs only
- *    for `ephemeral`/`permanent`; `auto` may prompt; `repo` falls to the
- *    floor). A Tier-S parser analyzer resolved absent is surfaced loudly on
- *    stderr — see `surfaceAbsent`.
+ *  - dependency absent: `absent` (only versioned declarations can be offered
+ *    or installed). Absent Tier-S parsers use the regex floor; see `surfaceAbsent`.
  */
 export function resolveAnalyzerPlan(
   root: string,
@@ -152,19 +151,19 @@ function surfaceAbsent(entry: AnalyzerPlanEntry): AnalyzerPlanEntry {
     return entry;
   }
   process.stderr.write(
-    `[audit-code] analyzer '${entry.id}' (${entry.dependency ?? "unknown dependency"}) is ABSENT — ` +
-      `parser-grade extraction is OFF for this audit; the weaker regex floor will run instead. ` +
-      `Install '${entry.dependency}' (and 'tree-sitter-wasms') to restore it.\n`,
+    `[audit-code] analyzer '${entry.id}' (${entry.dependency ?? "unknown dependency"}) was not found in repo or cache; ` +
+      `parser-grade extraction is unavailable without the parser runtime; the weaker regex floor is the fallback.\n`,
   );
   return entry;
 }
 
-/**
- * A plan entry whose dependency is absent and whose setting is `auto` (or unset)
- * with in-scope files — the only case that warrants proposing an install in the
- * conversation-first flow. (ephemeral/permanent install silently; repo/skip fall
- * to the floor — loudly for Tier-S, via `surfaceAbsent`.)
- */
+/** Match the installer's explicit-version prerequisite, not repo/cache lookup. */
+export function isGraphAnalyzerDependencyInstallable(dependency?: string): boolean {
+  return Boolean(dependency && parseAnalyzerSpec(dependency).version);
+}
+
+/** Only absent, versioned dependencies without a decision warrant an offer. */
 export function needsInstallDecision(entry: AnalyzerPlanEntry): boolean {
-  return entry.resolution === "absent" && entry.setting === "auto";
+  return entry.resolution === "absent" && entry.setting === "auto" &&
+    isGraphAnalyzerDependencyInstallable(entry.dependency);
 }

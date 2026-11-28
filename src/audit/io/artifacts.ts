@@ -361,6 +361,10 @@ export function getArtifactValue(
   return key ? bundle[key] : undefined;
 }
 
+function assertIntentCheckpointVersion(checkpoint: IntentCheckpoint | undefined): void {
+  throwOnSchemaVersionMismatch(checkpoint, ARTIFACT_DEFINITIONS.intent_checkpoint.fileName, "intent-checkpoint/v1");
+}
+
 export async function loadArtifactBundle(
   root: string,
   review?: { requestedTooling?: ReviewToolingTransition },
@@ -417,11 +421,7 @@ export async function loadArtifactBundle(
   // Schema-version guards (ARC-dd468422): versioned artifacts must carry the
   // exact expected schema_version or the load fails with a diagnosable error.
   // Checked after the loop so the error message can name both values.
-  throwOnSchemaVersionMismatch(
-    bundle.intent_checkpoint,
-    "intent_checkpoint.json",
-    "intent-checkpoint/v1",
-  );
+  assertIntentCheckpointVersion(bundle.intent_checkpoint);
   // charter_register is the one DISCARD-policy artifact (regenerable analysis
   // state): the v2 taxonomy rename (design resolution 4) means a v1/unstamped
   // register read under v2 semantics silently misroutes every persisted
@@ -1010,6 +1010,7 @@ async function expectedQuestionMarkdown(artifactsDir: string): Promise<string | 
       ARTIFACT_DEFINITIONS.scope.read(join(artifactsDir, ARTIFACT_DEFINITIONS.scope.fileName)),
       ARTIFACT_DEFINITIONS.intent_checkpoint.read(join(artifactsDir, ARTIFACT_DEFINITIONS.intent_checkpoint.fileName)),
     ]);
+    assertIntentCheckpointVersion(intent_checkpoint);
     if (!repo_manifest || !file_disposition || scope?.mode !== "full") return undefined;
     const source = reviewSourceScope({ repo_manifest, file_disposition, scope, intent_checkpoint });
     const fingerprints = new Map(source.allowedSourcePaths.map(path => [path, source.files.get(path)!.hash!] as const));

@@ -95,6 +95,8 @@ program
   .option("--plan-only", "Finish planning, then persist a pause before implementation")
   .description("Write and print one backend-rendered remediation step")
   .option("--verification-command <command>", "Operator-approved test command for this run; declared build/typecheck/lint checks remain")
+  // sites-pinned: tests/plan-authority.test.mjs
+  .option("--retry-final-gate", "Re-run an unchanged failed phase-boundary verification after fixing external prerequisites")
   .option("--root <path>", ROOT_OPTION_DESCRIPTION)
   .option(
     "--artifacts-dir <path>",
@@ -158,6 +160,7 @@ program
             planOnly: options.planOnly === true,
             finalizeClosing: options.finalizeClosing === true,
             verificationCommand: options.verificationCommand,
+            retryFinalGate: options.retryFinalGate === true,
             forceReplan: options.forceReplan === true,
           }),
         );

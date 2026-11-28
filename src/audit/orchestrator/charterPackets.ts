@@ -16,7 +16,6 @@
 // (`dependencySlices.ts` → `charterReadFileSlice`) derives from it, so the
 // packets and the staleness edge can never drift apart.
 
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   CharterKind,
@@ -39,6 +38,7 @@ import {
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
 import { isTestPath, normalizeExtractorPath } from "../extractors/pathPatterns.js";
+import { readBoundedFileText } from "../extractors/readFileText.js";
 import {
   extractCommentLines,
   strippedSourceLines,
@@ -181,18 +181,10 @@ export function topLevelDeclarationLines(
 // was delivered rather than what a ceiling could afford.
 //
 // The one remaining bound is a READ-SAFETY guard, never a size budget: a file
-// larger than READ_SAFETY_MAX_BYTES is not read at all, because a binary blob
+// larger than the bounded reader's default cap is skipped, because a binary blob
 // or a pathological generated file is noise rather than evidence. Such a file
 // is recorded BY NAME in the coverage manifest as `unreadable_or_oversized`
-// with its byte count. Nothing that IS read is ever cut short.
-
-/**
- * The read-safety bound: the bytes a single file may occupy before this builder
- * declines to read it at all. NOT a delivery budget — a file under it is
- * delivered WHOLE, and a file over it is omitted BY NAME with its byte count,
- * never trimmed to fit.
- */
-const READ_SAFETY_MAX_BYTES = 512 * 1024;
+// with its byte count when known. No partial read is delivered as evidence.
 
 interface ExcerptCandidate {
   evidence_class: EvidenceClass;
@@ -242,31 +234,6 @@ function lineRunsOf(lines: readonly NumberedSourceLine[]): PacketLineRun[] {
     else runs.push({ start: entry.line, end: entry.line });
   }
   return runs;
-}
-
-/**
- * The outcome of reading one candidate file. `oversized` carries the byte count
- * so the omission can state WHY, rather than leaving a reader to guess whether
- * the file was missing, binary, or simply large.
- */
-type RepoFileRead =
-  | { kind: "text"; text: string }
-  | { kind: "oversized"; bytes: number }
-  | { kind: "unreadable" };
-
-async function readRepoFile(
-  root: string,
-  path: string,
-): Promise<RepoFileRead> {
-  try {
-    const buf = await readFile(join(root, path));
-    if (buf.byteLength > READ_SAFETY_MAX_BYTES) {
-      return { kind: "oversized", bytes: buf.byteLength };
-    }
-    return { kind: "text", text: buf.toString("utf8") };
-  } catch {
-    return { kind: "unreadable" };
-  }
 }
 
 export interface MaterializeCharterPacketParams {
@@ -345,7 +312,7 @@ function note(
  * Read one named candidate, or record the read-safety omission and yield
  * nothing. The bound is on READING, not on delivering: a file this returns is
  * delivered whole, and a file it declines is named in the coverage manifest
- * with its byte count.
+ * with its byte count when known.
  */
 async function readCandidate(
   plan: PacketPlan,
@@ -353,7 +320,7 @@ async function readCandidate(
   evidenceClass: EvidenceClass,
   path: string,
 ): Promise<string | undefined> {
-  const read = await readRepoFile(root, path);
+  const read = await readBoundedFileText(join(root, path));
   if (read.kind === "text") return read.text;
   note(
     plan,

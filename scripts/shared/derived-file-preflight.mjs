@@ -475,7 +475,7 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, exclude = {}
       abstention = {
         reason:
           `the worktree CHANGED while the legs ran (${short(worktreeTreeBefore)} → ${short(worktreeTreeAfter)}), ` +
-          `so the legs judged at least two different trees and neither is the staged tree (${short(stagedTree)})`,
+          `so the preflight cannot attribute the results to one unchanged staged tree (${short(stagedTree)})`,
       };
     } else {
       abstention = {

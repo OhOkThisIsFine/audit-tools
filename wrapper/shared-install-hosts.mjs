@@ -1,6 +1,6 @@
 // sites-pinned: tests/shared/installer-host-compatibility.test.ts
-import { stat } from 'node:fs/promises';
-import { relative } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 
 export function hasFlag(argv, name) {
   return argv.includes(name);
@@ -25,6 +25,14 @@ export function requireFlagValue(argv, name) {
 
 export function normalizeNewlines(value) {
   return value.replace(/\r\n/g, '\n');
+}
+
+export async function legacySkillOwnershipMatcher(toolName) {
+  const source = await readFile(join(import.meta.dirname, '..', 'skills', toolName, 'SKILL.md'), 'utf8');
+  const expected = normalizeNewlines(source);
+  // A name or stock phrase can survive user edits; only the complete shipped
+  // skill is evidence that this legacy file is safe to clean up.
+  return (content) => normalizeNewlines(content) === expected;
 }
 
 export function splitFrontmatter(markdown) {
