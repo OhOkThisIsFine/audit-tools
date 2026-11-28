@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import YAML from "yaml";
 import { catalogCommands } from "../scripts/shared/verify-steps.mjs";
 import { DOC_MANIFEST } from "../scripts/doc-manifest-data.mjs";
-import { PINS, legCommand } from "../scripts/shared/derived-file-preflight.mjs";
+import { PINS, legCommand, runDerivedFilePreflight } from "../scripts/shared/derived-file-preflight.mjs";
 import {
   assessPreparedRemoteTag,
   assertPreparedReleaseMode,
@@ -43,6 +45,48 @@ test("staged release metadata has a build-free witness and rejects stray runner 
   const result = spawnSync(process.execPath, ["scripts/shared/run-contract-tests.mjs", "untrusted-filter"], {cwd:root, encoding:"utf8", windowsHide:true});
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /does not support filters/);
+});
+
+test("a preflight that starts on the staged tree keeps failed legs advisory if the worktree changes", t => {
+  const fixture = mkdtempSync(join(tmpdir(), "preflight-wording-"));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const git = (...args) => {
+    const result = spawnSync("git", args, { cwd: fixture, encoding: "utf8", windowsHide: true });
+    assert.equal(result.status, 0, result.stderr || String(result.error));
+    return result.stdout.trim();
+  };
+  git("init", "--quiet");
+  const subject = "scripts/synthetic-leg.mjs";
+  const leg = "check:doc-manifest";
+  mkdirSync(join(fixture, "scripts"));
+  writeFileSync(join(fixture, "package.json"), JSON.stringify({ scripts: { [leg]: `node ${subject}` } }));
+  writeFileSync(join(fixture, "tracked.txt"), "baseline\n");
+  git("add", "package.json", "tracked.txt");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "baseline");
+  for (const changed of [false, true]) {
+    writeFileSync(join(fixture, subject), (
+      changed ? 'import { writeFileSync } from "node:fs";\nwriteFileSync("tracked.txt", "changed\\n");\n' : ""
+    ) + 'console.error("synthetic leg failure");\nprocess.exit(1);\n');
+    writeFileSync(join(fixture, "tracked.txt"), "staged\n");
+    git("add", subject, "tracked.txt");
+    const stagedTree = git("write-tree");
+    const result = runDerivedFilePreflight({ root: fixture, staged: [subject, "tracked.txt"], stagedTree });
+    assert.equal(result.worktreeTreeBefore, stagedTree);
+    if (changed) {
+      assert.notEqual(result.worktreeTreeAfter, stagedTree);
+      assert.equal(result.attributable, false);
+      assert.match(result.abstention.reason, /worktree CHANGED.*cannot attribute the results to one unchanged staged tree/);
+      assert.deepEqual(result.failures, []);
+      assert.deepEqual(result.unattributed.map(({ script, outcome }) => ({ script, outcome })), [{ script: leg, outcome: "failed" }]);
+      assert.match(result.unattributed[0].tail, /synthetic leg failure/);
+    } else {
+      assert.equal(result.worktreeTreeAfter, stagedTree);
+      assert.equal(result.attributable, true);
+      assert.equal(result.abstention, null);
+      assert.deepEqual(result.failures.map(({ script }) => script), [leg]);
+      assert.deepEqual(result.unattributed, []);
+    }
+  }
 });
 
 test("prepared release requires exact successful default pushes from both canonical workflows", () => {
