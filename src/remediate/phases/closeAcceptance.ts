@@ -50,10 +50,19 @@ const DEFAULT_NPM_SETTINGS = [
 async function npmExecutionContext(root: string): Promise<string | undefined> {
   try {
     const env = Object.entries(process.env).sort(([a], [b]) => a.localeCompare(b));
-    if (env.some(([name, value]) => value && /^(node_(options|path)|npm_config_prefix)$/i.test(name))) return;
+    if (env.some(([name, value]) => value && /^node_(options|path)$/i.test(name))) return;
     const keys = DEFAULT_NPM_SETTINGS.map(([key]) => key);
-    const result = await runTrackedAsync(["npm", "config", "get", ...keys], { cwd: root, timeout: 10_000 });
-    if (result.status !== 0 || result.error || result.signal) return;
+    // npm scripts themselves export npm_config_prefix. Verify npm's effective
+    // *project* root rather than treating that inherited global prefix as an override.
+    const opts = { cwd: root, timeout: 10_000 };
+    const [result, prefix] = await Promise.all([
+      runTrackedAsync(["npm", "config", "get", ...keys], opts),
+      runTrackedAsync(["npm", "prefix"], opts),
+    ]);
+    if (result.status !== 0 || result.error || result.signal ||
+        prefix.status !== 0 || prefix.error || prefix.signal ||
+        !isAbsolute(prefix.stdout.trim()) ||
+        await realpath(prefix.stdout.trim()) !== await realpath(root)) return;
     const expected = DEFAULT_NPM_SETTINGS.map(([key, value]) => `${key}=${value}`).join("\n");
     if (result.stdout.trim().replaceAll("\r\n", "\n") !== expected) return;
     return createHash("sha256").update(JSON.stringify([env, expected])).digest("hex");

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -10,8 +9,17 @@ const checkout = resolve(process.env.AUDIT_TOOLS_TRIAL_CHECKOUT ?? process.cwd()
 const load = file => import(pathToFileURL(join(checkout, "dist", file)).href);
 
 async function closeFixture(t, changes = {}) {
-  const root = await mkdtemp(join(await realpath(tmpdir()), "close-suite-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  // The owned spawn redacts the Windows sandbox tmpdir's identifier from
+  // captured stdout. Keep the test checkout in an ignored, stable path so
+  // npm prefix can prove the actual project root without bypassing redaction.
+  const fixtures = join(await realpath(checkout), ".audit-tools", "close-suite-fixtures");
+  await mkdir(fixtures, { recursive: true });
+  const parent = await realpath(fixtures);
+  const root = await mkdtemp(join(parent, "close-suite-"));
+  t.after(async () => {
+    assert.equal(await realpath(root), root);
+    await rm(root, { recursive: true, force: true });
+  });
   const artifactsDir = join(root, ".audit-tools", "remediation-custom");
   const options = { root, artifactsDir };
   const { executionPlanPaths, ingestExecutionPlan, readCanonicalPlan, readExecutionIntent } = await load("remediate/contractPipeline/executionPlan.js");
@@ -36,6 +44,14 @@ async function closeFixture(t, changes = {}) {
   };
   const log = (label) => `import { appendFileSync } from "node:fs"; appendFileSync(".git/fixture-trace", ${JSON.stringify(label + "\n")});`;
   if (changes.noAdvisory) delete scripts["verify:guards"];
+  if (changes.inheritPrefix) {
+    const oldPrefix = process.env.npm_config_prefix;
+    process.env.npm_config_prefix = oldPrefix ?? checkout;
+    t.after(() => {
+      if (oldPrefix === undefined) delete process.env.npm_config_prefix;
+      else process.env.npm_config_prefix = oldPrefix;
+    });
+  }
   if (changes.globalIgnoreScripts) {
     const oldGlobal = process.env.npm_config_globalconfig;
     const globalConfig = join(root, "global.npmrc");
@@ -53,7 +69,7 @@ async function closeFixture(t, changes = {}) {
   await writeFile(join(root, "scripts/shared/guard-no-suite-running.mjs"), log("prebuild"));
   await writeFile(join(root, "scripts/shared/clean-dist.mjs"),
     `${log("build")} import { mkdirSync, writeFileSync } from "node:fs"; mkdirSync("dist",{recursive:true}); writeFileSync("dist/built.js","start");`);
-  const leaf = `import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"; const raw = process.argv.slice(2); const label = raw[0] === "--check" ? "check:tests" : "suite:" + (process.env.npm_lifecycle_event ?? "node") + ":" + readFileSync("dist/built.js", "utf8"); appendFileSync(".git/fixture-trace", label + "\\n"); if(raw[0] !== "--check") { mkdirSync(".claude/hooks/.state/suite-green",{recursive:true}); writeFileSync(".claude/hooks/.state/suite-green/latest.json","fixture"); if(${Boolean(changes.leafMutates)}) writeFileSync("dist/built.js","changed in suite"); if(${Boolean(changes.red)}) process.exitCode=1; }`;
+  const leaf = `import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"; import {resolve} from "node:path"; const raw = process.argv.slice(2); const label = raw[0] === "--check" ? "check:tests" : "suite:" + (process.env.npm_lifecycle_event === "test:built" && resolve(process.env.npm_package_json ?? "") === resolve("package.json") ? "test:built" : "node") + ":" + readFileSync("dist/built.js", "utf8"); appendFileSync(".git/fixture-trace", label + "\\n"); if(raw[0] !== "--check") { mkdirSync(".claude/hooks/.state/suite-green",{recursive:true}); writeFileSync(".claude/hooks/.state/suite-green/latest.json","fixture"); if(${Boolean(changes.leafMutates)}) writeFileSync("dist/built.js","changed in suite"); if(${Boolean(changes.red)}) process.exitCode=1; }`;
   await writeFile(join(root,"scripts/shared/run-contract-tests.mjs"), leaf);
   await writeFile(join(root,"scripts/check-invariant-glossary.mjs"), `${log("glossary")} ${changes.mutate ? 'import {writeFileSync} from "node:fs"; writeFileSync("dist/built.js","changed");' : changes.mutateDependency ? 'import {writeFileSync} from "node:fs"; writeFileSync("node_modules/fixture-runtime.mjs","changed");' : ""}`);
   await writeFile(join(root,"scripts/hook.mjs"),log("hook"));
@@ -140,6 +156,12 @@ test("the native default close observes one npm-context suite after guarded buil
   assert.match(report, /Combined evidence: guarded build and terminal `npm run test:built` from the final floor/);
   assert.match(report, /Landing Gates \(advisory\)/);
   assert.match(report, /Reused observation from final floor: npm run test:built; wrapper not rerun/);
+});
+
+test("an inherited npm prefix does not redirect the verified project root", async t => {
+  const {trace, report} = await closeFixture(t,{inheritPrefix:true});
+  assert.deepEqual(trace, ["prebuild","build","check","check:tests","suite:test:built:start","glossary"]);
+  assert.match(report, /Reused observation from final floor/);
 });
 
 test("a preceding check changes ignored build output, so the advisory guard runs independently", async t => {
