@@ -1,6 +1,6 @@
 // sites-pinned: tests/shared/analyzer-acquisition-engine.test.ts, tests/shared/analyzer-pipx-contract.test.ts, tests/audit/analyzer-run-consent.test.ts
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { accessSync, chmodSync, constants, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { hashContent } from "../hash.js";
 import {
@@ -117,6 +117,8 @@ export interface AnalyzerSafetyProfile {
 export interface AnalyzerInvocationContext {
   /** Allocated once by the engine, inside this invocation's private directory. */
   readonly reportPath?: string;
+  /** Local rules override supported by Semgrep only. */
+  readonly localRules?: string;
   /** Root-relative POSIX paths from the candidate's {@link ExternalAnalyzerCandidate.discoverInputs}. */
   readonly inputs?: readonly string[];
 }
@@ -337,9 +339,18 @@ export interface AnalyzerConsentTokenGrant {
   readonly value: string;
   /** The candidate ids this grant authorizes, and only those. */
   readonly tools: readonly string[];
+  /** Granted for existing execution only, not package/release acquisition. */
+  readonly existingOnlyTools?: readonly string[];
+}
+
+export interface ExistingAnalyzerRuntime {
+  executable: string;
+  localRules?: string;
 }
 
 export interface AcquisitionEngineOptions {
+  /** Explicit candidate-specific installed runtime, never an acquisition fallback. */
+  existingRuntimes?: Readonly<Record<string, ExistingAnalyzerRuntime>>;
   /** Invocation-scoped detection/admission decisions, shared with budget counting. */
   admissions?: ReadonlyMap<string, string | null>;
   /**
@@ -569,6 +580,47 @@ function emptyResults(tool: string): ExternalAnalyzerResults {
   return { tool, generated_at: new Date().toISOString(), results: [] };
 }
 
+export function existingRuntimeRequired(candidate: ExternalAnalyzerCandidate, options: AcquisitionEngineOptions): boolean {
+  return options.consentToken?.existingOnlyTools?.includes(candidate.id) === true;
+}
+
+function canonicalLocalPath(input: string): string {
+  const local = (value: string) => isAbsolute(value) && !/^[\\/]{2}/u.test(value) &&
+    !/[\u0000-\u001F]/u.test(value) &&
+    (process.platform !== "win32" || /^[a-z]:[\\/][^:]*$/iu.test(value));
+  if (!local(input)) throw new Error("expected an absolute local path");
+  const resolved = realpathSync(input);
+  if (!local(resolved)) throw new Error("path does not resolve locally");
+  return resolved;
+}
+
+function existingRuntimePaths(candidate: ExternalAnalyzerCandidate, root: string, runtime: ExistingAnalyzerRuntime) {
+  if (candidate.runner === "cargo") throw new Error("this analyzer requires its cargo subcommand");
+  const name = candidate.binary?.binaryName ?? candidate.bin ?? candidate.id;
+  const file = basename(runtime.executable);
+  const named = process.platform === "win32" ? file.toLowerCase() === name.toLowerCase() + ".exe" : file === name;
+  if (!named) throw new Error("expected the analyzer's own native executable name");
+  const executable = canonicalLocalPath(runtime.executable);
+  if (!statSync(executable).isFile() ||
+      (process.platform === "win32" && basename(executable).toLowerCase() !== name.toLowerCase() + ".exe")) {
+    throw new Error("not a directly executable file");
+  }
+  const location = relative(realpathSync(root), executable);
+  if (!isAbsolute(location) && location !== ".." && !location.startsWith(".." + sep)) {
+    throw new Error("analyzer executable is inside the frozen source");
+  }
+  accessSync(executable, constants.X_OK);
+
+  if (runtime.localRules === undefined) return { executable };
+  if (candidate.id !== "semgrep") throw new Error("local rules override is only supported for Semgrep");
+  const localRules = canonicalLocalPath(runtime.localRules);
+  const rules = statSync(localRules);
+  if (!rules.isDirectory() && !(rules.isFile() && /\.ya?ml$/iu.test(localRules))) {
+    throw new Error("local rules must be a YAML file or directory");
+  }
+  return { executable, localRules };
+}
+
 function settingFor(
   analyzers: Record<string, AnalyzerSetting> | undefined,
   id: string,
@@ -667,12 +719,46 @@ export async function runExternalAnalyzer(
   const beforeProbe = expiredOutcome();
   if (beforeProbe) return beforeProbe;
 
-  // Resolve the argv prefix. A `binary` candidate is gated by binary-acquisition
-  // (PATH probe / checksum-verified download) AHEAD of the engine, so it skips the
-  // runner probe and uses its resolved executable path; everything else passes the
-  // capability-probe run-safety gate before its first real spawn.
+  // An explicit local executable takes precedence without an acquisition fallback.
+  // Otherwise binary candidates arrive resolved; ecosystem launchers need their
+  // capability probe before the first real spawn.
   let prefix: string[];
-  if (candidate.runner === "binary") {
+  let localRules: string | undefined;
+  let existingVersion: string | undefined;
+  const runtime = options.existingRuntimes?.[candidate.id];
+  const resolutionFailure = (error: string): AcquisitionOutcome => ({
+    results: emptyResults(candidate.id),
+    status: { tool: candidate.id, resolved: false, status: "not_resolved", stage: "resolve", error },
+  });
+  if (runtime) {
+    if (candidate.id === "semgrep" && existingRuntimeRequired(candidate, options) && !runtime.localRules) {
+      return resolutionFailure("Run-only Semgrep requires approved local rules; registry rules were not requested.");
+    }
+    try {
+      const resolved = existingRuntimePaths(candidate, root, runtime);
+      const versionProbe = await run([resolved.executable, ...(candidate.binary?.versionProbeArgs.slice(1) ?? ["--version"])], root,
+        resolveSpawnDeadline(deadline, ANALYZER_CHILD_DEADLINE_MS));
+      const afterProbe = expiredOutcome();
+      if (afterProbe) return afterProbe;
+      const output = (versionProbe.stdout + "\n" + versionProbe.stderr).slice(0, 4096);
+      const version = candidate.binary?.parseVersion
+        ? candidate.binary.parseVersion(output.trim())
+        : /\bv?(\d+\.\d+(?:\.\d+)+(?:[-+][a-z0-9.-]+)?)(?![.\d])/iu.exec(output)?.[1];
+      if (versionProbe.error || versionProbe.status !== 0 || !version) {
+        return resolutionFailure("Existing executable version check failed: " +
+          (versionProbe.error?.message ?? (versionProbe.status === 0 ? "no recognizable version" : "exit " + versionProbe.status)) +
+          (versionProbe.stderr.trim() ? "; " + versionProbe.stderr.trim().slice(0, 300) : ""));
+      }
+      prefix = [resolved.executable];
+      localRules = resolved.localRules;
+      existingVersion = version;
+    } catch (error) {
+      return resolutionFailure("Existing executable could not be resolved: " +
+        (error instanceof Error ? error.message : String(error)));
+    }
+  } else if (existingRuntimeRequired(candidate, options)) {
+    return resolutionFailure("Run-only consent requires an explicit existing executable; acquisition was not attempted.");
+  } else if (candidate.runner === "binary") {
     const resolved = options.resolvedBinaries?.[candidate.id];
     if (!resolved) {
       log("[f5] %s binary not acquired", candidate.id);
@@ -713,12 +799,14 @@ export async function runExternalAnalyzer(
           resolved: true,
           status: "failed",
           error: `input discovery failed: ${discovered.reason}`,
+          ...(existingVersion ? { version: existingVersion } : {}),
           duration_ms: 0,
         },
       };
     }
     inputs = discovered.paths;
   }
+  const acquireLockedPackage = !runtime && candidate.npmLock;
   let ownedDirectory: string | undefined;
   let reportPath: string | undefined;
   let outcome: AcquisitionOutcome | undefined;
@@ -730,10 +818,10 @@ export async function runExternalAnalyzer(
     }
   };
   try {
-    if (candidate.npmLock || candidate.managedReport) {
+    if (acquireLockedPackage || candidate.managedReport) {
       // mkdtemp creates an exclusive directory; never alter the process umask.
       // Windows uses the temp location's inherited ACL; POSIX mode is verified.
-      ownedDirectory = mkdtempSync(join(tmpdir(), candidate.npmLock ? "audit-tools-tool-" : "audit-tools-report-"));
+      ownedDirectory = mkdtempSync(join(tmpdir(), acquireLockedPackage ? "audit-tools-tool-" : "audit-tools-report-"));
       if (process.platform !== "win32") {
         chmodSync(ownedDirectory, 0o700);
         if ((statSync(ownedDirectory).mode & 0o777) !== 0o700) {
@@ -742,8 +830,8 @@ export async function runExternalAnalyzer(
       }
       if (candidate.managedReport) reportPath = join(ownedDirectory, "report.json");
     }
-    if (candidate.npmLock && ownedDirectory) {
-      const { lock, entrypoint } = candidate.npmLock;
+    if (acquireLockedPackage && ownedDirectory) {
+      const { lock, entrypoint } = acquireLockedPackage;
       const dependencies = lock.packages[""].dependencies;
       writeFileSync(join(ownedDirectory, "package.json"), JSON.stringify({ private: true, dependencies }));
       writeFileSync(join(ownedDirectory, "package-lock.json"), JSON.stringify(lock));
@@ -769,7 +857,7 @@ export async function runExternalAnalyzer(
       }
       prefix = [process.execPath, join(ownedDirectory, entrypoint)];
     }
-    const context: AnalyzerInvocationContext = { reportPath, inputs };
+    const context: AnalyzerInvocationContext = { reportPath, inputs, localRules };
     const invoke = async (): Promise<AcquisitionOutcome> => {
       const argv = candidate.buildArgv(prefix, root, context);
       const afterArgv = expiredOutcome();
@@ -784,7 +872,7 @@ export async function runExternalAnalyzer(
             paths: new Set(paths),
             completedFindingsExit: observed.completedFindingsExit,
             fingerprint: hashContent(JSON.stringify([
-              candidate.id, candidate.runner, candidate.spec, observed.configurationFingerprint, paths,
+              candidate.id, candidate.runner, existingVersion ?? candidate.spec, observed.configurationFingerprint, paths,
             ])),
           };
         } catch {
@@ -1020,11 +1108,12 @@ export async function runExternalAnalyzer(
     } catch {
       // Do not replace the original diagnostic or expose filesystem error text.
       if (outcome) {
-        outcome.status.error = [outcome.status.error, candidate.npmLock ? "analyzer tool cleanup failed" : "analyzer report cleanup failed"].filter(Boolean).join("; ");
+        outcome.status.error = [outcome.status.error, acquireLockedPackage ? "analyzer tool cleanup failed" : "analyzer report cleanup failed"].filter(Boolean).join("; ");
         if (outcome.status.status === "success") outcome.status.status = "failed";
       }
     }
   }
+  if (existingVersion) outcome!.status.version = existingVersion;
   return outcome!;
 }
 
@@ -1093,7 +1182,7 @@ export async function resolveBinaryCandidates(
   const resolvedBinaries: Record<string, string> = {};
   const unresolvedStatuses: ExternalAnalyzerToolStatus[] = [];
   for (const candidate of prepared.candidates) {
-    if (candidate.runner !== "binary") continue;
+    if (candidate.runner !== "binary" || options.existingRuntimes?.[candidate.id] || existingRuntimeRequired(candidate, options)) continue;
     const denied = admissionReason(candidate, root, options);
     if (denied) {
       unresolvedStatuses.push({ tool: candidate.id, resolved: false, status: "skipped", error: denied });

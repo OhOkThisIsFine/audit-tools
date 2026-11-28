@@ -291,7 +291,7 @@ const semgrepCandidate: ExternalAnalyzerCandidate = {
   // CONSENT-GATED: pulls rule sets from network and is heavier; only runs with a consent token.
   defaultRun: false,
   detect: (root) => detectPythonEcosystem(root) || detectNodeEcosystem(root),
-  buildArgv: (prefix, root) => [...prefix, "--json", "--quiet", "--metrics=off", "--disable-version-check", "--config", "p/default", root],
+  buildArgv: (prefix, root, context) => [...prefix, "--json", "--quiet", "--metrics=off", "--disable-version-check", "--config", context?.localRules ?? "p/default", root],
   diagnosticSnippets: false,
   parse: parseSemgrep,
 };

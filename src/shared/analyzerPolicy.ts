@@ -25,7 +25,7 @@ const ANALYZER_POLICY_LOCK_RELATIVE_PATH =
   ".audit-tools/audit/analyzer-policy.lock" as const;
 
 /** A current-run decline used by the shared admission boundary. Never standing consent. */
-export const AnalyzerConsentDecisionSchema = AnalyzerRunConsentDecisionSchema.exclude(["granted"]);
+export const AnalyzerConsentDecisionSchema = AnalyzerRunConsentDecisionSchema.exclude(["granted", "granted_existing"]);
 export type AnalyzerConsentDecision = z.infer<
   typeof AnalyzerConsentDecisionSchema
 >;

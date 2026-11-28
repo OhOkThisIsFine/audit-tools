@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { readOptionalJsonFile, writeJsonFile } from "./io/json.js";
 
-export const AnalyzerRunConsentDecisionSchema = z.enum(["granted", "declined"]);
+export const AnalyzerRunConsentDecisionSchema = z.enum(["granted", "granted_existing", "declined"]);
 export type AnalyzerRunConsentDecision = z.infer<typeof AnalyzerRunConsentDecisionSchema>;
 
 const RunConsentSchema = z.object({

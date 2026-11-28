@@ -1259,6 +1259,8 @@ export {
   runExternalAnalyzer,
   registerExternalAnalyzers,
   runAcquisitionEngine,
+  existingRuntimeRequired,
+  type ExistingAnalyzerRuntime,
   prepareAcquisition,
   resolveBinaryCandidates,
   detectNodeEcosystem,
