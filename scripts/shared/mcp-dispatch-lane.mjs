@@ -34,19 +34,11 @@
 // OpenCode enforces none on the task itself; the bridge clamps a single
 // `opencode_wait` to at most 45 seconds (agent-dispatch src/bridge/proxy.ts
 // MAX_WAIT_SECONDS). This module owns the ceiling: it polls `opencode_wait`
-// with whatever time is left (never more than 45s per call), and on ITS OWN
-// `timeoutMs` deadline it calls `opencode_job_cancel` and RETURNS rather than
-// throwing — a throw is exactly what `lane-dispatch.mjs` retries once, and a
-// timeout must never run the same call twice. The RETURN is usually a
-// non-completed result (status `timed_out`, naming the job and the elapsed
-// time), but not always: upstream `JobService.cancel()` returns the terminal
-// snapshot UNCHANGED when the job already finished between the last wait and
-// the cancel call, so a completed/failed answer that lands exactly there is
-// returned as-is — never discarded and relabeled `timed_out`. A wait that
-// comes back non-terminal WITHOUT using its full time budget (e.g. a
-// transient worker-read fault reporting `unknown` at once — opencode-mcp dist/
-// tools/workflow.js waitForSnapshot()'s catch path) is retried after upstream
-// opencode_wait's own default poll interval (2000 ms), not in a tight loop.
+// with whatever time is left (never more than 45s per call). Initialization,
+// fire and wait share the caller's deadline. A known job can get one bounded
+// cancel after that deadline; only a terminal snapshot proves it is safe to
+// release its checkout. Once fire may have been written, losing the reply is
+// an unknown execution outcome, not a retryable transport failure.
 //
 // TERMINAL STATUSES. `completed`, `failed`, and `cancelled` are returned as
 // terminal. `input_required` cannot happen for the `answer` agent (mode
@@ -97,12 +89,11 @@
 // (the checkout `C:/Code/audit-tools` maps to `C:/Code-worktrees/audit-tools/
 // ...`; `<repo>` is the MAIN checkout's name even when the caller sits in a
 // linked worktree), points the job at the same subdirectory inside it, and
-// removes it in a `finally` — on success, on a failed job, on a timeout and on
-// a thrown transport death. It refuses a worktree path inside any repository:
-// a nested worktree breaks test discovery for the outer one. A process killed
-// mid-dispatch never reaches its `finally`, so every repository-reading
-// dispatch first sweeps its repo's `dispatch-lane-<pid>-*` worktrees whose pid
-// is no longer alive. Consequences: the lane reads COMMITTED HEAD, never the
+// removes it only when no fire was sent or a terminal job is confirmed.
+// Before fire it locks the worktree with Git, so a later stale sweep cannot
+// remove it if this process exits without confirming the outcome.
+// A nested worktree is refused because it breaks outer test discovery.
+// Consequences: the lane reads COMMITTED HEAD, never the
 // caller's uncommitted edits, and its own writes are discarded; the caller's
 // HEAD, index, branches and status are untouched (`--detach` creates no
 // branch). The `answer` agent (every tool denied) and a directory outside git
@@ -110,7 +101,7 @@
 // checkout.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { processAlive } from './primitives.mjs';
 import { resolveSpawn } from './spawn-shell.mjs';
@@ -131,6 +122,9 @@ const WAIT_RETRY_MS = 2_000;
 
 /** How long `close()` gives the bridge to exit on stdin end before killing it. */
 const CLOSE_GRACE_MS = 5_000;
+const CANCEL_GRACE_MS = 1_500;
+const WORKTREE_CLEANUP_MS = 1_000;
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /** Statuses a poll stops on: an answer or an error exists, or input is needed. */
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'input_required']);
@@ -145,6 +139,27 @@ export class DispatchLaneError extends Error {
     super(message, details.cause === undefined ? undefined : { cause: details.cause });
     this.name = 'DispatchLaneError';
   }
+}
+
+class DispatchDeadlineError extends DispatchLaneError {
+  constructor(operation) {
+    super('agent-dispatch deadline exceeded during ' + operation);
+    this.name = 'DispatchDeadlineError';
+  }
+}
+
+// Avoid Node's overflow-to-1ms behavior for large deadlines.
+function deadlineTimer(deadline, expire) {
+  let timer;
+  function arm() {
+    const left = deadline - performance.now();
+    timer = setTimeout(
+      () => performance.now() < deadline ? arm() : expire(),
+      Math.min(MAX_TIMER_MS, Math.max(1, Math.ceil(left))),
+    );
+  }
+  arm();
+  return () => clearTimeout(timer);
 }
 
 /**
@@ -243,14 +258,21 @@ const LANE_WORKTREE_NAME = /^dispatch-lane-(\d+)-[0-9a-f]+$/;
  *
  * @param {string[]} args
  * @param {string} cwd
+ * @param {number} [timeout]
  */
-function git(args, cwd) {
-  return spawnSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+function git(args, cwd, timeout) {
+  return spawnSync('git', args, {
+    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout, killSignal: 'SIGKILL',
+  });
 }
 
-/** @param {string[]} args @param {string} cwd */
-function gitOrThrow(args, cwd) {
-  const r = git(args, cwd);
+const timeLeft = (deadline) => Math.max(0, Math.min(MAX_TIMER_MS, Math.ceil(deadline - performance.now())));
+
+/** @param {string[]} args @param {string} cwd @param {number} [deadline] */
+function gitOrThrow(args, cwd, deadline = Infinity) {
+  const timeout = Number.isFinite(deadline) ? timeLeft(deadline) : undefined;
+  if (timeout === 0) throw new DispatchDeadlineError('worktree setup');
+  const r = git(args, cwd, timeout);
   if (r.status !== 0) {
     throw new DispatchLaneError(
       `git ${args.join(' ')} failed in ${cwd} (${r.error?.message ?? `exit ${r.status}`}): ${(r.stderr ?? '').trim()}`,
@@ -264,17 +286,21 @@ function gitOrThrow(args, cwd) {
  * not exist).
  *
  * @param {string} directory
+ * @param {number} deadline
  * @returns {{ mainTop: string, prefix: string, head: string } | null}
  */
-function repositoryOf(directory) {
+function repositoryOf(directory, deadline) {
   if (!existsSync(directory)) return null;
-  const probe = git(['rev-parse', '--is-inside-work-tree'], directory);
+  const timeout = timeLeft(deadline);
+  if (!timeout) throw new DispatchDeadlineError('worktree setup');
+  const probe = git(['rev-parse', '--is-inside-work-tree'], directory, timeout);
+  if (probe.error) throw new DispatchLaneError('could not inspect the lane workspace: ' + probe.error.message);
   if (probe.status !== 0 || probe.stdout.trim() !== 'true') return null;
   const [commonDir, prefix] = gitOrThrow(
     ['rev-parse', '--path-format=absolute', '--git-common-dir', '--show-prefix'],
-    directory,
+    directory, deadline,
   ).split(/\r?\n/);
-  return { mainTop: dirname(resolve(commonDir)), prefix: prefix ?? '', head: gitOrThrow(['rev-parse', 'HEAD'], directory) };
+  return { mainTop: dirname(resolve(commonDir)), prefix: prefix ?? '', head: gitOrThrow(['rev-parse', 'HEAD'], directory, deadline) };
 }
 
 /**
@@ -307,10 +333,26 @@ function enclosingRepository(path) {
  * @param {string} mainTop
  * @param {string} path
  */
-function removeLaneWorktree(mainTop, path) {
-  git(['worktree', 'remove', '--force', path], mainTop);
-  rmSync(path, { recursive: true, force: true });
-  git(['worktree', 'prune'], mainTop);
+function removeLaneWorktree(mainTop, path, deadline = performance.now() + WORKTREE_CLEANUP_MS, release = false) {
+  // Only a helper-owned path under this repository's worktree container
+  // can reach git removal or the recursive fallback.
+  path = resolve(path);
+  if (dirname(path) !== resolve(laneWorktreeContainer(mainTop)) || !LANE_WORKTREE_NAME.test(basename(path))) return;
+  const clean = (args) => {
+    const timeout = timeLeft(deadline);
+    return timeout ? git(args, mainTop, timeout) : undefined;
+  };
+  if (release) clean(['worktree', 'unlock', path]);
+  const removed = clean(['worktree', 'remove', '--force', path]);
+  // A half-created worktree can be missing from Git's registry. Keep the
+  // fallback bounded too; cleanup failure must not replay a confirmed job.
+  const timeout = timeLeft(deadline);
+  if (removed?.status !== 0 && timeout && existsSync(path)) {
+    spawnSync(process.execPath, [
+      '-e', 'require("node:fs").rmSync(process.argv[1], {recursive: true, force: true})', path,
+    ], { timeout, killSignal: 'SIGKILL', stdio: 'ignore', windowsHide: true });
+  }
+  clean(['worktree', 'prune']);
 }
 
 /**
@@ -320,11 +362,29 @@ function removeLaneWorktree(mainTop, path) {
  * @param {string} mainTop
  * @param {string} container
  */
-export function sweepStaleLaneWorktrees(mainTop, container) {
+export function sweepStaleLaneWorktrees(mainTop, container, deadline = performance.now() + WORKTREE_CLEANUP_MS) {
   if (!existsSync(container)) return;
-  for (const name of readdirSync(container)) {
+  const stale = readdirSync(container).filter((name) => {
     const owner = LANE_WORKTREE_NAME.exec(name);
-    if (owner && !processAlive(Number(owner[1]))) removeLaneWorktree(mainTop, join(container, name));
+    return owner && !processAlive(Number(owner[1]));
+  });
+  if (!stale.length) return;
+  // If Git cannot tell us which worktrees are protected, do not sweep.
+  const timeout = timeLeft(deadline);
+  if (!timeout) return;
+  const listed = git(['worktree', 'list', '--porcelain', '-z'], mainTop, timeout);
+  if (listed.status !== 0) return;
+  const locked = new Set();
+  const pathKey = (path) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
+  let path;
+  for (const entry of listed.stdout.split('\0')) {
+    if (entry.startsWith('worktree ')) path = pathKey(entry.slice('worktree '.length));
+    else if (path && (entry === 'locked' || entry.startsWith('locked '))) locked.add(path);
+  }
+  for (const name of stale) {
+    if (performance.now() >= deadline) break;
+    const path = resolve(container, name);
+    if (!locked.has(pathKey(path))) removeLaneWorktree(mainTop, path, deadline);
   }
 }
 
@@ -333,10 +393,11 @@ export function sweepStaleLaneWorktrees(mainTop, container) {
  * is in no repository: nothing there is a checkout to protect.
  *
  * @param {string} directory
- * @returns {{ directory: string, remove: () => void } | null}
+ * @param {number} deadline
+ * @returns {{ path: string, directory: string, protect: () => void, remove: () => void } | null}
  */
-function openLaneWorktree(directory) {
-  const repo = repositoryOf(directory);
+function openLaneWorktree(directory, deadline) {
+  const repo = repositoryOf(directory, deadline);
   if (repo === null) return null;
   const container = laneWorktreeContainer(repo.mainTop);
   const nesting = enclosingRepository(container);
@@ -346,18 +407,23 @@ function openLaneWorktree(directory) {
         `worktree breaks that repository's test discovery.`,
     );
   }
-  sweepStaleLaneWorktrees(repo.mainTop, container);
+  sweepStaleLaneWorktrees(repo.mainTop, container, Math.min(deadline, performance.now() + WORKTREE_CLEANUP_MS));
   const path = join(container, `dispatch-lane-${process.pid}-${randomBytes(4).toString('hex')}`);
   try {
-    gitOrThrow(['worktree', 'add', '--detach', path, repo.head], repo.mainTop);
+    gitOrThrow(['worktree', 'add', '--detach', path, repo.head], repo.mainTop, deadline);
   } catch (err) {
     removeLaneWorktree(repo.mainTop, path);
     throw err;
   }
   const inside = join(path, repo.prefix);
   return {
+    path,
     directory: existsSync(inside) ? inside : path,
-    remove: () => removeLaneWorktree(repo.mainTop, path),
+    protect: () => gitOrThrow(
+      ['worktree', 'lock', '--reason', 'agent-dispatch execution may still use this checkout', path],
+      repo.mainTop, deadline,
+    ),
+    remove: () => removeLaneWorktree(repo.mainTop, path, undefined, true),
   };
 }
 
@@ -379,7 +445,8 @@ function startBridge({ command, args, cwd, spawnImpl, protocolVersion, onStderr 
   let nextId = 1;
   let buffer = '';
   /** @type {string | null} */
-  let exited = null;
+  let transportError = null;
+  let childEnded = false;
 
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk) => {
@@ -405,13 +472,19 @@ function startBridge({ command, args, cwd, spawnImpl, protocolVersion, onStderr 
   child.stderr.on('data', (chunk) => onStderr(String(chunk)));
 
   const settle = (/** @type {string} */ reason) => {
-    if (exited !== null) return;
-    exited = reason;
+    if (transportError !== null) return;
+    transportError = reason;
     for (const waiter of pending.values()) waiter.reject(new DispatchLaneError(reason));
     pending.clear();
   };
+  child.stdin.on('error', (err) => settle('agent-dispatch bridge stdin closed: ' + err.message));
   child.on('error', (err) => settle(`agent-dispatch bridge failed to start: ${err.message}`));
-  child.on('exit', (code, signal) => settle(`agent-dispatch bridge exited (${signal ?? code}) before answering`));
+  const onChildEnd = (code, signal) => {
+    childEnded = true;
+    settle('agent-dispatch bridge exited (' + (signal ?? code) + ') before answering');
+  };
+  child.on('exit', onChildEnd);
+  child.on('close', onChildEnd);
 
   const write = (/** @type {object} */ message) => {
     try {
@@ -420,53 +493,93 @@ function startBridge({ command, args, cwd, spawnImpl, protocolVersion, onStderr 
       settle(`agent-dispatch bridge stdin closed: ${/** @type {any} */ (err)?.message ?? err}`);
     }
   };
-  const request = (/** @type {string} */ method, /** @type {unknown} */ params) =>
+  const request = (method, params, deadline, onSend, signal) =>
     new Promise((resolve, reject) => {
-      if (exited !== null) {
-        reject(new DispatchLaneError(exited));
-        return;
-      }
+      const operation = params?.name ?? method;
+      const timeout = () => new DispatchDeadlineError(operation);
+      if (transportError !== null) return reject(new DispatchLaneError(transportError));
+      if (signal?.aborted || performance.now() >= deadline) return reject(timeout());
       const id = nextId++;
-      pending.set(id, { resolve, reject });
+      const release = () => {
+        pending.delete(id);
+        stopTimer();
+        signal?.removeEventListener('abort', expire);
+      };
+      const expire = () => {
+        release();
+        reject(timeout());
+      };
+      const stopTimer = Number.isFinite(deadline) ? deadlineTimer(deadline, expire) : () => {};
+      signal?.addEventListener('abort', expire, { once: true });
+      pending.set(id, {
+        resolve: (msg) => {
+          if (performance.now() >= deadline) return expire();
+          release();
+          resolve(msg);
+        },
+        reject: (err) => { release(); reject(err); },
+      });
+      onSend?.();
       write({ jsonrpc: '2.0', id, method, params });
     });
 
-  const ready = request('initialize', {
-    protocolVersion,
-    capabilities: {},
-    clientInfo: { name: 'audit-tools dispatch lane', version: '1' },
-  }).then((reply) => {
-    if (reply.error) throw new DispatchLaneError(`initialize refused: ${reply.error.message}`);
-    write({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
-    return reply.result;
-  });
-  // A handshake that fails is reported by the first dispatch, not as an
-  // unhandled rejection in between.
-  ready.catch(() => {});
+  // Share one handshake. A short concurrent caller cannot cancel a longer
+  // one, but the handshake is abandoned when nobody is left waiting for it.
+  let initialization;
+  let initialized = false;
+  let waiting = 0;
+  const controller = new AbortController();
+  async function ready(deadline) {
+    if (transportError !== null) throw new DispatchLaneError(transportError);
+    if (initialized) return;
+    if (performance.now() >= deadline) throw new DispatchDeadlineError('initialize');
+    initialization ??= request('initialize', {
+      protocolVersion,
+      capabilities: {},
+      clientInfo: { name: 'audit-tools dispatch lane', version: '1' },
+    }, Infinity, undefined, controller.signal).then((reply) => {
+      if (reply.error) throw new DispatchLaneError('initialize refused: ' + reply.error.message);
+      initialized = true;
+      write({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
+    });
+    waiting++;
+    try {
+      await new Promise((resolve, reject) => {
+        const stop = deadlineTimer(deadline, () => reject(new DispatchDeadlineError('initialize')));
+        initialization.then(
+          () => { stop(); resolve(undefined); },
+          (err) => { stop(); reject(err); },
+        );
+      });
+    } finally {
+      if (--waiting === 0 && !initialized) controller.abort();
+    }
+  }
 
   return {
     request,
     ready,
-    isDead: () => exited !== null,
     close: () =>
       new Promise((resolve) => {
-        if (exited !== null) {
-          resolve(undefined);
-          return;
-        }
-        const timer = setTimeout(() => {
-          try {
-            child.kill();
-          } catch {}
-          resolve(undefined);
-        }, CLOSE_GRACE_MS);
-        child.once('exit', () => {
+        if (childEnded) return resolve(undefined);
+        const finish = () => {
           clearTimeout(timer);
+          child.off('exit', finish);
+          child.off('close', finish);
           resolve(undefined);
-        });
-        try {
-          child.stdin.end(); // The bridge treats stdin end as its own end of life.
-        } catch {}
+        };
+        const timer = setTimeout(() => {
+          settle('agent-dispatch bridge closed by its owner');
+          try { child.kill('SIGKILL'); } catch {}
+          child.stdin.destroy();
+          child.stdout.destroy();
+          child.stderr.destroy();
+          child.unref();
+          finish();
+        }, CLOSE_GRACE_MS);
+        child.once('exit', finish);
+        child.once('close', finish);
+        try { child.stdin.end(); } catch {}
       }),
   };
 }
@@ -477,9 +590,11 @@ function startBridge({ command, args, cwd, spawnImpl, protocolVersion, onStderr 
  * @param {ReturnType<typeof startBridge>} bridge
  * @param {'opencode_fire' | 'opencode_wait' | 'opencode_job_cancel'} name
  * @param {Record<string, unknown>} args
+ * @param {number} deadline monotonic milliseconds
+ * @param {() => void} [onSend] marks a fire as potentially accepted
  */
-async function callTool(bridge, name, args) {
-  const reply = await bridge.request('tools/call', { name, arguments: args });
+async function callTool(bridge, name, args, deadline, onSend) {
+  const reply = await bridge.request('tools/call', { name, arguments: args }, deadline, onSend);
   if (reply.error) {
     throw new DispatchLaneError(`${name} refused: ${reply.error.message}`);
   }
@@ -502,7 +617,7 @@ async function callTool(bridge, name, args) {
  */
 async function cancelJob(bridge, jobId, failedWhat) {
   try {
-    return await callTool(bridge, 'opencode_job_cancel', { jobId });
+    return await callTool(bridge, 'opencode_job_cancel', { jobId }, performance.now() + CANCEL_GRACE_MS);
   } catch (err) {
     throw new DispatchLaneError(
       `opencode_job_cancel for ${jobId} ${failedWhat}: ${/** @type {any} */ (err)?.message ?? err}`,
@@ -511,70 +626,27 @@ async function cancelJob(bridge, jobId, failedWhat) {
   }
 }
 
-/**
- * Poll a job to a terminal status, respecting the CALLER's `deadline` — not
- * the bridge's own 45-second-per-call clamp. On deadline, cancel and RETURN
- * rather than throwing (see the module header) — usually a `timed_out`
- * result, but the cancel snapshot's own completed/failed answer when the job
- * finished right at the deadline.
- *
- * @param {ReturnType<typeof startBridge>} bridge
- * @param {string} jobId
- * @param {number} deadline epoch ms
- * @param {number} startedAt epoch ms
- * @param {number} waitRetryMs test seam for `WAIT_RETRY_MS` — see `openDispatchLane`
- */
-async function pollUntilTerminal(bridge, jobId, deadline, startedAt, waitRetryMs) {
-  for (;;) {
-    if (Date.now() >= deadline) {
-      // The cancel itself failing after a deadline is a transport-level
-      // fault, not an ordinary timeout: `cancelJob` throws, so the driver's one
-      // retry applies (a plain timed-out RETURN never reaches that retry).
-      const cancelled = await cancelJob(bridge, jobId, 'failed after its deadline');
-      // Upstream JobService.cancel() returns the TERMINAL snapshot unchanged
-      // when the job already finished between the last wait and this cancel
-      // call — a real completed/failed answer must never be discarded and
-      // relabeled timed_out just because it arrived on the cancel reply
-      // rather than a wait reply.
-      if (cancelled.status === 'completed' || cancelled.status === 'failed') return cancelled;
-      // The error names what the cancel reply itself reported, so a reader
-      // (and a test) can see whether the cancel took effect.
-      return {
-        ...cancelled,
-        status: 'timed_out',
-        error: `job ${jobId} still running after ${Date.now() - startedAt} ms, past its timeout — cancel reported ${cancelled.status}`,
-      };
+async function pollUntilTerminal(bridge, jobId, deadline, waitRetryMs) {
+  while (performance.now() < deadline) {
+    let sc;
+    try {
+      sc = await callTool(bridge, 'opencode_wait', {
+        jobId,
+        timeoutSeconds: Math.min(MAX_WAIT_SECONDS, Math.max(0, (deadline - performance.now()) / 1000)),
+      }, deadline);
+    } catch (err) {
+      if (err instanceof DispatchDeadlineError) break;
+      throw err;
     }
-    const secondsLeft = Math.max(0, (deadline - Date.now()) / 1000);
-    const sc = await callTool(bridge, 'opencode_wait', {
-      jobId,
-      timeoutSeconds: Math.min(MAX_WAIT_SECONDS, secondsLeft),
-    });
     if (TERMINAL_STATUSES.has(sc.status)) return sc;
-    if (sc.timedOut !== true) await sleep(waitRetryMs);
+    if (sc.timedOut !== true) await sleep(Math.max(0, Math.min(waitRetryMs, deadline - performance.now())));
   }
-}
-
-/**
- * `input_required` cannot happen for the `answer` agent, but CAN for
- * `dispatch` (mode "agent" — see the module header): handled rather than
- * ignored, cancel the job and return it as a non-completed result instead of
- * leaving a session waiting on a question nobody will answer.
- *
- * @param {ReturnType<typeof startBridge>} bridge
- * @param {string} jobId
- */
-async function cancelInputRequired(bridge, jobId) {
-  const cancelled = await cancelJob(bridge, jobId, '(input_required) failed');
-  return {
-    ...cancelled,
-    error: cancelled.error ?? `job ${jobId} asked for input; a headless sweep cannot answer it — cancelled`,
-  };
+  return null;
 }
 
 /**
  * @param {any} sc terminal structuredContent
- * @returns {{ raw: string, status: string, lane: string, error: string | undefined }}
+ * @returns {{ raw: string, status: string, lane: string, error: string | undefined, jobId?: string, checkout?: string }}
  */
 function finalize(sc) {
   const info = sc?.result && typeof sc.result === 'object' ? sc.result.info : undefined;
@@ -587,6 +659,8 @@ function finalize(sc) {
     status: typeof sc?.status === 'string' ? sc.status : 'unknown',
     lane,
     error: stringifyError(sc?.error),
+    ...(typeof sc?.jobId === 'string' ? { jobId: sc.jobId } : {}),
+    ...(typeof sc?.checkout === 'string' ? { checkout: sc.checkout } : {}),
   };
 }
 
@@ -654,35 +728,60 @@ export function openDispatchLane({
      *   accepted so an existing caller's option object still type-checks.
      * @param {Record<string, unknown>} [opts.schema] unused — see above.
      * @param {number} [opts.maxTokens] unused — see above.
-     * @returns {Promise<{ raw: string, status: string, lane: string, error: string | undefined }>}
+     * @returns {Promise<ReturnType<typeof finalize>>}
      */
     async dispatch(task, opts) {
-      if (typeof opts?.timeoutMs !== 'number' || !(opts.timeoutMs > 0)) {
+      if (!Number.isFinite(opts?.timeoutMs) || !(opts.timeoutMs > 0)) {
         throw new DispatchLaneError('dispatch requires opts.timeoutMs (agent-dispatch enforces no job timeout of its own)');
       }
-      await bridge.ready;
-      const startedAt = Date.now();
-      const deadline = startedAt + opts.timeoutMs;
+      const deadline = performance.now() + opts.timeoutMs;
+      await bridge.ready(deadline);
       const agent = opts.mode === 'agent' ? 'dispatch' : 'answer';
       const requested = resolve(opts.cwd ?? cwd);
       // sites-pinned: tests/shared/dispatch-lane-worktree.test.ts
-      const worktree = agent === 'dispatch' ? openLaneWorktree(requested) : null;
+      const worktree = agent === 'dispatch' ? openLaneWorktree(requested, deadline) : null;
+      let fireSent = false;
+      let terminal = false;
+      let jobId;
       try {
+        worktree?.protect();
         let sc = await callTool(bridge, 'opencode_fire', {
           prompt: task,
           agent,
           directory: worktree?.directory ?? requested,
-          // providerID/modelID intentionally omitted — see the module header.
-        });
+          // providerID/modelID intentionally omitted - see the module header.
+        }, deadline, () => { fireSent = true; });
+        jobId = typeof sc.jobId === 'string' && sc.jobId ? sc.jobId : undefined;
         if (!TERMINAL_STATUSES.has(sc.status)) {
-          sc = await pollUntilTerminal(bridge, sc.jobId, deadline, startedAt, waitRetryMs);
+          if (!jobId) throw new DispatchLaneError('fire reply did not identify the job');
+          sc = await pollUntilTerminal(bridge, jobId, deadline, waitRetryMs);
         }
-        if (sc.status === 'input_required') {
-          sc = await cancelInputRequired(bridge, sc.jobId);
+        if (sc === null || sc.status === 'input_required') {
+          const timedOut = sc === null;
+          if (!jobId) throw new DispatchLaneError('cannot cancel without a job ID');
+          sc = await cancelJob(bridge, jobId, timedOut ? 'failed after its deadline' : '(input_required) failed');
+          if (!TERMINAL_STATUSES.has(sc.status) || sc.status === 'input_required') {
+            throw new DispatchLaneError('cancel reported ' + sc.status + ', not a terminal outcome');
+          }
+          if (timedOut && sc.status === 'cancelled') {
+            sc = { ...sc, status: 'timed_out', error: 'job ' + jobId + ' exceeded its timeout; cancel reported cancelled' };
+          } else if (!timedOut && sc.status === 'cancelled' && sc.error == null) {
+            sc = { ...sc, error: 'job ' + jobId + ' asked for input; a headless sweep cannot answer it - cancelled' };
+          }
         }
-        return finalize(sc);
+        terminal = true;
+        return finalize({ ...sc, jobId: jobId ?? sc.jobId });
+      } catch (err) {
+        if (!fireSent) throw err;
+        const identity = jobId ? ' for job ' + jobId : '';
+        return finalize({
+          status: 'unknown',
+          jobId,
+          checkout: worktree?.path,
+          error: 'execution outcome unknown' + identity + ': ' + (err?.message ?? err),
+        });
       } finally {
-        worktree?.remove();
+        if (!fireSent || terminal) worktree?.remove();
       }
     },
 
