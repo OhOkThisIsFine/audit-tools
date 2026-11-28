@@ -11,6 +11,7 @@ import {
   runAdmittedProjectLandingGateCommand,
 } from "audit-tools/shared";
 import type { ProjectTestAdmissionOutcome } from "audit-tools/shared";
+import { nativePriorLandingCheck } from "../steps/gateCommands.js";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 
 /**
@@ -76,6 +77,7 @@ export interface LandingGateOutcome {
   output: string;
   /** True when the gate could not be SPAWNED or was refused admission. */
   spawn_error?: string;
+  reused_from?: string;
 }
 
 export interface LandingGateVerifyOutcome {
@@ -117,6 +119,7 @@ export async function verifyLandingGates(params: {
   root: string;
   timeoutMs: number;
   overrides?: LandingGateVerifyOverrides;
+  recheckNativeGuard?: () => Promise<boolean>;
 }): Promise<LandingGateVerifyOutcome> {
   const { root, timeoutMs } = params;
   const run = params.overrides?.run ?? runAdmittedProjectLandingGateCommand;
@@ -126,7 +129,17 @@ export async function verifyLandingGates(params: {
   }
 
   const gates: LandingGateOutcome[] = [];
+  let reuse = params.overrides ? undefined : params.recheckNativeGuard;
   for (const command of commands) {
+    // Re-discover at this slot, exactly as the default admission path does.
+    if (reuse && command === "npm run verify:guards" &&
+        await reuse() && discoverLandingGates(root).includes(command)) {
+      gates.push({ command, refuses: landingGateRefusal(command), passed: true, output: "",
+        reused_from: "final floor: npm run test:built" });
+      continue;
+    }
+    // Do not cross arbitrary scripts or lifecycle hooks on the way to the alias.
+    if (reuse && !nativePriorLandingCheck(root, command)) reuse = undefined;
     const outcome = await run(command.split(" "), root, { timeoutMs });
     const passed =
       outcome.admitted && outcome.exit_code === 0 && !outcome.timed_out && !outcome.spawn_error;

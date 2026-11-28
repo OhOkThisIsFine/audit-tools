@@ -231,6 +231,8 @@ export async function runToolOwnedFinalGate(
      * unit command can use it; all preceding operations retain their ordering.
      */
     terminalUnit?: { argv: string[]; execute: GateRunner };
+    /** Select the exact native npm leaf at the unit slot, after the guarded build and checks. */
+    nativeCloseUnit?: () => Promise<{ argv: string[]; execute: GateRunner } | undefined>;
   } = {},
 ): Promise<ToolOwnedFinalGateResult> {
   const runtime_residual = isAuditToolsMonorepo(root)
@@ -292,17 +294,19 @@ export async function runToolOwnedFinalGate(
     // `await` is correct for an injected synchronous runner too — awaiting a
     // non-promise yields the value unchanged — so a stub needs no migration.
     const terminal = opts.terminalUnit;
-    const execute = terminal && index === commands.length - 1 && spec.layer === "unit" &&
-      spec.package_dir === undefined && spec.argv.length === terminal.argv.length &&
-      spec.argv.every((arg, i) => arg === terminal.argv[i])
-      ? terminal.execute : runner;
-    const { status, stdout, stderr, ran, error } = await execute(spec.argv, root, spec.package_dir);
+    const terminalSlot = index === commands.length - 1 && spec.layer === "unit" && spec.package_dir === undefined;
+    const native = terminalSlot ? await opts.nativeCloseUnit?.() : undefined;
+    const shared = terminalSlot && terminal && spec.argv.length === terminal.argv.length &&
+      spec.argv.every((arg, i) => arg === terminal.argv[i]) ? terminal : undefined;
+    const selected = native ?? shared;
+    const argv = selected?.argv ?? spec.argv;
+    const { status, stdout, stderr, ran, error } = await (selected?.execute ?? runner)(argv, root, spec.package_dir);
     const cmdPassed = ran !== false && status === 0 && error === undefined;
     const stdoutTail = cmdPassed ? undefined : outputTail(stdout);
     const diagnostic = error ? (stderr ? `${stderr}\n${error.message}` : error.message) : stderr;
     const stderrTail = cmdPassed ? undefined : outputTail(diagnostic);
     results.push({
-      argv: spec.argv,
+      argv,
       layer: spec.layer,
       ...(spec.package_dir ? { package_dir: spec.package_dir } : {}),
       exit_code: status,

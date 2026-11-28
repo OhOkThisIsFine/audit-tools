@@ -1934,6 +1934,9 @@ export function buildRemediationReportMarkdown(
 
   const combined = closeSuiteEvidence(combinedTest);
   reportContent += `\nCombined test suite: ${combined.status.replace("_", " ")}\n`;
+  if (combinedTest.executed_command) {
+    reportContent += `Combined evidence: guarded build and terminal \`${combinedTest.executed_command}\` from the final floor.\n`;
+  }
   if (combined.status === "failed") {
     reportContent += "\n## Combined Test Suite Failure\n\nThe full test suite failed after remediation. No items with a resolved status were available to re-block, so the run completed, but the following failure was recorded:\n";
   }
@@ -1950,6 +1953,7 @@ export function buildRemediationReportMarkdown(
   } else {
     for (const gate of landingGates.gates) {
       reportContent += `- \`${gate.command}\` — ${gate.passed ? "passed" : "**FAILED**"}${gate.refuses ? ` (refuses ${gate.refuses})` : ""}\n`;
+      if (gate.reused_from) reportContent += `  - Reused observation from ${gate.reused_from}; wrapper not rerun.\n`;
       if (!gate.passed) {
         if (gate.spawn_error) reportContent += `  - ${gate.spawn_error}\n`;
         if (gate.output) reportContent += `\n\`\`\`\n${gate.output}\n\`\`\`\n`;
@@ -2429,6 +2433,9 @@ export async function runClosePhase(
   const landingGates = await verifyLandingGates({
     root: options.root,
     timeoutMs: CLOSING_CHILD_DEADLINE_MS,
+    ...(!analyzerVerify.ran && !options.analyzerLeadVerifyOverrides && !options.headEvidenceOverrides &&
+      !state.plan.e2e_command && acceptance.recheckNativeGuard
+      ? { recheckNativeGuard: acceptance.recheckNativeGuard } : {}),
     ...(options.landingGateVerifyOverrides
       ? { overrides: options.landingGateVerifyOverrides }
       : {}),
@@ -2438,7 +2445,7 @@ export async function runClosePhase(
   } else {
     for (const gate of landingGates.gates) {
       console.log(
-        `Advisory landing gate ${gate.command}: ${gate.passed ? "passed" : "FAILED"}`,
+        `Advisory landing gate ${gate.command}: ${gate.passed ? "passed" : "FAILED"}${gate.reused_from ? ` (reused ${gate.reused_from})` : ""}`,
       );
       if (!gate.passed) {
         runLogger?.event({
@@ -2785,6 +2792,7 @@ async function finishCloseReport(
     step_count: number;
     combined_test_result: ReturnType<typeof closeSuiteEvidence> & {
       suite_name?: string;
+      executed_command?: string;
       duration_ms: number;
     };
     e2e_result: ReturnType<typeof closeSuiteEvidence>;
@@ -2805,6 +2813,7 @@ async function finishCloseReport(
     combined_test_result: {
       ...closeSuiteEvidence(combinedTest),
       ...(combinedTest.suite_name ? { suite_name: combinedTest.suite_name } : {}),
+      ...(combinedTest.executed_command ? { executed_command: combinedTest.executed_command } : {}),
       duration_ms: combinedTest.duration_ms,
     },
     e2e_result: closeSuiteEvidence(e2eResult),
