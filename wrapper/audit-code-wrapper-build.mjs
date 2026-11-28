@@ -1,6 +1,6 @@
 import { open, stat, unlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileExists, newestMtimeMs } from './audit-code-wrapper-io.mjs';
 import { resolveWithinRoot } from '../scripts/shared/primitives.mjs';
 
@@ -75,7 +75,9 @@ export async function shouldBuildDistForPaths({
   const distMtime = (await stat(distEntryPath)).mtimeMs;
   const sourceMtime = await newestMtimeMs(sourceRootPath);
   const tsconfigMtime = (await stat(tsconfigPathValue)).mtimeMs;
-  const newestInput = Math.max(sourceMtime, tsconfigMtime);
+  const baseConfigPath = join(dirname(tsconfigPathValue), 'tsconfig.base.json');
+  const baseConfigMtime = (await fileExists(baseConfigPath)) ? (await stat(baseConfigPath)).mtimeMs : 0;
+  const newestInput = Math.max(sourceMtime, tsconfigMtime, baseConfigMtime);
   return distMtime < newestInput;
 }
 

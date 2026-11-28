@@ -22,6 +22,7 @@ const __dirname = import.meta.dirname;
 const distEntry = join(__dirname, "dist", "remediate", "index.js");
 const sourceRoot = join(__dirname, "src");
 const tsconfigPath = join(__dirname, "tsconfig.json");
+const baseConfigPath = join(__dirname, "tsconfig.base.json");
 
 function newestMtimeMs(path) {
   const stats = statSync(path);
@@ -45,15 +46,15 @@ export function shouldBuildDist() {
   if (!existsSync(distEntry)) {
     return true;
   }
-  // Compare dist freshness against src/ (and tsconfig.json when present). A
-  // missing tsconfig.json must NOT collapse this to an existence-only check: a
-  // dist older than src/ is still stale and must rebuild (CE-003). Previously
-  // the tsconfig-absent branch returned `!existsSync(distEntry)`, so a present
-  // but stale dist was silently used.
-  const newestSourceMs = existsSync(tsconfigPath)
-    ? Math.max(newestMtimeMs(sourceRoot), statSync(tsconfigPath).mtimeMs)
-    : newestMtimeMs(sourceRoot);
-  return statSync(distEntry).mtimeMs < newestSourceMs;
+  // Missing config files do not exempt stale source from rebuilding (CE-003).
+  let newestInput = newestMtimeMs(sourceRoot);
+  if (existsSync(tsconfigPath)) {
+    newestInput = Math.max(newestInput, statSync(tsconfigPath).mtimeMs);
+    if (existsSync(baseConfigPath)) {
+      newestInput = Math.max(newestInput, statSync(baseConfigPath).mtimeMs);
+    }
+  }
+  return statSync(distEntry).mtimeMs < newestInput;
 }
 
 // Default build runner (platform-branched npm run build). Injectable in
