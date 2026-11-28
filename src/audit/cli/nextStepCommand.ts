@@ -5,7 +5,7 @@ import { systemicReviewInputRevision } from "../orchestrator/systemicChallengeEx
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { ReviewUnavailableError } from "./reviewSubmission.js";
 import { validateAuditArguments, NEXT_STEP_ARGUMENTS } from "./argumentContract.js";
-import { functionalPreflightStep } from "./functionalPreflight.js";
+import { degradedDepthConflict, resolveFunctionalPreflight, type FunctionalPreflightScope } from "./functionalPreflight.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 import { INDEPENDENT_CONTEXT, SEPARATE_CONTEXT_OR_SELF } from "../../shared/prompts.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/artifacts-dir-rollover.test.ts
@@ -445,9 +445,9 @@ async function cmdNextStepBody(
     return;
   }
 
-  const preflight = await functionalPreflightStep(root, artifactsDir);
-  if (preflight) {
-    await NEXT_STEP_EMISSION.emitPlan(currentStepPlan(preflight));
+  const preflight = await resolveFunctionalPreflight(root, artifactsDir);
+  if (preflight.step) {
+    await NEXT_STEP_EMISSION.emitPlan(currentStepPlan(preflight.step));
     return;
   }
 
@@ -473,6 +473,13 @@ async function cmdNextStepBody(
     since: getFlag(argv, "--since"),
   });
 
+  // Defend the actual emission against a checkpoint changed after the preflight read.
+  const conflict = degradedDepthConflict(preflight.scope, result.bundle.intent_checkpoint);
+  if (conflict) {
+    await NEXT_STEP_EMISSION.emitPlan(blockedStepPlan(operatorHandoffBlock(root, artifactsDir, conflict)));
+    return;
+  }
+
   // The advisory lines the fold drained onto a step kind with no advisory
   // channel of its own. Attached to the emitted result — the boundary BELOW the
   // dispatch table, so it decorates whichever row emits, including the
@@ -483,6 +490,7 @@ async function cmdNextStepBody(
     sourceRoot: result.sourceRoot,
     artifactsDir,
     analyzerPolicy,
+    preflightScope: preflight.scope,
     result,
   });
 }
@@ -512,6 +520,7 @@ interface NextStepEmitContext {
    * assuming a caller loaded it.
    */
   analyzerPolicy: AnalyzerPolicy | null;
+  preflightScope?: FunctionalPreflightScope;
   result: NextStepResult;
 
 }
@@ -1389,7 +1398,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
 );
 
 const emitConfirmIntent = emissionRow<"confirm_intent">(
-  async ({ root, sourceRoot, artifactsDir, argv }, result) => {
+  async ({ root, sourceRoot, artifactsDir, argv, preflightScope }, result) => {
     const intentCheckpointPath = join(artifactsDir, "intent_checkpoint.json");
     const continueCommand = nextStepCommand(root, artifactsDir);
     const { graph, query } = await evidenceGraphForStep(artifactsDir, sourceRoot, result.bundle);
@@ -1439,6 +1448,7 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
       prompt: renderConfirmIntentPrompt(preDigest, {
         intentCheckpointPath,
         continueCommand,
+        degradedLimitation: preflightScope?.mode === "degraded" ? preflightScope.limitation : undefined,
         evidenceGraphCommand: query,
         analyzerCoverageGaps: await readAnalyzerCoverageGaps(artifactsDir, result.bundle),
         evidenceGraphStatus: graph.indexed ? "Codebase Memory is available for indexed symbols and call sites." :
