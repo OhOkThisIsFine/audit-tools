@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashContent } from "./primitives.mjs";
 import { worktreeTrees } from "./worktree-tree.mjs";
@@ -66,7 +66,11 @@ try {
   const before = worktreeTrees(root)?.tree ?? null;
   if (!before) throw new Error("Could not bind tests to a Git worktree tree");
   const timeoutMs = 120_000;
-  const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", ...paths], {
+  // Windows fixtures frequently launch their own Git or npm process trees.
+  const workerArgs = process.platform === "win32"
+    ? ["--test-concurrency", String(Math.max(1, Math.floor(availableParallelism() / 2)))]
+    : [];
+  const result = spawnSync(process.execPath, ["--test", ...workerArgs, "--test-reporter=tap", ...paths], {
     cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], windowsHide: true, timeout: timeoutMs,
   });
   process.stdout.write(result.stdout ?? "");
