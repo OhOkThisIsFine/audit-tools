@@ -4,7 +4,7 @@ import { readPlanClarificationResolutions, planClarificationRefusal, pausedClari
 import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "../state/dirtyBaseline.js";
 import { CLARIFICATION_RESOLUTION_FILENAME, TRIAGE_RESOLUTION_FILENAME, readDecisionSnapshot, decisionContextDigest } from "../state/decisionConsumption.js";
 import { RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
-import { reopenStaleTriageSuccesses } from "../phases/triageConformance.js";
+import { refreshReplannedHostConformance, reopenStaleTriageSuccesses } from "../phases/triageConformance.js";
 import { stateRunId, requireStateRunId, currentHostBoundaryState } from "../state/runIdentity.js";
 import { presentReportStep } from "./frictionCloseout.js";
 import { reviewFilterDispositionsPath, persistReviewFilterDispositions, type PersistedReviewFilterDispositions } from "../review/filterDispositions.js";
@@ -2291,6 +2291,24 @@ async function handleClosing(
     await store.saveState(state);
     return { kind: "transition", state };
   }
+  const priorBindings = Object.values(state.items ?? {}).map(item => item.conformance_review?.binding);
+  const refreshIssues = await refreshReplannedHostConformance(root, artifactsDir, state);
+  if (Object.values(state.items ?? {}).some((item, index) => item.conformance_review?.binding !== priorBindings[index])) {
+    await store.saveState(state);
+  }
+  if (refreshIssues.length) return { kind: "emit", step: await writeCurrentStep({
+    stepKind: "review_contract_conformance",
+    status: refreshIssues.some(issue => issue.code !== "conformance_review_required") ? "blocked" : "ready",
+    runId: stateRunId(state), repoRoot: root, artifactsDir,
+    prompt: ["# Review carried-forward implementations",
+      "No implementation is being dispatched. A revised plan requires fresh bound conformance for previously landed work before closeout.",
+      ...refreshIssues.map(issue => `${issue.work_item_id}: ${issue.message}`),
+      "When the named issues are resolved, run next-step. Do not use a stale receipt to close."
+    ].join("\n\n"),
+    artifactPaths: Object.fromEntries(refreshIssues.map(issue => ["review_" + issue.work_item_id, issue.review_request_path])),
+    allowedCommands: [loaderCommand("next-step")],
+    stopCondition: "Obtain current independent conformance or remain paused.",
+  }) };
   const closeStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
 

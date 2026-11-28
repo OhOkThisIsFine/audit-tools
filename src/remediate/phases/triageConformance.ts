@@ -5,10 +5,10 @@ import { readFile, readdir, lstat, readlink } from "node:fs/promises";
 import { hashContent } from "../../shared/hash.js";
 import { stableStringify } from "../../shared/stableStringify.js";
 import { headCommit } from "../../shared/git.js";
-import { AUDIT_TOOLS_DIRNAME, contentSha256, readOptionalJsonFile, writeJsonFile, parseCommandString, resolveWithinRoot, uniqueSorted } from "audit-tools/shared";
+import { AUDIT_TOOLS_DIRNAME, contentSha256, readOptionalJsonFile, writeJsonFile, parseCommandString, resolveWithinRoot, runTrackedAsync, uniqueSorted, TRACKED_CHILD_DEADLINE_MS } from "audit-tools/shared";
 import type { RemediationState } from "../state/store.js";
 import { worktreeContentId } from "../steps/gateCommands.js";
-import { checkConformanceSubject, conformanceIssue, conformanceReviewPaths, conformanceSubjectsDir, type ConformanceReviewCheck } from "../steps/dispatch/contractConformanceReview.js";
+import { checkConformanceSubject, conformanceIssue, conformanceReviewPaths, conformanceSubjectsDir, type ConformanceReviewCheck, type ConformanceReviewIssue } from "../steps/dispatch/contractConformanceReview.js";
 import { readSubmissionDocument } from "../../shared/submission/submissionClassifier.js";
 
 
@@ -102,6 +102,67 @@ export async function writeTriageObservation(artifactsDir: string, runId: string
   });
 }
 
+/** A context-only replan may keep immutable work, but not its old review verdict. */
+export async function refreshReplannedHostConformance(root: string, artifactsDir: string, state: RemediationState): Promise<ConformanceReviewIssue[]> {
+  const plan = state.plan;
+  if (!state.conformance_review?.enabled || !plan || !plan.review_revision_sha256) return [];
+  const issues: ConformanceReviewIssue[] = [];
+  const head = await headCommit(root);
+  const git = (...args: string[]) => runTrackedAsync(["git", ...args], { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS });
+  for (const unit of plan.units) {
+    const item = state.items?.[unit.id];
+    const receipt = item?.conformance_review;
+    if (item?.status !== "resolved" || !item.host_landed_commit || !receipt || receipt.review.mode !== "independent") continue;
+    const paths = conformanceReviewPaths(artifactsDir, plan.plan_id, unit.id);
+    const archived = await readOptionalJsonFile<{ binding: string; content: Record<string, unknown> }>(
+      join(conformanceSubjectsDir(artifactsDir), receipt.binding + ".json"),
+    );
+    if (!archived?.content || typeof archived.content !== "object" ||
+        archived.binding !== receipt.binding || contentSha256(archived.content) !== receipt.binding) continue;
+    const prior = archived.content;
+    if ("observation" in prior || (prior.review_revision_sha256 === plan.review_revision_sha256 &&
+        (prior.refreshed_head === undefined || prior.refreshed_head === head))) continue;
+    const requirements = plan.requirements.filter(entry => unit.requirement_ids.includes(entry.id));
+    const examples = (plan.review_counterexamples ?? []).filter(entry => unit.addresses_counterexample_ids.includes(entry.id));
+    const landed = item.host_landed_commit;
+    const result = prior.result as { landed_commit?: unknown } | undefined;
+    const scoped = unit.allowed_files.map(path => ":(literal)" + path);
+    const diff = ["--quiet", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none"];
+    const matchesScope = async () => {
+      if (!head || !scoped.length ||
+          (await git("diff", ...diff, landed, head, "--", ...scoped)).status !== 0 ||
+          (await git("diff", ...diff, head, "--", ...scoped)).status !== 0 ||
+          (await git("diff", "--cached", ...diff, head, "--", ...scoped)).status !== 0) return false;
+      const untracked = await git("ls-files", "--others", "--exclude-standard", "-z", "--", ...scoped);
+      return untracked.status === 0 && untracked.stdout === "";
+    };
+    const reject = (message: string) => issues.push({
+      code: "conformance_review_insufficient", work_item_id: unit.id,
+      result_path: paths.response, review_request_path: paths.request, message,
+    });
+    if (prior.repository_root !== root || prior.run_id !== plan.plan_id || prior.work_item_id !== unit.id ||
+        stableStringify(prior.unit) !== stableStringify(unit) || stableStringify(prior.requirements) !== stableStringify(requirements) ||
+        stableStringify(prior.accepted_counterexamples) !== stableStringify(examples) ||
+        stableStringify(prior.obligation_ids) !== stableStringify(unit.requirement_ids) || result?.landed_commit !== landed ||
+        !head || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(landed) ||
+        (await git("merge-base", "--is-ancestor", landed, head)).status !== 0 ||
+        !await matchesScope()) {
+      reject("The prior conformance receipt cannot be refreshed: its contract or landed scope differs. Reconcile this unit against the current approved plan before closing.");
+      continue;
+    }
+    const refreshed = await checkConformanceSubject({
+      artifactsDir, runId: plan.plan_id, itemId: unit.id, obligationIds: unit.requirement_ids,
+      content: { ...prior, review_revision_sha256: plan.review_revision_sha256, refreshed_head: head },
+      evidenceInstruction: "This was an already landed implementation. Verify the cited commit and obligations against the approved plan and the refreshed HEAD. Review any changed read context: the prior receipt is not current approval.",
+    });
+    if (!refreshed.ok) issues.push(refreshed.issue);
+    else if (refreshed.receipt && await matchesScope() && await headCommit(root) === head) {
+      item.conformance_review = refreshed.receipt;
+    } else reject("The candidate changed while refreshing conformance. Re-run next-step on stable source.");
+  }
+  return issues;
+}
+
 /** Successful terminal units must retain the receipt for their current review subject. */
 export async function assertSuccessfulConformance(root: string, artifactsDir: string, state: RemediationState): Promise<void> {
   if (!state.conformance_review?.enabled || !state.plan) return;
@@ -125,6 +186,7 @@ export async function assertSuccessfulConformance(root: string, artifactsDir: st
       if (content.run_id !== state.plan.plan_id || content.work_item_id !== unit.id || content.review_revision_sha256 !== state.plan.review_revision_sha256 ||
         stableStringify(content.unit) !== stableStringify(unit) || stableStringify(content.requirements) !== stableStringify(requirements) ||
         stableStringify(content.accepted_counterexamples) !== stableStringify(examples)) fail();
+      if (content.refreshed_head !== undefined && content.refreshed_head !== await headCommit(root)) fail();
       // Host success is a review of immutable committed evidence; later units may land.
     }
   }
