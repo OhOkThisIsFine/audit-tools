@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/host-handoff.test.ts, tests/audit/host-handoff.test.ts
+// sites-pinned: tests/audit-changed-site-pins-cycle3.test.mjs
 // (both draws bind their worker prompts here, so a change to where the digest
 // stops moves every `prompt_sha256` the tests re-derive from the prompt text)
 /**
