@@ -1,7 +1,6 @@
 // sites-pinned: tests/audit/line-index-measurements.test.ts
 import { resolve } from "node:path";
 import { countLines } from "./args.js";
-import type { RepoManifest } from "../types.js";
 import { isFileMissingError } from "audit-tools/shared";
 import { uniqueSorted } from "../../shared/compareCodeUnits.js";
 import { errorMessage } from "../../shared/io/json.js";
@@ -79,15 +78,6 @@ async function measureLinePaths(
   // Promise.all preserves input order: duplicate keys take their last input
   // occurrence's value, independently of read completion order.
   return Object.fromEntries(entries);
-}
-
-export async function buildLineIndex(
-  root: string,
-  repoManifest: RepoManifest,
-): Promise<Record<string, number>> {
-  // Keep original order, multiplicity and raw path spelling. Coverage uses
-  // these same verbatim keys, including paths with redundant segments.
-  return measureLinePaths(root, repoManifest.files.map((file) => file.path));
 }
 
 export async function buildLineIndexForPaths(
