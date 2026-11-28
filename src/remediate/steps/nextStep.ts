@@ -2325,7 +2325,7 @@ async function handleClosing(
   }
   const priorBindings = Object.values(state.items ?? {}).map(item => item.conformance_review?.binding);
   await assertOwnership();
-  const refreshIssues = await refreshReplannedHostConformance(root, artifactsDir, state);
+  const refreshIssues = await refreshReplannedHostConformance(root, artifactsDir, state, assertOwnership);
   if (Object.values(state.items ?? {}).some((item, index) => item.conformance_review?.binding !== priorBindings[index])) {
     await store.saveState(state, assertOwnership);
   }

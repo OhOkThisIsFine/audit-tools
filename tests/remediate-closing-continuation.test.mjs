@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
+import fs from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { contentSha256 as hash, currentPromptPath, currentStepPath, FileLockOwnershipLostError, hashContent, runWithBlockedStepBackstop } from "../dist/shared/index.js";
@@ -21,12 +23,26 @@ import { runCloseAcceptance } from "../dist/remediate/phases/closeAcceptance.js"
 import { finalGateOutcomePath, finalGateRecordPath, writeFinalGateVerdict, finalGateVerdictPath } from "../dist/remediate/steps/finalGate.js";
 import { processAgentId } from "../dist/shared/io/stepContractWriter.js";
 import { presentReportStep } from "../dist/remediate/steps/frictionCloseout.js";
+import { conformanceReviewPaths, conformanceSubjectsDir } from "../dist/remediate/steps/dispatch/contractConformanceReview.js";
 
 const entry = fileURLToPath(new URL("../dist/remediate/index.js", import.meta.url));
 const put = (path, value) => writeFile(path, JSON.stringify(value));
 
-async function fixture(t) {
-  const root = await mkdtemp(join(await realpath(tmpdir()), "remediate-closing-continuation-"));
+function afterFileRead(t, target, callback) {
+  const original = readFile;
+  const mocked = t.mock.method(fs, "readFile", async (path, ...args) => {
+    try { return await original(path, ...args); }
+    finally { if (path === target) await callback(); }
+  });
+  syncBuiltinESMExports();
+  return () => {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  };
+}
+
+async function fixture(t, parent = tmpdir()) {
+  const root = await mkdtemp(join(await realpath(parent), "remediate-closing-continuation-"));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 3 }));
   const artifactsDir = join(root, ".audit-tools", "remediation");
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }).trim();
@@ -581,5 +597,205 @@ test("fully green close publishes before cleanup; a fenced terminal pointer leav
       assert.match(await readFile(currentPromptPath(artifactsDir), "utf8"), /Present Remediation Report/);
       assert.equal(await readFile(join(root, ".audit-tools", "remediation-friction-fixture.json"), "utf8"), "{}");
     }
+  });
+});
+
+test("closing refresh fences each carried-forward conformance write and receipt adoption", async t => {
+  for (const loss of ["none", "subject", "request", "review", "receipt"]) await t.test(loss, async t => {
+    const f = await fixture(t);
+    const { root, artifactsDir, store, git } = f;
+    await reviewedClosing(f, "none");
+    const state = await store.loadState();
+    const plan = state.plan;
+    const unit = plan.units[0];
+    const commit = git("rev-parse", "HEAD");
+    const prior = { repository_root: root, run_id: plan.plan_id, work_item_id: unit.id,
+      unit, requirements: plan.requirements, accepted_counterexamples: [], obligation_ids: unit.requirement_ids,
+      result: { landed_commit: commit }, review_revision_sha256: "a".repeat(64) };
+    const binding = hash(prior);
+    const refreshed = hash({ ...prior, review_revision_sha256: plan.review_revision_sha256, refreshed_head: commit });
+    const review = { mode: "independent", reason: "Synthetic independent review for the fixture." };
+    const priorReceipt = { requirement: "independent", binding, review, summary: "Earlier accepted evidence." };
+    const paths = conformanceReviewPaths(artifactsDir, plan.plan_id, unit.id);
+    const subjects = conformanceSubjectsDir(artifactsDir);
+    const oldSubject = join(subjects, binding + ".json");
+    const oldReview = join(subjects, binding + ".review.json");
+    const newSubject = join(subjects, refreshed + ".json");
+    const newReview = join(subjects, refreshed + ".review.json");
+    const lock = join(artifactsDir, PHASE_LOCK_FILENAME);
+    const oldRequest = { binding, content: prior };
+    await mkdir(subjects, { recursive: true });
+    await put(oldSubject, oldRequest);
+    await put(oldReview, priorReceipt);
+    await put(paths.request, oldRequest);
+    state.conformance_review = { enabled: true, run_id: plan.plan_id };
+    state.items[unit.id] = { unit_id: unit.id, status: "resolved", host_landed_commit: commit, conformance_review: priorReceipt };
+    await store.saveState(state);
+    await put(join(artifactsDir, "confirm_resume_ack.json"), { choice: "resume" });
+    const next = () => decideNextStep({ root, artifactsDir, skipFinalGate: true });
+    const request = async () => JSON.parse(await readFile(paths.request, "utf8"));
+    const accept = async () => {
+      assert.equal((await next()).step_kind, "review_contract_conformance");
+      const bound = await request();
+      assert.equal(bound.binding, refreshed);
+      assert.deepEqual(JSON.parse(await readFile(newSubject, "utf8")), bound);
+      assert.deepEqual((await store.loadState()).items[unit.id].conformance_review, priorReceipt);
+      const response = { ...bound.response_template, declaration: review, summary: "Fixture verified.",
+        obligations: unit.requirement_ids.map(obligation_id => ({ obligation_id, verdict: "satisfied", evidence: ["Fixture source is unchanged."] })) };
+      await put(paths.response, response);
+      return response;
+    };
+    if (loss === "none") {
+      const response = await accept();
+      assert.equal((await next()).step_kind, "present_report");
+      assert.deepEqual(JSON.parse(await readFile(newReview, "utf8")), response);
+      assert.equal((await store.loadState()).items[unit.id].conformance_review.binding, refreshed);
+      const archive = join(root, ".audit-tools", "remediation-conformance");
+      assert.deepEqual(JSON.parse(await readFile(join(archive, refreshed + ".json"), "utf8")), await request());
+      assert.deepEqual(JSON.parse(await readFile(join(archive, refreshed + ".review.json"), "utf8")), response);
+    } else {
+      const response = loss === "review" || loss === "receipt" ? await accept() : undefined;
+      const priorLive = await request();
+      let crossed = false;
+      const revoke = async () => {
+        assert.equal(crossed, false);
+        assert.equal(existsSync(lock), true);
+        crossed = true;
+        await rm(lock);
+      };
+      let restore;
+      if (loss === "receipt") {
+        // After review publication and the awaited scope/HEAD recheck, the
+        // real next-step assertion must still prevent stale receipt adoption.
+        const assertActive = StateStore.prototype.assertActivePhaseOwnership;
+        const mocked = t.mock.method(StateStore.prototype, "assertActivePhaseOwnership", async function (assertToken) {
+          if (existsSync(newReview)) await revoke();
+          return assertActive.call(this, assertToken);
+        });
+        const saveState = StateStore.prototype.saveState;
+        const save = t.mock.method(StateStore.prototype, "saveState", function (candidate, ...args) {
+          assert.notEqual(candidate.items?.[unit.id]?.conformance_review?.binding, refreshed, "stale refresh reached the state-save fence");
+          return saveState.call(this, candidate, ...args);
+        });
+        restore = () => {
+          mocked.mock.restore();
+          save.mock.restore();
+        };
+      } else {
+        restore = afterFileRead(t, { subject: newSubject, request: paths.request, review: paths.response }[loss], revoke);
+      }
+      try { await assert.rejects(next, FileLockOwnershipLostError); }
+      finally { restore(); }
+      assert.equal(crossed, true);
+      assert.deepEqual(await request(), priorLive);
+      assert.equal(existsSync(newSubject), loss !== "subject");
+      if (loss === "receipt") assert.deepEqual(JSON.parse(await readFile(newReview, "utf8")), response);
+      else assert.equal(existsSync(newReview), false);
+      assert.deepEqual((await store.loadState()).items[unit.id].conformance_review, priorReceipt);
+    }
+    assert.deepEqual(JSON.parse(await readFile(oldSubject, "utf8")), oldRequest);
+    assert.deepEqual(JSON.parse(await readFile(oldReview, "utf8")), priorReceipt);
+    assert.equal(existsSync(lock), false);
+  });
+});
+
+test("green close archives each conformance artifact only while owned", async t => {
+  const { root, artifactsDir, store } = await fixture(t);
+  await reviewedClosing({ root, artifactsDir, store }, "none");
+  await put(join(artifactsDir, "confirm_resume_ack.json"), { choice: "resume" });
+  const subjects = conformanceSubjectsDir(artifactsDir);
+  const destination = join(root, ".audit-tools", "remediation-conformance");
+  const first = "1".repeat(64) + ".json";
+  const second = "2".repeat(64) + ".review.json";
+  await mkdir(subjects, { recursive: true });
+  await put(join(subjects, first), { marker: "first" });
+  await put(join(subjects, second), { marker: "second" });
+  const lock = join(artifactsDir, PHASE_LOCK_FILENAME);
+  const restore = afterFileRead(t, join(subjects, second), async () => {
+    assert.deepEqual(JSON.parse(await readFile(join(destination, first), "utf8")), { marker: "first" });
+    await rm(lock);
+  });
+  try {
+    await assert.rejects(() => decideNextStep({ root, artifactsDir, skipFinalGate: true }), FileLockOwnershipLostError);
+  } finally { restore(); }
+  assert.equal(existsSync(join(destination, second)), false);
+  assert.deepEqual(JSON.parse(await readFile(join(subjects, second), "utf8")), { marker: "second" });
+  assert.equal((await store.loadState()).status, "complete");
+  assert.equal((await decideNextStep({ root, artifactsDir, skipFinalGate: true })).step_kind, "present_report");
+});
+
+test("native close qualification fences every npm probe, including post-suite and deferred reuse", async t => {
+  // Owned child output redacts OS temp paths on Windows. Use ignored checkout
+  // scratch so the synthetic npm prefix can return the real local root.
+  const parent = fileURLToPath(new URL("../.audit-tools", import.meta.url));
+  await mkdir(parent, { recursive: true });
+  for (const stopAt of [0, 1, 2, 3, 4]) await t.test(`probe pair ${stopAt || "held"}`, async t => {
+    const f = await fixture(t, parent);
+    await reviewedClosing(f, "none");
+    const state = await f.store.loadState();
+    state.plan.test_command = "npm test";
+    state.plan.test_command_source = "project_facts";
+    const { root, artifactsDir, git } = f;
+    for (const dir of ["src/shared", "src/audit", "src/remediate", "scripts/shared", "tests", "node_modules", "dist"]) {
+      await mkdir(join(root, dir), { recursive: true });
+    }
+    await put(join(root, "package.json"), { name: "audit-tools", scripts: {
+      prebuild: "node scripts/shared/guard-no-suite-running.mjs",
+      build: "node scripts/shared/clean-dist.mjs && tsc -p tsconfig.json",
+      check: "tsc -p tsconfig.json --noEmit",
+      "check:tests": "node scripts/shared/run-contract-tests.mjs --check",
+      test: "npm run build && npm run test:built",
+      "test:built": "node scripts/shared/run-contract-tests.mjs",
+      "verify:guards": "npm run test:built",
+    } });
+    for (const file of ["audit-code.mjs", "remediate-code.mjs", "scripts/shared/run-contract-tests.mjs", "dist/built.js"]) {
+      await writeFile(join(root, file), "");
+    }
+    await writeFile(join(root, ".gitignore"), ".audit-tools/\ndist/\nnode_modules/\n");
+    const shimDir = join(root, ".git");
+    const trace = join(shimDir, "npm-trace");
+    await writeFile(trace, "");
+    await writeFile(join(shimDir, "npm-fixture.cjs"), `
+      const argv = process.argv.slice(2);
+      require("node:fs").appendFileSync(".git/npm-trace", argv.slice(0, 2).join(" ") + "\\n");
+      if (argv[0] === "config") console.log("script-shell=null\\nignore-scripts=false\\nworkspace=\\nworkspaces=null\\ninclude-workspace-root=false\\nglobal=false\\nnode-options=null\\nlocation=user");
+      if (argv[0] === "prefix") console.log(process.cwd());
+    `);
+    await writeFile(join(shimDir, "npm"), '#!/bin/sh\nnode .git/npm-fixture.cjs "$@"\n', { mode: 0o755 });
+    await writeFile(join(shimDir, "npm.cmd"), "@node .git/npm-fixture.cjs %*\r\n");
+    git("add", ".");
+    git("commit", "-qm", "Synthetic native close");
+    const pathKey = Object.keys(process.env).find(key => key.toLowerCase() === "path") ?? "PATH";
+    const oldPath = process.env[pathKey];
+    process.env[pathKey] = [shimDir, oldPath].filter(Boolean).join(delimiter);
+    t.after(() => {
+      if (oldPath === undefined) delete process.env[pathKey];
+      else process.env[pathKey] = oldPath;
+    });
+    const launches = async () => (await readFile(trace, "utf8")).trim().split("\n").filter(Boolean);
+    const outcomePath = finalGateOutcomePath(artifactsDir);
+    await writeFile(outcomePath, "earlier outcome");
+    const lost = new Error("synthetic ownership lost during npm qualification");
+    const accept = () => runCloseAcceptance({ state, options: { root, artifactsDir },
+      runCombined: async () => assert.fail("native qualification must not fall back"),
+      assertOwnership: async () => {
+        const observed = await launches();
+        if (stopAt && observed.at(-1) === "config get" && observed.filter(command => command === "config get").length === stopAt) throw lost;
+      },
+    });
+    const all = ["config get", "prefix", "run build", "run check", "run check:tests", "config get", "prefix",
+      "run test:built", "config get", "prefix", "config get", "prefix"];
+    if (stopAt && stopAt < 4) {
+      await assert.rejects(accept, error => error === lost);
+      assert.equal(await readFile(outcomePath, "utf8"), "earlier outcome");
+    } else {
+      const accepted = await accept();
+      assert.equal(accepted.gate.passed, true);
+      assert.equal(accepted.combinedTest.executed_command, "npm run test:built");
+      if (stopAt) await assert.rejects(accepted.recheckNativeGuard, error => error === lost);
+      else assert.equal(await accepted.recheckNativeGuard(), true);
+      assert.equal(JSON.parse(await readFile(outcomePath, "utf8")).passed, true);
+    }
+    assert.deepEqual(await launches(), stopAt ? all.slice(0, [0, 1, 6, 9, 11][stopAt]) : all);
   });
 });
