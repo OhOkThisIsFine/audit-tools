@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { availableParallelism, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashContent } from "./primitives.mjs";
 import { worktreeTrees } from "./worktree-tree.mjs";
@@ -68,11 +68,7 @@ try {
   // On Windows the full fixture inventory can exceed two minutes while still
   // making progress. Keep a finite deadline and require the same complete TAP.
   const timeoutMs = process.platform === "win32" ? 240_000 : 120_000;
-  // Windows fixtures frequently launch their own Git or npm process trees.
-  const workerArgs = process.platform === "win32"
-    ? ["--test-concurrency", String(Math.max(1, Math.floor(availableParallelism() / 2)))]
-    : [];
-  const result = spawnSync(process.execPath, ["--test", ...workerArgs, "--test-reporter=tap", ...paths], {
+  const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", ...paths], {
     cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], windowsHide: true, timeout: timeoutMs,
   });
   process.stdout.write(result.stdout ?? "");
