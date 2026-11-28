@@ -220,15 +220,6 @@ function findHostGuidance(installedHost, host) {
 const legacyLocalAuditCodeSurfaceSpecs = [
   {
     path: [".codex", "skills", "audit-code", "SKILL.md"],
-    content: [
-      "---",
-      "name: audit-code",
-      "description: Conversation-first autonomous code auditing workflow for the /audit-code command.",
-      "---",
-      "",
-      "# audit-code skill",
-      "",
-    ].join("\n"),
   },
   {
     path: [".codex", "skills", "audit-code", "audit-code.prompt.md"],
@@ -268,13 +259,6 @@ const legacyLocalAuditCodeSurfaceSpecs = [
   },
   {
     path: [".opencode", "skills", "audit-code", "SKILL.md"],
-    content: [
-      "---",
-      "name: audit-code",
-      "description: Conversation-first autonomous code auditing workflow for the /audit-code command.",
-      "---",
-      "",
-    ].join("\n"),
   },
   {
     path: [".opencode", "skills", "audit-code", "audit-code.prompt.md"],
@@ -305,10 +289,11 @@ const legacyLocalAuditCodeSurfaceSpecs = [
 ];
 
 async function writeLegacyLocalAuditCodeSurfaces(root) {
+  const shippedSkill = await readFile(new URL("../../skills/audit-code/SKILL.md", import.meta.url), "utf8");
   for (const spec of legacyLocalAuditCodeSurfaceSpecs) {
     const target = join(root, ...spec.path);
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, spec.content);
+    await writeFile(target, spec.content ?? shippedSkill);
   }
 }
 
@@ -445,6 +430,16 @@ export async function runEnsurePhase({ runCommand, auditCodeCommand, root, log }
   assert.equal(ensuredAfterLegacySurfaces.reason, "legacy_local_audit_code_surface");
   await assertLegacyLocalAuditCodeSurfacesRemoved(root);
   log.elapsed("ensure removes stale local command surfaces", stepStart);
+
+  const customSkillPath = join(root, ".opencode", "skills", "audit-code", "SKILL.md");
+  const shippedSkill = await readFile(new URL("../../skills/audit-code/SKILL.md", import.meta.url), "utf8");
+  const customSkill = shippedSkill + "\nProject-specific skill instructions.\n";
+  await writeFile(customSkillPath, customSkill);
+  const ensuredWithCustomSkill = JSON.parse((await runCommand(auditCodeCommand, ["ensure"], {
+    cwd: root, label: "audit-code ensure (custom local skill)",
+  })).stdout);
+  assert.equal(ensuredWithCustomSkill.action, "skipped");
+  assert.equal(await readFile(customSkillPath, "utf8"), customSkill);
 }
 
 // `install` + `verify-install`: every generated host surface, and the negative
