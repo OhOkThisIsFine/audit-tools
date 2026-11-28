@@ -1,8 +1,9 @@
 // sites-pinned: tests/audit/status-command.test.ts
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
-import { assertSubmissionRunId, isFileMissingError, readJsonFile } from "audit-tools/shared";
+import { assertSubmissionRunId, hashContent, isFileMissingError, readJsonFile, toPromptPathToken } from "audit-tools/shared";
 import { AuditTaskSchema } from "../types.js";
 import type { AuditState, ObligationState } from "../types/auditState.js";
 import { getArtifactsDir } from "./args.js";
@@ -14,22 +15,29 @@ import { ARTIFACT_DEFINITIONS, loadArtifactBundle } from "../io/artifacts.js";
 import { ReviewPlanSchema, type ReviewPlan } from "../../shared/types/reviewQuestion.js";
 import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import { loadCurrentActiveReviewRun } from "./reviewRun.js";
-import { StepArtifactSchema } from "./steps.js";
+import { StepArtifactSchema, type StepArtifact } from "./steps.js";
 import { inspectAuditQuestionHandoff, readAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
 import { readExistingRunConsentUnlocked } from "../../shared/analyzerRunConsent.js";
-import { functionalPreflightPath } from "./functionalPreflight.js";
+import { functionalPreflightPath, readFunctionalPreflight } from "./functionalPreflight.js";
 import { getRunPaths } from "../io/runArtifacts.js";
+import { readAuditReviewBinding } from "./auditReviewBindings.js";
+import { AUDIT_GATE_SUBMISSION_SCOPE, laneSubmissionId, laneSubmissionPath, systemicChallengeLane } from "./laneSubmissions.js";
+import { systemicChallengeSchemaForBundle, systemicPremiseToken, systemicReviewInputRevision } from "../orchestrator/systemicChallengeExecutor.js";
+import { systemicChallengeEnded } from "../types/systemicChallenge.js";
+import { parseReviewSubmissionEnvelope } from "../../shared/types/reviewIndependence.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   await withArtifactTreeHold(artifactsDir, undefined, () => reportHeldStatus(artifactsDir));
 }
 
-async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: string) {
+function readCurrentStep(artifactsDir: string) {
+  return readJsonFile<unknown>(join(artifactsDir, "steps", "current-step.json"))
+    .then(raw => StepArtifactSchema.parse(raw));
+}
+
+async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: string, step: StepArtifact) {
   try {
-    const step = StepArtifactSchema.parse(await readJsonFile<unknown>(
-      join(artifactsDir, "steps", "current-step.json"),
-    ));
     const boundPath = step.artifact_paths.host_workload;
     const alongsideChallenge = step.step_kind === "systemic_challenge";
     if ((!alongsideChallenge && step.step_kind !== "dispatch_review") || step.run_id !== runId ||
@@ -69,11 +77,55 @@ async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: st
   }
 }
 
+// Inspect the same persisted round, prompt and answer that next-step would
+// consume, without decoding through its ledger-writing submission path.
+async function systemicContinuation(artifactsDir: string, step: StepArtifact, runId: string) {
+  if (step.step_kind !== "systemic_challenge" || step.status !== "ready" ||
+      step.run_id !== runId || resolve(step.artifacts_dir) !== resolve(artifactsDir)) return null;
+  try {
+    const bundle = await loadArtifactBundle(artifactsDir, {});
+    const register = bundle.systemic_challenge;
+    if (!register || systemicChallengeEnded(register) ||
+        register.round_token !== systemicPremiseToken(bundle)) return { state: "stale" };
+    const lane = systemicChallengeLane(register.rounds);
+    const path = laneSubmissionPath(artifactsDir, lane);
+    const resultPath = step.artifact_paths.systemic_challenge_results;
+    const promptPath = step.artifact_paths.systemic_challenge_prompt;
+    if (!resultPath || resolve(resultPath) !== resolve(path) || !promptPath) return { state: "stale" };
+    const binding = await readAuditReviewBinding(artifactsDir, lane);
+    if (binding?.requirement !== "independent" || binding.runId !== AUDIT_GATE_SUBMISSION_SCOPE ||
+        binding.submissionId !== laneSubmissionId(lane, binding.runId) ||
+        resolve(binding.promptPath) !== resolve(promptPath) ||
+        binding.semanticInputRevision !== systemicReviewInputRevision(bundle)) return { state: "stale" };
+
+    let bytes: Buffer;
+    try { bytes = await readFile(path); } catch (error) {
+      if (!isFileMissingError(error)) throw error;
+      return {
+        state: "await_result",
+        summary: "The systemic challenge can continue once its own result is saved. It does not wait for ordinary answers.",
+      };
+    }
+    const parsed = parseReviewSubmissionEnvelope(JSON.parse(bytes.toString("utf8")), {
+      requirement: binding.requirement, promptSha256: binding.promptSha256,
+    });
+    if (!parsed.ok || !systemicChallengeSchemaForBundle(bundle).safeParse(parsed.result).success) {
+      return { state: "unavailable" };
+    }
+    const roundHash = hashContent(lane + "\n" + hashContent(bytes));
+    if (register.folded_submission_hashes?.includes(roundHash)) return { state: "stale" };
+    return {
+      state: "ready", action: "continue",
+      summary: "Run next-step to continue the systemic challenge without waiting for ordinary answers.",
+    };
+  } catch {
+    return { state: "unavailable" };
+  }
+}
+
 async function publishedPreflight(artifactsDir: string) {
   try {
-    const step = StepArtifactSchema.parse(await readJsonFile<unknown>(
-      join(artifactsDir, "steps", "current-step.json"),
-    ));
+    const step = await readCurrentStep(artifactsDir);
     if (step.step_kind !== "functional_preflight" || !step.run_id ||
         (step.status !== "ready" && step.status !== "blocked") ||
         resolve(step.artifacts_dir) !== resolve(artifactsDir) ||
@@ -81,7 +133,14 @@ async function publishedPreflight(artifactsDir: string) {
         resolve(step.artifact_paths.functional_preflight) !== resolve(functionalPreflightPath(artifactsDir))) return null;
     const consent = await readExistingRunConsentUnlocked(step.repo_root, artifactsDir);
     if (consent?.run_id !== step.run_id) return null;
-    return { run_id: step.run_id, status: step.status, summary: step.progress?.summary ?? null };
+    const current = await readFunctionalPreflight(artifactsDir, consent.run_id, toPromptPathToken(consent.repository_root));
+    if (current.state === "accepted") return {
+      run_id: consent.run_id, status: current.report.decision,
+      summary: current.report.decision === "ready"
+        ? "Functional preflight is ready. Run next-step to continue."
+        : "Operator approved a degraded audit. Run next-step to continue. Limitation: " + current.report.limitation,
+    };
+    return { run_id: consent.run_id, status: current.state === "stopped" ? "blocked" : "pending", summary: current.summary };
   } catch {
     // A missing, invalid, or stale publication cannot prove an active preflight.
     return null;
@@ -132,6 +191,7 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
   // Planned questions are not outstanding answers. Only the published handoff
   // and accepted ledger can report answer status.
   let handoff: Awaited<ReturnType<typeof questionHandoff>> | null = null;
+  let systemic: Awaited<ReturnType<typeof systemicContinuation>> = null;
   let questionReview: { run_id: string | null; snapshot_id: string; planned_questions: number } | null = null;
   let questionReviewUnreadable = false;
   try {
@@ -139,7 +199,15 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
       join(artifactsDir, ARTIFACT_DEFINITIONS.review_plan.fileName),
     ));
     const runId = await readQuestionReviewRunId(artifactsDir);
-    if (runId && auditState.status !== "complete") handoff = await questionHandoff(artifactsDir, plan, runId);
+    if (runId && auditState.status !== "complete") {
+      const step = await readCurrentStep(artifactsDir).catch(() => undefined);
+      if (step) {
+        handoff = await questionHandoff(artifactsDir, plan, runId, step);
+        systemic = await systemicContinuation(artifactsDir, step, runId);
+      } else {
+        handoff = { state: "unavailable" };
+      }
+    }
     questionReview = {
       run_id: runId ?? null,
       snapshot_id: plan.snapshot_id,
@@ -187,6 +255,7 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     archived_pending_tasks: pendingTasksSummary,
     archived_pending_tasks_state: archivedTasksState,
     question_review_handoff: handoff,
+    systemic_challenge_continuation: systemic,
     question_review: questionReview,
     question_review_unreadable: questionReviewUnreadable,
   });
