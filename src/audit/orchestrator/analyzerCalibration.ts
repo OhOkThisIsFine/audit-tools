@@ -25,6 +25,7 @@ export const AnalyzerCalibrationSchema = z.strictObject({
       detail: explanation,
     }).optional(),
     measurement: z.strictObject({
+      attempt_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
       outcome: z.enum(["complete", "partial", "failed"]),
       evidence: explanation,
     }).optional(),
@@ -84,11 +85,13 @@ export function analyzerCalibrationRequest(bundle: ArtifactBundle, selection: un
   } });
   const runtimes = new Map(Object.entries(analyzerRuntimeOverrides(parsedSelection.success ? parsedSelection.data.decisions : [])));
   const previousRetries = new Map<string, Set<string>>();
+  const latestRetry = new Map<string, string>();
   for (const retry of bundle.external_analyzer_acquisition?.calibration_retries ?? []) {
     for (const row of retry.tools) {
       const override = analyzerRuntimeOverrides([row])[row.tool];
       if (override) runtimes.set(row.tool, override);
       if (row.change) {
+        latestRetry.set(row.tool, hashContent(stableStringify([retry.input_sha256, retry.at, row.change])));
         const signatures = previousRetries.get(row.tool) ?? new Set<string>();
         signatures.add(retrySignature(runtimes.get(row.tool), row.change));
         previousRetries.set(row.tool, signatures);
@@ -96,9 +99,17 @@ export function analyzerCalibrationRequest(bundle: ArtifactBundle, selection: un
     }
   }
   const admitted = new Set(bundle.file_disposition?.files.filter(file => file.status === "included").map(file => file.path));
+  const measurementScope = hashContent(stableStringify({
+    files: bundle.repo_manifest?.files, disposition: bundle.file_disposition?.files,
+    selection: parsedSelection.success ? parsedSelection.data.input_sha256 : null,
+  }));
   const tools = [...statuses.values()].map(({ row, runner, requestedScope }) => {
     const admittedSkipped = row.reported_coverage?.skipped.filter(path => admitted.has(path)) ?? [];
-    return { ...row, runner, requestedScope, admittedSkipped,
+    const measurementAttempt = runner === "host" ? hashContent(stableStringify({
+      tool: row.tool, scope: requestedScope, measurementScope,
+      retry: latestRetry.get(row.tool),
+    })) : undefined;
+    return { ...row, runner, requestedScope, measurementAttempt, admittedSkipped,
       incomplete: isDegradedExternalAnalyzerStatus(row) || Boolean(row.source_read_failures) || admittedSkipped.length > 0,
       findings: bundle.external_analyzer_results?.find(entry => entry.tool === row.tool)?.results.length ?? 0 };
   });
@@ -120,7 +131,8 @@ export function currentAnalyzerCalibration(value: unknown, request: AnalyzerCali
     const row = byId.get(tool.tool);
     if (!row || !validRuntimeOverride(row, row.action === "retry" && tool.runner === "registered") ||
         (row.action === "retry" && !row.change) ||
-        (tool.runner !== "host" && row.measurement)) return false;
+        (row.measurement && (tool.runner !== "host" ||
+          row.measurement.attempt_sha256 !== tool.measurementAttempt))) return false;
     if (row.action === "retry" && row.change) {
       const runtime = analyzerRuntimeOverrides([row])[row.tool] ?? request.runtimes.get(row.tool);
       if (request.previousRetries.get(row.tool)?.has(retrySignature(runtime, row.change))) return false;

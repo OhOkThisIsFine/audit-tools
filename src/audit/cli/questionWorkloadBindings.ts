@@ -1,7 +1,8 @@
-// sites-pinned: tests/audit/next-step-question-workload.test.ts, tests/audit/result-submit.test.ts
+// sites-pinned: tests/review-evidence.test.mjs
 import { compareCodeUnits, hashContent, stableStringify, toPosixPath } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { projectRuleMatchesLens } from "../orchestrator/projectRuleEvidence.js";
+import { reviewSourceRefContains } from "../orchestrator/questionEvidence.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewPlan, type ReviewAssignment, type ReviewEvidence, type ReviewReopenEvent, type ReviewSourceRef, questionReopenDependencies } from "../../shared/types/reviewQuestion.js";
 import type { AuditQuestionBinding } from "./dispatch/questionReviewAcceptance.js";
@@ -86,11 +87,16 @@ export async function questionWorkloadBindings(
     for (const { path } of suggested_sources) {
       for (const position of evidenceByPath.get(path) ?? []) matches.add(position);
     }
-    for (const dependency of question.evidence_dependencies) {
-      for (const position of evidenceByDependency.get(stableStringify(dependency)) ?? []) matches.add(position);
-    }
+    const explicitlyBound = new Set(question.evidence_dependencies.flatMap(dependency =>
+      evidenceByDependency.get(stableStringify(dependency)) ?? []));
+    for (const position of explicitlyBound) matches.add(position);
     const scopedEvidence = [...matches].sort((a, b) =>
       compareCodeUnits(evidence[a]!.evidence_id, evidence[b]!.evidence_id) || a - b)
+      // A shared harness or an omnibus file can support unrelated operations.
+      // Infer relevance only when all evidence spans are within this question's
+      // suggested scope. Preserve intentional cross-surface evidence bindings.
+      .filter(position => explicitlyBound.has(position) || evidence[position]!.source_refs.every(ref =>
+        suggested_sources.some(suggested => reviewSourceRefContains(suggested, ref))))
       .map(position => evidence[position]!)
       .filter(record => projectRuleMatchesLens(record.evidence_id, question.lens));
     const epoch = epochs.get(question.question_id);

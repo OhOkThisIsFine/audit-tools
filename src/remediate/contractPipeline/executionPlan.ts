@@ -513,7 +513,8 @@ export async function readApprovedExecutionPlan(artifactsDir: string): Promise<{
   if (!canonical || !source || canonical.source_sha256 !== contentSha256(source)) return undefined;
   if(stableStringify(source.intent??null)!==stableStringify(await readExecutionIntent(artifactsDir)??null))return undefined;
   for (const entry of source.sources) {
-    try { if (hashContent(await readFile(entry.path, "utf8")) !== entry.sha256) return undefined; }
+    // sites-pinned: tests/plan-authority.test.mjs
+    try { if (hashContent(await readFile(entry.path)) !== entry.sha256) return undefined; }
     catch { return undefined; }
   }
   const paths=executionPlanPaths(artifactsDir);

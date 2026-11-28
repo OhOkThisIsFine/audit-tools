@@ -227,7 +227,8 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
   }
   for (const entry of source.sources) {
     let actual: string;
-    try { actual = hashContent(await readFile(entry.path, "utf8")); } catch { actual = "missing"; }
+    // sites-pinned: tests/plan-authority.test.mjs
+    try { actual = hashContent(await readFile(entry.path)); } catch { actual = "missing"; }
     if (actual !== entry.sha256) return emit(options, `The agreed input ${entry.path} changed or disappeared. The current plan is preserved. Restore the agreed source or explicitly start a new run; an old review cannot authorize changed source evidence.`, "blocked");
   }
   const state = await readOptionalJsonFile<Pick<RemediationState, "plan" | "items" | "wave_simplifications">>(join(options.artifactsDir, STATE_FILENAME));

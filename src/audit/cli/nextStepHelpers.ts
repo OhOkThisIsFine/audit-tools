@@ -2785,12 +2785,12 @@ const HOST_SELECTION_OBLIGATION_ORDER = PRIORITY.flatMap(id =>
 type CalibrationInputs = { selection: unknown; receipt: unknown };
 
 // sites-pinned: tests/audit-smoke.test.mjs
-async function measureCalibrationIndex(bundle: ArtifactBundle, params: NextStepParams, retry = false) {
+async function measureCalibrationIndex(bundle: ArtifactBundle, params: NextStepParams, attempt?: string) {
   const scope = reviewSourceScope(bundle);
   const files = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])]
     .map(path => ({ path, fingerprint: scope.files.get(path)!.hash! }));
   const { indexed, graphSha256, graphIndexError } =
-    await publishAuditEvidenceGraph(params.artifactsDir, requireSourceRoot(params), files, undefined, true, retry);
+    await publishAuditEvidenceGraph(params.artifactsDir, requireSourceRoot(params), files, undefined, true, attempt);
   if (indexed && graphSha256) return { status: "success" as const, index_sha256: graphSha256 };
   if (graphIndexError) return { status: "failed" as const, error: graphIndexError };
   return { status: "not_resolved" as const, error: "No eligible local Codebase Memory executable was configured or found." };
@@ -2847,7 +2847,7 @@ function calibrationObligation(inputs: CalibrationInputs): AuditObligationDef {
               : { updated: { ...bundle, external_analyzer_acquisition: { ...active } }, artifacts_written: [acquisitionFile] };
             const marker = next.updated.external_analyzer_acquisition!;
             marker.codebase_memory = affected.includes(CODEBASE_MEMORY)
-              ? await measureCalibrationIndex(next.updated, ctx.params, true)
+              ? await measureCalibrationIndex(next.updated, ctx.params, request.input_sha256)
               : active.codebase_memory;
             marker.calibration_retries = [...(marker.calibration_retries ?? []), {
               input_sha256: request.input_sha256, at: marker.generated_at ?? new Date().toISOString(),
@@ -3108,6 +3108,7 @@ async function prepareQuestionDispatch(bundle: ArtifactBundle, ctx: AuditNextSte
     root: ctx.params.root, sourceRoot, artifactsDir: ctx.params.artifactsDir, runId: cycle.runId, bindings: cycle.pending,
     inventoryOmissionCount: bundle.review_plan?.omissions.length,
     graph: bundle.graph_bundle,
+    acquisition: bundle.external_analyzer_acquisition,
   });
   return {
     carried,

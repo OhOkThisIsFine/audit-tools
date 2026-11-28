@@ -37,8 +37,7 @@ export interface ExecutorDefinition {
    * superset the code may produce; the two are pinned against each other by
    * legacy tests/audit/executor-artifact-production-declaration.test.ts.
    *
-   * Ordered by artifact fileName, then role (content-derived stable key, as
-   * `LIFECYCLE_PRODUCTIONS` and `EXECUTOR_WRITE_SITES` are) — pinned by DECL-9.
+   * Ordered by artifact fileName, then role, like `LIFECYCLE_PRODUCTIONS`.
    */
   produces: readonly ArtifactProduction[];
   /**

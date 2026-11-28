@@ -414,11 +414,13 @@ export function finalGateVerdictPath(artifactsDir: string): string {
  * a cache miss costs a gate run, a false hit certifies a tree nobody checked.
  * Never throws.
  */
+// sites-pinned: tests/plan-authority.test.mjs
 export async function readFinalGateVerdict(
   artifactsDir: string,
   scope: string,
   tree: string | null,
   binding?: string,
+  retryRed = false,
 ): Promise<FinalGateVerdictRecord | undefined> {
   if (tree === null) return undefined;
   const raw = await readOptionalJsonFile<FinalGateVerdictRecord>(
@@ -430,6 +432,8 @@ export async function readFinalGateVerdict(
   if (binding !== undefined && (record.binding !== binding || record.scoped_out)) return undefined;
   if (record.tree === null || record.tree !== tree) return undefined;
   if (!Array.isArray(record.results)) return undefined;
+  // A repaired runtime or fixture may not change source bytes or command argv.
+  if (retryRed && !record.passed) return undefined;
   return record;
 }
 

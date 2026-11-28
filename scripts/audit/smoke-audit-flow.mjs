@@ -95,7 +95,7 @@ async function advanceToDispatchReady(runNextStep, log) {
       const reason = "Offline smoke fixture";
       const answer = step.step_kind === "analyzer_selection"
         ? { input_sha256, decisions: tools.map(tool => ({ tool, action: "omit", reason })), additional_checks: [], gaps: [] }
-        : { input_sha256, decisions: tools.map(tool => ({ tool, action: "limited", reason, coverage: "No independent coverage claimed" })), unresolved: [] };
+        : { input_sha256, decisions: tools.map(tool => ({ tool, action: "limited", reason, coverage: "No independent coverage claimed", recovery: { failure: "complete", disposition: "exhausted", detail: "Hermetic smoke runs without external analyzer coverage" } })), unresolved: [] };
       await writeFile(step.artifact_paths[step.step_kind], JSON.stringify(answer, null, 2) + "\n");
       continue;
     }

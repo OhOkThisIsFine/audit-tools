@@ -126,11 +126,13 @@ import {
   type GateRunner,
   type ToolOwnedFinalGateResult,
 } from "./finalGate.js";
+// sites-pinned: tests/plan-authority.test.mjs
 import {
   renderGateAttribution,
   worktreeContentId,
   type GateRedAttribution,
   finalGateBinding,
+  toolOwnedFinalGateCommands,
 } from "./gateCommands.js";
 import {
   buildNextContractPipelineStep,
@@ -212,6 +214,8 @@ export interface NextStepOptions extends FindingSelectionOptions {
   finalizeClosing?: boolean;
   /** Explicit operator-supplied test role; retained in the current plan. */
   verificationCommand?: string;
+  /** Bypass a matching red phase-boundary verdict after external prerequisites change. */
+  retryFinalGate?: boolean;
   forceReplan?: boolean;
   /** Persist a stop after successful planning, before implementation. */
   planOnly?: boolean;
@@ -759,6 +763,28 @@ export function reportNamesResultFiles(
   );
 }
 
+// sites-pinned: tests/plan-authority.test.mjs
+export function renderRepositoryFloorPreview(
+  root: string,
+  state: RemediationState,
+  options: NextStepOptions,
+): string[] {
+  if (finalGateDisabledReason(options) !== null) return [];
+  const commands = toolOwnedFinalGateCommands(root, explicitFinalGateTestCommand(state));
+  if (!commands.length) return [];
+  return [
+    "## Repository verification prerequisites (orchestrator, before delegation)",
+    "",
+    "Planned repository verification commands, as currently declared (not executed here):",
+    ...commands.map(spec => "- " + spec.layer + ": " + renderPromptCommand(spec.argv) +
+      (spec.package_dir ? " (cwd: " + spec.package_dir + ")" : "")),
+    "",
+    "Inspect these commands and their repository setup instructions now for required runtimes, dependencies, and fixtures. For necessary fixtures, establish isolated startup, readiness, and teardown with focused checks; surface anything unavailable or requiring separate authorization before dispatch. Do not use live services or production credentials as fixture substitutes.",
+    "Do not repeat an adequate prerequisite check unless the commands or environment change. Do not run the repository-wide suite here; the gate re-resolves and runs verification on the current checkout.",
+    "",
+  ];
+}
+
 async function buildImplementDispatchStep(ctx: {
   root: string;
   artifactsDir: string;
@@ -937,6 +963,7 @@ async function buildImplementDispatchStep(ctx: {
     "",
     `\`${handoff.workload_path}\``,
     "",
+    ...renderRepositoryFloorPreview(root, state, ctx.options),
     "The file lists the issued wave. Give each item's prompt to a worker. Do not start unissued units; units with overlapping write scope wait for a later wave.",
     "",
     ...report,
@@ -1664,10 +1691,12 @@ async function handlePendingIntake(
     discoveryRead,
     loaderCommand,
     randomRunId,
+    // sites-pinned: tests/plan-authority.test.mjs
     // A newly accepted revision must not inherit the prior source's
-    // synthesis or finding approval. Keep those records as history.
+    // synthesis, scope confirmation, or finding approval. Keep those records as history.
     archivePriorSourceIntake: () => archiveConsumedInputs([
       paths.summary, paths.clarificationResolution, paths.brief, paths.riskSignal,
+      paths.intentCheckpoint, intentInterpretationPath(artifactsDir),
       reviewRequestPath(artifactsDir), reviewResolutionPath(artifactsDir),
       reviewDecisionPath(artifactsDir), reviewFilterDispositionsPath(artifactsDir),
     ]),
@@ -2081,6 +2110,7 @@ async function emitFinalGateRedStep(ctx: {
   // SERVED, not observed. State the id and state exactly what moves it: any
   // edit to a non-ignored file outside the run's own artifacts. This is the
   // same carve-out `worktreeContentId` applies, said in the operator's terms.
+  // sites-pinned: tests/plan-authority.test.mjs
   const bindingBlock =
     ctx.tree === undefined
       ? "The tool keeps no copy of this result. Each next-step runs the full build\n" +
@@ -2094,9 +2124,10 @@ async function emitFinalGateRedStep(ctx: {
           `outside \`${AUDIT_TOOLS_DIRNAME}/\` and outside git-ignored paths changes that tree.\n` +
           "The next next-step then runs the full build and suite again, which takes\n" +
           "minutes. With no edit, next-step shows this same red at once and runs\n" +
-          "nothing. So fix something before you run next-step again.";
+          "nothing. Use --retry-final-gate after fixing an external prerequisite that does not change the tree.";
   const nextCommand = loaderCommand("next-step");
   const recoveryCommand = `${nextCommand} --verification-command "<operator-approved command>"`;
+  const retryCommand = ctx.tree == null ? nextCommand : loaderCommand("next-step --retry-final-gate");
   const declaredTestHint = gate.results.length === 0 ? suggestDeclaredMakeTest(root) : undefined;
   const declaredTestHintText = declaredTestHint
     ? "The root Makefile contains a test target. Candidate: `" + renderPromptCommand(declaredTestHint) +
@@ -2144,13 +2175,13 @@ ${attributionBlock}
 Do these steps:
 
 1. Fix the failing command, or confirm that it was already broken before this run.
-2. Run \`${nextCommand}\`.
+2. Run \`${retryCommand}\`.
 
 When the suite is green, the run continues from where it stopped.
 
 ${bindingBlock}
 `,
-      allowedCommands: gate.results.length === 0 ? [nextCommand, recoveryCommand] : [nextCommand],
+      allowedCommands: gate.results.length === 0 ? [nextCommand, recoveryCommand] : [retryCommand],
       stopCondition:
         gate.results.length === 0
           ? "Stop. Obtain an explicit verification command from the operator or leave this run paused."
@@ -2234,7 +2265,8 @@ async function runPhaseBoundaryGate(ctx: {
   // known and was already recorded. A HIT is therefore a full substitute,
   // including for a RED one (see {@link readFinalGateVerdict} — the pause is
   // rebuilt from the cached results rather than re-derived).
-  const cached = await readFinalGateVerdict(artifactsDir, scope, tree, binding);
+  // sites-pinned: tests/plan-authority.test.mjs
+  const cached = await readFinalGateVerdict(artifactsDir, scope, tree, binding, options.retryFinalGate);
   if (cached !== undefined) {
     // Recorded as a distinct outcome from a real run: the judge is `history`,
     // not a spawned command, and `commands_run` counts what HISTORY held, never

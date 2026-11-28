@@ -72,7 +72,7 @@ try {
     cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], windowsHide: true, timeout: timeoutMs,
   });
   process.stdout.write(result.stdout ?? "");
-  if (result.error?.code === "ETIMEDOUT") {
+  if (result.error && "code" in result.error && result.error.code === "ETIMEDOUT") {
     throw new Error(`Contract suite timed out (ETIMEDOUT) after ${timeoutMs / 1000}s; no green stamp written. Rerun npm run test:built unfiltered on the same unchanged checkout when the machine is ready.`);
   }
   if (result.error) throw result.error;

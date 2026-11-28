@@ -68,7 +68,7 @@ async function run(binary: string, home: string, operation: string, args: object
 
 /** Source-only local index. Stage only admitted bytes, never the live workspace,
  * Git metadata, or file links. Remove the staging tree before publishing. */
-export async function prepareReviewerCbm(runDir: string, sourceRoot: string, files: readonly SourceFile[], retryFailure = false): Promise<{
+export async function prepareReviewerCbm(runDir: string, sourceRoot: string, files: readonly SourceFile[], attempt?: string): Promise<{
   indexed?: ReviewerCbm; failure?: string; reusedFailure?: boolean;
 }> {
   const binary = executable();
@@ -85,6 +85,7 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
   const root = await realpath(sourceRoot);
   const key = hashContent(stableStringify({
     engine: ENGINE, root, files, tool: build ? { binary, build } : { unqualified: binary ?? configured },
+    ...(attempt === undefined ? {} : { attempt }),
     ...(process.platform === "win32" && { systemRoot: process.env.SystemRoot }),
   }));
   await mkdir(runDir, { recursive: true });
@@ -98,7 +99,7 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
   }
   try {
     const prior = FailureMarker.safeParse(JSON.parse(await readFile(failurePath, "utf8")));
-    if (!retryFailure && prior.success && prior.data.key === key) return { failure: prior.data.reason, reusedFailure: true };
+    if (prior.success && prior.data.key === key) return { failure: prior.data.reason, reusedFailure: true };
   } catch (error) {
     if (!isFileMissingError(error) && !(error instanceof SyntaxError)) throw error;
   }

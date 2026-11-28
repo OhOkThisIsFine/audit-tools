@@ -9,6 +9,7 @@ import {
   hashContent,
   hostHandoffResultPath,
   isFileMissingError,
+  isSha256,
   isJsonParseError,
   readJsonFile,
   resolveContainedPath,
@@ -53,8 +54,9 @@ import {
 import type { ArtifactBundle } from "../../io/artifacts.js";
 import { projectQuestionForReport } from "../../reporting/questionReport.js";
 import { renderAuditCommand } from "../prompts.js";
-import { prepareReviewerCbm } from "../reviewerCodebaseMemory.js";
+import { prepareReviewerCbm, ReviewerCbmSchema } from "../reviewerCodebaseMemory.js";
 import { buildReviewerGraph } from "../reviewGraphCommand.js";
+import { CODEBASE_MEMORY } from "../../orchestrator/analyzerCalibration.js";
 import {
   acceptQuestionReview,
   projectQuestionReview,
@@ -155,7 +157,7 @@ async function readQuestionLedger(paths: ResolvedBoundaryPaths) {
   return ledger;
 }
 
-const reviewerGraphIndex = (artifactsDir: string, digest: string) =>
+export const reviewerGraphIndex = (artifactsDir: string, digest: string) =>
   join(artifactsDir, "review-graph-index", digest + ".json");
 
 /** Existing issued workloads did not encode which graph layout issued them. */
@@ -279,19 +281,33 @@ export async function publishAuditEvidenceGraph(
   sourceFiles: readonly { path: string; fingerprint: string }[],
   graph: ArtifactBundle["graph_bundle"],
   indexSourceOnly: boolean | "native-only" = false,
-  retryIndexFailure = false,
+  indexAttempt?: string,
+  acquisition?: ArtifactBundle["external_analyzer_acquisition"],
 ) {
   const files = sourceFiles.map(({ path, fingerprint }) => ({ path, fingerprint }))
     .sort((a, b) => compareCodeUnits(a.path, b.path));
+  const sourceFingerprint = hashContent(stableStringify(files));
   let indexed;
   let graphIndexError: string | undefined;
   let graphIndexFailureReused = false;
-  if (indexSourceOnly !== "native-only" && (graph || indexSourceOnly)) {
+  const measurement = acquisition?.codebase_memory;
+  if (indexSourceOnly !== "native-only" && (graph || indexSourceOnly || measurement)) {
     try {
-      const result = await prepareReviewerCbm(artifactsDir, sourceRoot, files, retryIndexFailure);
-      indexed = result.indexed;
-      graphIndexError = result.failure;
-      graphIndexFailureReused = result.reusedFailure === true;
+      const handle = measuredCodebaseMemoryHandle(artifactsDir, acquisition);
+      if (handle) {
+        const measured = await readFile(handle.graphIndex, "utf8");
+        if (hashContent(measured) !== handle.graphSha256) throw new Error("Calibrated graph does not match the measured fingerprint.");
+        const receipt = z.looseObject({ source_sha256: z.string().optional(), indexed: ReviewerCbmSchema }).parse(JSON.parse(measured));
+        // A changed admitted scope must not reuse an index over different source bytes.
+        if (receipt.source_sha256 === sourceFingerprint) indexed = receipt.indexed;
+      }
+      if (measurement?.status === "failed") graphIndexError = measurement.error ?? "The measured Codebase Memory attempt failed.";
+      if (!indexed && (!measurement || measurement.status === "success")) {
+        const result = await prepareReviewerCbm(artifactsDir, sourceRoot, files, indexAttempt ?? latestCodebaseMemoryAttempt(acquisition));
+        indexed = result.indexed;
+        graphIndexError = result.failure;
+        graphIndexFailureReused = result.reusedFailure === true;
+      }
     }
     catch (error) {
       graphIndexError = errorMessage(error);
@@ -303,7 +319,7 @@ export async function publishAuditEvidenceGraph(
   // actually succeeded. Failed or unconfigured indexing must not publish it.
   const indexedOnly = graph === undefined && indexed !== undefined;
   const graphText = graph || indexedOnly
-    ? buildReviewerGraph(graph ?? { graphs: {} }, files.map(({ path }) => path), indexed)
+    ? buildReviewerGraph(graph ?? { graphs: {} }, files.map(({ path }) => path), indexed, sourceFingerprint)
     : undefined;
   const graphSha256 = graphText === undefined ? undefined : hashContent(graphText);
   const graphIndex = graphSha256 === undefined ? undefined : reviewerGraphIndex(artifactsDir, graphSha256);
@@ -311,9 +327,22 @@ export async function publishAuditEvidenceGraph(
   return { graphIndex, graphSha256, indexed, indexedOnly, graphIndexFailed: graphIndexError !== undefined, graphIndexError, graphIndexFailureReused };
 }
 
+export function latestCodebaseMemoryAttempt(acquisition: ArtifactBundle["external_analyzer_acquisition"]) {
+  return acquisition?.calibration_retries?.filter(retry => retry.tools.some(row => row.tool === CODEBASE_MEMORY)).at(-1)?.input_sha256;
+}
+
+export function measuredCodebaseMemoryHandle(artifactsDir: string, acquisition: ArtifactBundle["external_analyzer_acquisition"]) {
+  const receipt = acquisition?.codebase_memory;
+  const digest = receipt?.index_sha256;
+  return receipt?.status === "success" && digest && isSha256(digest)
+    ? { graphIndex: reviewerGraphIndex(artifactsDir, digest), graphSha256: digest }
+    : undefined;
+}
+
 export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
   sourceRoot: string; bindings: readonly AuditQuestionBinding[]; inventoryOmissionCount?: number;
   graph?: ArtifactBundle["graph_bundle"];
+  acquisition?: ArtifactBundle["external_analyzer_acquisition"];
 }) {
   const paths = resolveBoundaryPaths(params);
   const ids = new Set<string>();
@@ -334,7 +363,7 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
     }
   }
   const { graphSha256, indexed, graphIndexFailed } =
-    await publishAuditEvidenceGraph(paths.artifactsDir, params.sourceRoot, sourceFiles, params.graph);
+    await publishAuditEvidenceGraph(paths.artifactsDir, params.sourceRoot, sourceFiles, params.graph, false, undefined, params.acquisition);
   const workload = QuestionWorkloadSchema.parse({
     contract_version: REVIEW_QUESTION_CONTRACT_VERSION, run_id: paths.runId, source_root: toPosixPath(params.sourceRoot),
     source_files: sourceFiles,

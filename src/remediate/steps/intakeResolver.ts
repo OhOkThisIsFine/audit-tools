@@ -430,7 +430,8 @@ async function selectIntakeSource(
   requestedSelection: ReturnType<typeof requestedFindingSelection>,
   collectStartingPointStep: CollectStartingPointStep,
 ): Promise<IntakePause | { kind: "selected"; manifest: IntakeSourceManifest; discoveredInput?: VerifiedDiscoveredInput }> {
-  const { artifactsDir, inputResolution } = params;
+  // sites-pinned: tests/plan-authority.test.mjs
+  const { inputResolution } = params;
   let manifest = previousManifest;
   let discoveredInput: VerifiedDiscoveredInput | undefined;
   let classifiedAudit: { path: string; content: string; parsed: unknown } | undefined;

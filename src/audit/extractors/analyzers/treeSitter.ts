@@ -1,7 +1,8 @@
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolveWithinRoot } from "../../../shared/io/pathContainment.js";
 
 /**
  * Shared web-tree-sitter loader for the Tier-S parser analyzers (Python / HTML /
@@ -75,11 +76,8 @@ function selectedParserEntry(dependencyPath: string): string | undefined {
       ? createRequire(manifestPath).resolve("web-tree-sitter")
       : resolve(packageDir, manifest.module ?? manifest.main ?? "index.js"),
   );
-  const fromPackage = relative(packageDir, entry);
-  if (!fromPackage || fromPackage === ".." || fromPackage.startsWith(`..${sep}`) || isAbsolute(fromPackage)) {
-    return undefined;
-  }
-  return pathToFileURL(entry).href;
+  const contained = resolveWithinRoot(packageDir, entry, { allowRoot: false });
+  return contained ? pathToFileURL(contained).href : undefined;
 }
 
 async function importParserModule(

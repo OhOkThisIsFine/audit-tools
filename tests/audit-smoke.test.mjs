@@ -78,6 +78,12 @@ test("one review survives a fresh CLI invocation and both audit reports agree on
         decisions:[retry,decisions[1]]},retried),undefined);
       assert.ok(currentAnalyzerCalibration({...answer,input_sha256:retried.input_sha256,
         decisions:[{...retry,change:{...retry.change,detail:"Use fixture config 2"}},decisions[1]]},retried));
+      const host = request.tools.find(tool => tool.tool === retry.tool);
+      const hostAccepted = { tool: retry.tool, action: "accept", reason: "Fixture complete",
+        coverage: "src/*.ts", measurement: { outcome: "complete", evidence: "Exact synthetic invocation output.",
+          attempt_sha256: host.measurementAttempt } };
+      assert.ok(currentAnalyzerCalibration({...answer,input_sha256:request.input_sha256,decisions:[hostAccepted,decisions[1]]},request));
+      assert.equal(currentAnalyzerCalibration({...answer,input_sha256:retried.input_sha256,decisions:[hostAccepted,decisions[1]]},retried),undefined);
       // Normal end-to-end smoke completes after both explicit blockers.
       await put(step.artifact_paths.analyzer_calibration,answer);
     }else if(step.step_kind==="critical_flow_fallback"){

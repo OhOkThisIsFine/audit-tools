@@ -155,6 +155,7 @@ on:
       - "src/remediate/steps/dispatch/hostHandoff.ts"
       - "src/remediate/steps/finalGate.ts"
       - "src/remediate/steps/frictionCloseout.ts"
+      - "src/remediate/steps/intakeResolver.ts"
       - "src/remediate/steps/nextStep.ts"
       - "src/remediate/steps/planningGraph.ts"
       - "src/remediate/steps/prompts.ts"
