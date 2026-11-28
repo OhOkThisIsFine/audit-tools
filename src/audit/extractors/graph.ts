@@ -1,5 +1,5 @@
 import { buildGraphPathIndex, type GraphPathIndex } from "./graphPathIndex.js";
-// sites-pinned: tests/audit/graph-edge-cache.test.ts, tests/audit/graph-framework-routes.test.ts
+// sites-pinned: tests/audit-changed-site-pins-cycle3.test.mjs
 import { pythonRouterIdentities } from "./graphRouteSources.js";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, posix, resolve } from "node:path";
@@ -798,7 +798,7 @@ function extractPerFileContribution(
  * never equal a key minted now, so a stale cache degrades to a full re-extraction
  * (fail-safe) instead of replaying contributions built under different rules.
  */
-// sites-pinned: tests/audit/graph-edge-cache.test.ts
+// sites-pinned: tests/audit-changed-site-pins-cycle3.test.mjs
 export const GRAPH_EDGE_CACHE_KEY_VERSION = "v23";
 
 /**

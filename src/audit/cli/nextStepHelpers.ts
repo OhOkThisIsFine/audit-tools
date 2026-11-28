@@ -5,7 +5,6 @@ import { nextStepCommand } from "./prompts.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { assertQualifiedReviewObligation, assertQualifiedReviewStillCurrent, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
 import { publishAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
-import { preservesSourceIndexes } from "../orchestrator/executorRunners.js";
 import type { SpawnDeadline } from "../../shared/tooling/exec.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { decodeAuditReviewSubmission, readAuditReviewSubmission, currentAuditReviewInputRevision, auditLaneReviewRequirement, type CurrentReviewInputRevision } from "./reviewSubmission.js";
@@ -166,9 +165,7 @@ import { runExternalAnalyzerAcquisitionExecutor, type ExternalAcquisitionAdvance
 import {
   writeHandoffOnly,
 } from "./reviewRun.js";
-import { sizeIndexFromManifest } from "../orchestrator/reviewPacketSizing.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
-import { buildLineIndex } from "./lineIndex.js";
 import { errorMessage } from "../../shared/io/json.js";
 import {
   buildCharterPacketManifest,
@@ -2337,11 +2334,9 @@ export async function executeAndRecord(
   lastSummary: string,
   bundle: ArtifactBundle,
   ctx: {
-    manifestIndexCache: ManifestIndexCache;
     failureRef: { value: FailureAttribution };
   },
 ): Promise<AdvanceAuditResult> {
-  const inputManifest = bundle.repo_manifest;
   try {
     // Write a "started" marker before execution so a host watching the filesystem
     // can tell which executor is active during a long-running step (OBS-0d4c2311).
@@ -2353,7 +2348,6 @@ export async function executeAndRecord(
       status: "running",
       started_at: startedAt,
     });
-    const indexes = await manifestIndexes(requireSourceRoot(params), bundle, ctx.manifestIndexCache);
     const result = await runSingleAdvanceStep(bundle, {
       root: requireSourceRoot(params),
       repositoryRoot: params.root,
@@ -2363,8 +2357,6 @@ export async function executeAndRecord(
       externalAcquisition: params.externalAcquisition,
       autoFix: params.autoFix,
       since: params.since,
-      lineIndex: indexes.lineIndex,
-      sizeIndex: indexes.sizeIndex,
       // ONE git-index probe per fold (see `ScopeIndexMemo`).
       scopeIndexMemo: params.scopeIndexMemo,
     });
@@ -2408,38 +2400,7 @@ export async function executeAndRecord(
       `Deterministic executor ${failedExecutor} failed on obligation ${failedObligation} (iteration ${index + 1}, prior progress: ${lastSummary || "none"}): ${detail}`,
       { cause: error instanceof Error ? error : undefined },
     );
-  } finally {
-    // Partial writes survive both failed-tool returns and thrown dispatches.
-    // Delete the pre-dispatch entry even when no updated bundle is returned.
-    if (inputManifest && !preservesSourceIndexes(decision.selected_executor)) {
-      ctx.manifestIndexCache.delete(inputManifest);
-    }
   }
-}
-
-/**
- * Line/size indexes for a dispatch, memoized on `repo_manifest` IDENTITY: the
- * fold dispatches many steps per call and `buildLineIndex` walks real files,
- * so recomputing per dispatch would regress the drain's cost profile; the
- * manifest object is replaced when intake re-derives it or a runner may change
- * source bytes. Only audited read-only dispatches preserve the identity; a
- * potentially writing dispatch also evicts its input entry on every exit.
- */
-async function manifestIndexes(
-  root: string,
-  bundle: ArtifactBundle,
-  cache: ManifestIndexCache,
-): Promise<ManifestIndexes> {
-  const manifest = bundle.repo_manifest;
-  if (!manifest) return {};
-  const cached = cache.get(manifest);
-  if (cached) return cached;
-  const built = {
-    lineIndex: await buildLineIndex(root, manifest),
-    sizeIndex: sizeIndexFromManifest(manifest),
-  };
-  cache.set(manifest, built);
-  return built;
 }
 
 // ── Cycle guards (kept in audit's Ctx; NOT routed through advance) ─────────────
@@ -2598,8 +2559,6 @@ function deterministicProgressPath(artifactsDir: string): string {
   return join(artifactsDir, "steps", "deterministic-progress.json");
 }
 
-type ManifestIndexes = { lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> };
-type ManifestIndexCache = WeakMap<object, ManifestIndexes>;
 /** Dispatch-local failure attribution; `null` until a dispatch throws. */
 type FailureAttribution = { executor: string | null; obligation: string | null } | null;
 
@@ -2641,8 +2600,6 @@ interface AuditNextStepCtx {
   currentBundleRef: { value: ArtifactBundle };
   /** Dispatch-local failure attribution for the commit-on-throw. */
   failureRef: { value: FailureAttribution };
-  /** Per-manifest-identity line/size index memo (see `manifestIndexes`). */
-  manifestIndexCache: ManifestIndexCache;
 }
 
 /** The engine state audit folds on: the in-memory CARRIED bundle (never reloaded). */
@@ -3228,7 +3185,6 @@ async function runDeterministicFold(
     tx: createFoldTransaction(),
     currentBundleRef: { value: {} },
     failureRef: { value: null },
-    manifestIndexCache: new WeakMap(),
   };
 
   // ONE hold, ONE core commit (CX-02 constraint 3): the whole drain runs under

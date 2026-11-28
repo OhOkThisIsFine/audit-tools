@@ -2,7 +2,7 @@
 import { lstat, readdir, realpath, rm, rmdir, stat } from "node:fs/promises";
 import { isArtifactTreeHoldEntry, withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { foldReceiptPath, hasPendingFoldReceipt } from "../io/foldReceiptPath.js";
-import { join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import { auditToolsDir, hashContent, isFileMissingError, isJsonParseError, readJsonFile, readOptionalJsonFile, resolveWithinRoot, writeJsonFile } from "audit-tools/shared";
 import { ARTIFACT_DEFINITIONS, isWorkingDirFullyPromoted, retiredRunEvidenceIsArchived } from "../io/artifacts.js";
 import { assertCleanupSnapshotOwnership, removeRunSnapshot } from "../io/runSnapshot.js";
@@ -52,6 +52,22 @@ async function inspectEntry(path: string) {
     if (isFileMissingError(error)) return undefined;
     throw error;
   });
+}
+
+async function isTerminalCleanupResidue(
+  artifactsDir: string,
+  sweepPath: string,
+  snapshotRecord: string,
+): Promise<boolean> {
+  const sweepName = basename(sweepPath);
+  const recordName = basename(snapshotRecord);
+  for (const entry of await readdir(artifactsDir)) {
+    if (entry === recordName || isArtifactTreeHoldEntry(artifactsDir, entry)) continue;
+    if (entry !== sweepName) return false;
+    const info = await inspectEntry(sweepPath);
+    if (!info?.isFile() || info.isSymbolicLink()) return false;
+  }
+  return true;
 }
 
 // Remove a stale working artifacts directory. Two callers, ONE rule: the
@@ -149,14 +165,25 @@ async function cleanupHeld(
     else if (!isFileMissingError(error)) throw error;
   }
 
-  if (force && options.requireAuditMarker && status === "unknown" && !corrupt) {
-    return { action: "skipped", status, reason: "The working audit no longer has its identity marker; refusing forced cleanup." };
+  const missingRequiredMarker = force && options.requireAuditMarker && status === "unknown" && !corrupt;
+  let retainedRecord: string | undefined;
+  if (missingRequiredMarker) {
+    if (target) {
+      await assertOwnership();
+      // Only the exact owned record can authorize finishing the tail after
+      // removal of the state marker, and no run payload may remain.
+      retainedRecord = await assertCleanupSnapshotOwnership(target.root, artifactsDir, { snapshotAlreadyRemoved: true })
+        .catch(() => undefined);
+    }
+    if (retainedRecord === undefined || !(await isTerminalCleanupResidue(artifactsDir, sweepPath, retainedRecord))) {
+      return { action: "skipped", status, reason: "The working audit no longer has its identity marker; refusing forced cleanup." };
+    }
   }
 
-  const requireSnapshot = target !== undefined && (target.custom || (force && corrupt));
-  if (requireSnapshot) {
+  const requireSnapshot = target !== undefined && (target.custom || (force && corrupt) || missingRequiredMarker);
+  if (requireSnapshot && retainedRecord === undefined) {
     await assertOwnership();
-    await assertCleanupSnapshotOwnership(target.root, artifactsDir);
+    retainedRecord = await assertCleanupSnapshotOwnership(target.root, artifactsDir);
   }
 
   const sweep = !force && stateDigest && (status === "not_started" || status === "complete")
@@ -201,7 +228,7 @@ async function cleanupHeld(
   // forces it: `--force` is the escape hatch, and a corrupt record would
   // otherwise refuse it for good. A forced delete names what it leaves behind.
   await assertOwnership();
-  const problems = await removeRunSnapshot(artifactsDir, options.repositoryRoot);
+  const problems = await removeRunSnapshot(artifactsDir, options.repositoryRoot, { retainRecord: retainedRecord });
   if (problems.length > 0) {
     if (!force || requireSnapshot) {
       return {
@@ -221,15 +248,22 @@ async function cleanupHeld(
     await assertOwnership();
     await writeJsonFile(sweepPath, { state_sha256: stateDigest });
   }
-  for (const entry of await readdir(artifactsDir)) {
-    if (entry === marker || entry === sweepName || isArtifactTreeHoldEntry(artifactsDir, entry)) continue;
+  const retainedEntry = retainedRecord === undefined ? undefined : basename(retainedRecord);
+  if (!missingRequiredMarker) {
+    for (const entry of await readdir(artifactsDir)) {
+      if (entry === marker || entry === sweepName || entry === retainedEntry || isArtifactTreeHoldEntry(artifactsDir, entry)) continue;
+      await assertOwnership();
+      await rm(join(artifactsDir, entry), { recursive: true, force: true });
+    }
+    // Keep both state and exact snapshot ownership available throughout the sweep.
     await assertOwnership();
-    await rm(join(artifactsDir, entry), { recursive: true, force: true });
+    await rm(join(artifactsDir, marker), { force: true });
   }
-  // Keep the identity needed for a forced retry until the sweep succeeds.
-  await assertOwnership();
-  await rm(join(artifactsDir, marker), { force: true });
   await assertOwnership();
   await rm(sweepPath, { force: true });
+  if (retainedRecord !== undefined) {
+    await assertOwnership();
+    await rm(retainedRecord, { force: true });
+  }
   return { action: "deleted", status };
 }

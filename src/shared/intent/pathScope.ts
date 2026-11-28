@@ -106,12 +106,23 @@ export const EXCLUDED_OVERRIDE_STATUSES: ReadonlySet<string> = new Set([
   "vendor",
 ]);
 
+/** Explicit host exclusions dominate both review and write scope. */
+export function explicitScopeExclusion(filePath: string, checkpoint: IntentCheckpoint | undefined) {
+  return checkpoint?.excluded_scope?.find(entry => pathMatchesPrefix(filePath, entry.path));
+}
+
+/** Review chooses the first matching correction, not the first exclusion. */
+export function firstDispositionOverride(filePath: string, checkpoint: IntentCheckpoint | undefined) {
+  return checkpoint?.disposition_overrides?.find(entry => pathMatchesPrefix(filePath, entry.path));
+}
+
 /**
  * A file's structured exclusion reason (null when in scope). Explicit exclusions
  * and excluded dispositions apply to both review and write scope. `must_not_touch`
  * forbids writes only; it must not hide read-only audit targets from reviewers.
  * Write scope is the default so remediation callers retain their write guard.
- * Precedence is `excluded_scope`, `disposition_overrides`, then `must_not_touch`.
+ * Review uses the first matching override. Write checks all matching denies,
+ * then `must_not_touch`, so an earlier include never grants write authority.
  * Never reads `free_form_intent` (INV-S04).
  *
  * Aggregation stays with the caller: audit excludes a unit only when EVERY file
@@ -123,18 +134,19 @@ export function fileExclusionReason(
   scope: "review" | "write" = "write",
 ): string | null {
   if (!checkpoint) return null;
-  for (const entry of checkpoint.excluded_scope ?? []) {
-    if (pathMatchesPrefix(filePath, entry.path)) return entry.reason;
+  const exclusion = explicitScopeExclusion(filePath, checkpoint);
+  if (exclusion) return exclusion.reason;
+  if (scope === "review") {
+    const override = firstDispositionOverride(filePath, checkpoint);
+    return override && EXCLUDED_OVERRIDE_STATUSES.has(override.status) ? override.reason : null;
   }
   for (const ov of checkpoint.disposition_overrides ?? []) {
     if (EXCLUDED_OVERRIDE_STATUSES.has(ov.status) && pathMatchesPrefix(filePath, ov.path)) {
       return ov.reason;
     }
   }
-  if (scope === "write") {
-    for (const glob of checkpoint.must_not_touch ?? []) {
-      if (globMatches(filePath, glob)) return `must-not-touch scope (${glob})`;
-    }
+  for (const glob of checkpoint.must_not_touch ?? []) {
+    if (globMatches(filePath, glob)) return `must-not-touch scope (${glob})`;
   }
   return null;
 }

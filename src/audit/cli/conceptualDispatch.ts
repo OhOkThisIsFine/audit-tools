@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { resolveDesignReviewChoices } from "../orchestrator/designReviewTask.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
@@ -8,10 +9,15 @@ import {
   type DesignReviewBinding,
   type IntentCheckpoint,
   readTrailingSubmissionRefusals,
+  readJsonFile,
+  isJsonParseError,
   resolveDesignReviewBinding,
 } from "audit-tools/shared";
-import type { ConceptualWorkload } from "./steps.js";
+import type { ConceptualWorkload, StepArtifact } from "./steps.js";
 import { readAuditReviewSubmission, ReviewUnavailableError } from "./reviewSubmission.js";
+import { readAuditReviewBinding } from "./auditReviewBindings.js";
+import { parseReviewSubmissionEnvelope } from "../../shared/types/reviewIndependence.js";
+import { parseSubmissionArrayItems, unwrapSubmissionArray } from "./laneValidators.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import {
@@ -26,7 +32,10 @@ import {
 import { materializeFanoutLanes } from "./fanoutLanes.js";
 import type { FanoutLaneSpec } from "./fanoutLanes.js";
 import {
+  buildConceptualReviewAdjudication,
   clearConceptualReviewRoundManifest,
+  ConceptualJudgeSubmissionSchema,
+  SubmittedDesignFindingSchema,
   conceptualPerspectiveMalformedReason,
   conceptualReviewRoundManifestPath,
   parseConceptualPerspectiveFindings,
@@ -219,6 +228,173 @@ async function inspectPerspective(
     const reason = conceptualPerspectiveMalformedReason(error);
     if (reason === undefined) throw error;
     return { status: "malformed", reason };
+  }
+}
+
+type PublishedLane = ConceptualWorkload["pending_perspectives"][number];
+
+function samePath(expected: string, published: string | null | undefined): boolean {
+  return typeof published === "string" && resolve(expected) === resolve(published);
+}
+
+// Only prompt-bound evidence can describe the current lane. Do not call the
+// normal submission decoder here: it records declaration events on read.
+async function readPublishedConceptualResult(
+  artifactsDir: string, lane: PublishedLane, revision: string, previouslyRejected: boolean,
+) {
+  const binding = await readAuditReviewBinding(artifactsDir, lane.lane_id);
+  if (binding?.requirement !== "independent" || binding.runId !== AUDIT_GATE_SUBMISSION_SCOPE ||
+      binding.submissionId !== laneSubmissionId(lane.lane_id) ||
+      binding.semanticInputRevision !== revision || !samePath(binding.promptPath, lane.prompt_path)) {
+    return { state: "stale" as const };
+  }
+  let raw: unknown;
+  try {
+    raw = await readJsonFile<unknown>(lane.result_path);
+  } catch (error) {
+    if (isFileMissingError(error)) return { state: previouslyRejected ? "correction_required" as const : "missing" as const };
+    if (isJsonParseError(error)) return { state: "correction_required" as const };
+    throw error;
+  }
+  const parsed = parseReviewSubmissionEnvelope(raw, binding);
+  if (!parsed.ok) return {
+    state: parsed.code === "review_unavailable" ? "unavailable" as const : "correction_required" as const,
+  };
+  return { state: "delivered" as const, value: parsed.result };
+}
+
+/** Inspect a published conceptual pass, updating neither submissions nor audit state. */
+export async function inspectPublishedConceptualProgress(
+  artifactsDir: string, step: StepArtifact, loadBundle: () => Promise<ArtifactBundle>,
+) {
+  const stale = { state: "stale", summary: "Conceptual publication is stale. Run next-step to refresh it." };
+  if (step.run_id !== null || !samePath(artifactsDir, step.artifacts_dir)) return stale;
+  if (step.status === "blocked") return { state: "blocked", summary: "Conceptual review is blocked." };
+  if (step.status !== "ready") return stale;
+
+  try {
+    const paths = step.artifact_paths;
+    const lane = GATE_LANES.design_review_conceptual;
+    const resultPath = laneSubmissionPath(artifactsDir, lane);
+    const manifest = await readConceptualReviewRoundManifest(artifactsDir);
+    const workload = step.conceptual_workload;
+    const promptPath = manifest ? paths.conceptual_judge_prompt : paths.conceptual_prompt;
+    if (!samePath(resultPath, paths.conceptual_results) || !promptPath ||
+        (paths.design_review_conceptual_results !== undefined &&
+          !samePath(resultPath, paths.design_review_conceptual_results))) return stale;
+    const output = { lane_id: lane, prompt_path: promptPath, result_path: resultPath };
+    const perspectives = manifest?.perspectives ?? [];
+    if (manifest) {
+      const publishedPerspectivePaths = Object.keys(paths).filter(key => /^conceptual_perspective_\d+_(prompt|results)$/.test(key));
+      if (!workload || publishedPerspectivePaths.length !== 2 * perspectives.length ||
+          !/^[a-f0-9]{12}$/.test(manifest.round_id) ||
+          !samePath(conceptualReviewRoundManifestPath(artifactsDir), paths.conceptual_round_manifest) ||
+          manifest.judge.lane_id !== lane || manifest.judge.contributor_id !== lane ||
+          !samePath(promptPath, manifest.judge.prompt_path) || !samePath(resultPath, manifest.judge.result_path) ||
+          workload.judge.lane_id !== lane || !samePath(promptPath, workload.judge.prompt_path) ||
+          !samePath(resultPath, workload.judge.result_path)) return stale;
+      for (const [i, perspective] of perspectives.entries()) {
+        const id = conceptualPerspectiveLane(i + 1, manifest.round_id);
+        if (perspective.lane_id !== id || perspective.contributor_id !== id ||
+            !samePath(laneSubmissionPath(artifactsDir, id), perspective.result_path) ||
+            !samePath(perspective.prompt_path, paths[`conceptual_perspective_${i + 1}_prompt`]) ||
+            !samePath(perspective.result_path, paths[`conceptual_perspective_${i + 1}_results`])) return stale;
+      }
+    } else if (workload || paths.conceptual_round_manifest || paths.conceptual_judge_prompt) {
+      return stale;
+    }
+
+    const revision = designReviewInputRevision(await loadBundle(), "conceptual");
+    const refused = await readTrailingSubmissionRefusals(
+      artifactsDir, [lane, ...perspectives.map(p => p.lane_id)].map(id => laneSubmissionId(id)),
+      { runId: AUDIT_GATE_SUBMISSION_SCOPE },
+    );
+    const readResult = (item: PublishedLane) => readPublishedConceptualResult(
+      artifactsDir, item, revision, refused.has(laneSubmissionId(item.lane_id)),
+    );
+
+    const perspectiveFindings = new Map<string, ReturnType<typeof parseConceptualPerspectiveFindings>>();
+    const pending = [];
+    for (const perspective of perspectives) {
+      const result = await readResult(perspective);
+      let state: string = result.state;
+      if (result.state === "delivered") {
+        try {
+          perspectiveFindings.set(perspective.contributor_id, parseConceptualPerspectiveFindings(result.value));
+          continue;
+        } catch (error) {
+          if (conceptualPerspectiveMalformedReason(error) === undefined) throw error;
+          state = "correction_required";
+        }
+      }
+      const { lane_id, prompt_path, result_path } = perspective;
+      pending.push({ lane_id, prompt_path, result_path, state });
+    }
+
+    const response = await readResult(output);
+    if (response.state === "stale" || pending.some(p => p.state === "stale")) return stale;
+    const context = {
+      mode: manifest ? "deep" : "shallow",
+      ...(manifest ? { round_id: manifest.round_id, pending_perspectives: pending } : {}),
+      [manifest ? "judge" : "reviewer"]: { ...output, state: response.state === "delivered" ? "received" : response.state },
+    };
+    if (pending.length > 0) {
+      const unavailable = pending.some(p => p.state === "unavailable");
+      const correction = pending.some(p => p.state === "correction_required");
+      return {
+        ...context, state: unavailable ? "blocked" : correction ? "correction_required" : "await_perspectives",
+        action: unavailable ? "retry_independent_review" : correction ? "correct_perspectives" : "await_perspectives",
+        summary: unavailable ? "Retry unavailable perspectives when independent review is available."
+          : correction ? "Correct and resubmit the invalid perspective results to their bound paths."
+            : "Waiting for the remaining independent perspective results before dispatching the judge.",
+      };
+    }
+
+    const role = manifest ? "judge" : "reviewer";
+    if (response.state === "missing") return {
+      ...context, state: manifest ? "await_judge" : "await_reviewer",
+      action: manifest ? "dispatch_judge" : "dispatch_reviewer",
+      summary: `Run the independent ${role} and save its bound result.`,
+    };
+    if (response.state === "unavailable") return {
+      ...context, state: "blocked", action: "retry_independent_review",
+      summary: `Independent ${role} review is unavailable. Retry when independent review is available.`,
+    };
+
+    let valid = false;
+    if (response.state === "delivered") {
+      if (manifest) {
+        const parsed = ConceptualJudgeSubmissionSchema.safeParse(response.value);
+        if (parsed.success && parsed.data.round_id !== manifest.round_id) return stale;
+        if (parsed.success) {
+          try {
+            // Pass the original value so tool-owned verdict fields cannot be
+            // silently stripped by schema parsing before adjudication.
+            buildConceptualReviewAdjudication({
+              manifest, perspectiveFindings, submission: response.value, generatedAt: "1970-01-01T00:00:00.000Z",
+            });
+            valid = true;
+          } catch {
+            // A shape-valid judge result can still disagree with its inputs.
+          }
+        }
+      } else {
+        const unwrapped = unwrapSubmissionArray(response.value);
+        valid = unwrapped.ok && parseSubmissionArrayItems(unwrapped.array, SubmittedDesignFindingSchema).ok;
+      }
+    }
+    return valid ? {
+      ...context, [role]: { ...output, state: "validated" }, state: "ready", action: "continue",
+      summary: step.step_kind === "design_review_parallel"
+        ? "The conceptual result is ready for next-step. Contract review is a separate lane."
+        : "The conceptual result is ready. Run next-step to continue.",
+    } : {
+      ...context, [role]: { ...output, state: "correction_required" },
+      state: "correction_required", action: "correct_result",
+      summary: `Correct the independent ${role} result and save it to the same bound path.`,
+    };
+  } catch {
+    return { state: "unavailable", summary: "Could not inspect the published conceptual review." };
   }
 }
 

@@ -1,5 +1,5 @@
 import { admittedFileCoverage, extendFullFileReview } from "../orchestrator/fullFileReview.js";
-import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
+import { reviewSourceScope } from "../orchestrator/reviewSourceScope.js";
 import { assertNoPendingFoldReceipt } from "./foldReceiptPath.js";
 // sites-pinned: tests/audit/producer-contract-boundaries.test.ts, tests/audit/io-remediation.test.ts, tests/audit/seam-atomic-promote-findings.test.ts
 import { z, type ZodTypeAny } from "zod";
