@@ -163,12 +163,11 @@ function main() {
   function pathCandidate(token) {
     const path = stripLineSuffix(token).replace(/^\.\//, "");
     if (!path.includes("/")) return null;
-    if (/[*?{<>…]/.test(path)) return null;
-    if (path.startsWith("~") || /^[A-Za-z]:[\\/]/.test(path) || path.includes("://")) return null;
-    if (path.includes("\\")) return null;
-    if (path.split("/").some((s) => s === "." || s === ".." || s === "" )) return null;
+    if (path.startsWith("~") || /[\s*?{}<>\[\]:\\…]/.test(path)) return null;
+    const parts = path.replace(/\/$/, "").split("/");
+    if (parts.some((s) => s === "." || s === ".." || s === "")) return null;
     if (RUNTIME_STATE_PREFIXES.some((p) => path.startsWith(p))) return null;
-    if (!repoTopDirs.has(path.split("/", 1)[0])) return null;
+    if (!repoTopDirs.has(parts[0])) return null;
     return path;
   }
 
@@ -220,15 +219,15 @@ function main() {
   const danglingPaths = [];
   for (const { note, line, path } of candidates) {
     if (ignored.has(path)) continue;
-    const bare = path.replace(/\/+$/, "");
+    const bare = path.replace(/\/$/, "");
     // A trailing slash is unambiguous: that is a directory citation. Anything
     // else resolves as a FILE first and falls back to the tracked dir set, which
     // is what makes BOTH `.githooks/pre-commit` (a tracked extension-less FILE)
     // and `docs/backlog` (an extension-less DIRECTORY citation) resolve. Guessing
     // "no extension means directory" would red the first class.
-    const resolves =
-      trackedSet.has(bare) || (path.endsWith("/") && trackedDirSet.has(bare)) ||
-      (!path.endsWith("/") && !/\.[A-Za-z0-9]+$/.test(bare) && trackedDirSet.has(bare));
+    const resolves = path.endsWith("/")
+      ? trackedDirSet.has(bare)
+      : trackedSet.has(bare) || (!/\.[A-Za-z0-9]+$/.test(bare) && trackedDirSet.has(bare));
     if (!resolves) danglingPaths.push({ note, line, path });
   }
 
