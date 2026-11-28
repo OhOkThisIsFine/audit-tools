@@ -100,7 +100,12 @@ export function replaceTriggerBlocks(source, paths) {
   return { output, blocks };
 }
 
-function main() {
+function main(args) {
+  const check = args.length === 1 && args[0] === '--check';
+  if (args.length !== 0 && !check) {
+    process.stderr.write('usage: node scripts/shared/generate-ci-trigger-paths.mjs [--check]\n');
+    process.exit(2);
+  }
   const target = join(repoRoot, ...TARGET_RELPATH.split('/'));
   let source = null;
   try {
@@ -122,7 +127,7 @@ function main() {
     process.exit(1);
   }
 
-  if (process.argv.includes('--check')) {
+  if (check) {
     if (output !== source) {
       process.stderr.write(
         `\n${TARGET_RELPATH} trigger paths are STALE against the guard-reach registry.\n` +
@@ -147,4 +152,4 @@ function main() {
 const invokedDirectly =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-if (invokedDirectly) main();
+if (invokedDirectly) main(process.argv.slice(2));

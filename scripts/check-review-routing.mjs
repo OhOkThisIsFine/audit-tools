@@ -198,8 +198,8 @@ export function evaluateRatchet({ undeclared, baseline }) {
 }
 
 function main(args) {
-  const files = git(["ls-files", "docs/reviews/*.md"])
-    .split(/\r?\n/)
+  const files = git(["ls-files", "-z", "docs/reviews/*.md"])
+    .split("\0")
     .filter(Boolean);
   const { declared, undeclared, unknownRow } = classifyReviewRecords({
     files,
