@@ -72,7 +72,7 @@ function parseAnalyzerPolicy(
   const input = raw && typeof raw === "object" && !Array.isArray(raw)
     ? Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "analyzer_consent"))
     : raw;
-  const parsed = AnalyzerPolicySchema.safeParse(input ?? {});
+  const parsed = AnalyzerPolicySchema.safeParse(input === undefined ? {} : input);
   if (!parsed.success) {
     throw new Error(
       `Invalid ${policyPath}: ${formatSchemaFailure(parsed.error)}`,
