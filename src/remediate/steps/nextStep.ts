@@ -73,9 +73,11 @@ import { buildCoverageLedger } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import {
   assertNoUnresolvedClosingAction,
+  hasPreparedClosingRecord,
   retryIncompleteCloseReport,
   runClosePhase,
   UnresolvedClosingActionError,
+  type ClosingCommandRunner,
 } from "../phases/close.js";
 import { hasBoundRemediationSubmission, ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
 import { RETIRED_DISPATCH_SHAPE_MESSAGE, type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
@@ -237,6 +239,8 @@ export interface NextStepOptions extends FindingSelectionOptions {
    * deterministically in tests. Unset in production → real env-scrubbed builds.
    */
   finalGateRunner?: GateRunner;
+  /** In-process test seam; CLI never supplies it. */
+  closingCommandRunner?: ClosingCommandRunner;
 }
 
 const SESSION_INTENT_RESULT: unique symbol = Symbol("session-intent-result");
@@ -2344,6 +2348,7 @@ async function handleClosing(
       root, artifactsDir,
       skipFinalGate: options.skipFinalGate,
       finalGateRunner: options.finalGateRunner,
+      closingCommandRunner: options.closingCommandRunner,
       finalizeClosing: options.finalizeClosing,
       onFinalGateRed: async (gate) => {
         paused = await emitFinalGateRedStep({
@@ -2367,16 +2372,26 @@ async function handleClosing(
   if (closed.status !== "complete") {
     await store.saveState(closed);
     const preview = closed.closing_plan?.closing_action_preview;
-    if (closed.status === "closing" && preview && !closed.closing_plan?.pre_authorized) {
+    if (closed.status === "closing" && preview && (preview.delivery || !closed.closing_plan?.pre_authorized)) {
       const approveCommand = loaderCommand("next-step --finalize-closing");
+      const target = preview.delivery;
+      const preparing = !target && (preview.action === "push" || preview.action === "open-pr");
       return {
         kind: "emit",
         step: await writeCurrentStep({
           stepKind: "close_run", status: "ready", runId: stateRunId(closed),
           repoRoot: root, artifactsDir,
           prompt: [
-            "# Approve closing action",
-            `Ask the user to approve the closing action: ${closed.closing_plan?.action}.`,
+            target ? "# Approve delivery" : "# Approve closing action",
+            preparing ? "Ask the user to approve local commit preparation only. No push or PR will run on this approval."
+              : `Ask the user to approve the closing action: ${preview.action}.`,
+            ...(target ? [
+              `Candidate commit: ${target.candidate}`,
+              `Direct parent and expected old tip: ${target.parent}`,
+              `Remote: ${target.remote} (${target.address})`,
+              `Target ref: ${target.ref}`,
+              ...(target.pr ? [`Pull request: ${target.pr.repository}, head ${target.pr.head}, base ${target.pr.base}`] : []),
+            ] : []),
             `Commit message: ${preview.commit_message}`,
             "Files:", ...preview.files.map(file => `- ${file}`),
             ...(preview.leftover_files?.length ? ["Files left untouched:", ...preview.leftover_files.map(file => `- ${file}`)] : []),
@@ -3700,8 +3715,13 @@ async function advanceUnderPhaseLock(deps: {
     return buildOperatorControlStep(root, artifactsDir, state, control);
   }
   if (state?.status === "closing" && bareRequest && unchangedPlan) {
-    const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
-    if (completed) return handleComplete(root, artifactsDir, await store.loadState());
+    try {
+      const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
+      if (completed) return handleComplete(root, artifactsDir, await store.loadState());
+    } catch (error) {
+      if (!(error instanceof UnresolvedClosingActionError)) throw error;
+      return emitUnresolvedClosingStep(root, artifactsDir, state, error);
+    }
   }
   if (options.guidanceFile && options.guidanceText !== undefined) throw new Error("Choose --guidance or --guidance-file, not both.");
   const boundSource = await readPlanSource(artifactsDir);
@@ -3820,6 +3840,9 @@ async function advanceUnderPhaseLock(deps: {
     (requestedSelection !== undefined && JSON.stringify(requestedSelection) !== JSON.stringify(recordedSelection?.criteria));
   const closingContinuation = finalizeCurrentClosing && !inputSelectionChanged &&
     (resumeAck === undefined || resumeAck.choice === "resume");
+  const rePromptPreparedClosing = state?.status === "closing" && bareRequest && unchangedPlan &&
+    !inputSelectionChanged && (resumeAck === undefined || resumeAck.choice === "resume") &&
+    await hasPreparedClosingRecord(artifactsDir);
   const suppliedInputUnchanged = !inputSelectionChanged && suppliedInputMatchesRun(
     inputResolution, sourceManifest,
     boundSource?.sources.map(source => source.path).filter(path => resolve(path) !== resolve(ip.brief)),
@@ -3843,7 +3866,7 @@ async function advanceUnderPhaseLock(deps: {
     existingCheckpoint,
     rejectedCheckpointFields: checkpointRead?.rejected ?? [],
     resumeAck,
-    closingContinuation,
+    closingContinuation: closingContinuation || rePromptPreparedClosing,
     boundSubmissionReturned: !inputResolution.supplied && resumeAck === undefined && (
       (pendingWaveSimplification(state) !== undefined && existsSync(waveResponsePath(artifactsDir, pendingWaveSimplification(state)!))) ||
       (state?.host_handoff !== undefined && await hasBoundRemediationSubmission({
