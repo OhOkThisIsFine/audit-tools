@@ -3,7 +3,7 @@ import { backtickList } from "../../shared/reporting/markdown.js";
 import { readPlanClarificationResolutions, planClarificationRefusal, pausedClarifications, type PlanClarificationResolution } from "./clarificationResolution.js";
 import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "../state/dirtyBaseline.js";
 import { CLARIFICATION_RESOLUTION_FILENAME, TRIAGE_RESOLUTION_FILENAME, readDecisionSnapshot, decisionContextDigest } from "../state/decisionConsumption.js";
-import { RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
+import { RemediationPlanAuthorityError, verifyPersistedRuntimePlan } from "../contractPipeline/runtimePlanAuthority.js";
 import { refreshReplannedHostConformance, reopenStaleTriageSuccesses } from "../phases/triageConformance.js";
 import { stateRunId, requireStateRunId, currentHostBoundaryState } from "../state/runIdentity.js";
 import { presentReportStep } from "./frictionCloseout.js";
@@ -138,7 +138,10 @@ import {
   writePathASeedFromFindings,
 } from "./contractPipeline.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
-import { executionPlanPaths, readCanonicalPlan, readPlanSource } from "../contractPipeline/executionPlan.js";
+import {
+  beginPendingReplan, clearPendingReplan, executionPlanPaths, executionPlanRevision, readCanonicalPlan,
+  readPendingReplan, readPlanSource, readReplanBase,
+} from "../contractPipeline/executionPlan.js";
 import { completeWaveSimplification, pendingWaveSimplification, waveResponsePath, waveWritablePaths } from "./waveSimplification.js";
 import type { ExecutionUnit } from "../../shared/types/executionPlan.js";
 import {
@@ -681,19 +684,40 @@ async function saveStateForPlan(
   return state;
 }
 
-async function forceReplanFromExistingIntake(
+function hasIntakeConflict(input: {
+  selectionAlreadyBound: boolean; inputSelectionChanged: boolean; suppliedInput: boolean; suppliedInputUnchanged: boolean;
+  guidanceFileSupplied: boolean; sourceAlreadyBound: boolean; entryState: RemediationState | null;
+}): boolean {
+  return (input.selectionAlreadyBound && input.inputSelectionChanged) ||
+    (((input.suppliedInput && !input.suppliedInputUnchanged) || input.inputSelectionChanged || input.guidanceFileSupplied) &&
+      (input.sourceAlreadyBound || (input.entryState != null && input.entryState.status !== "pending")));
+}
+
+async function finishPendingReplan(
+  artifactsDir: string, store: StateStore, marker: NonNullable<Awaited<ReturnType<typeof readPendingReplan>>>,
+): Promise<void> {
+  const saved = await store.loadState();
+  if (saved?.status !== "planning" || saved.plan?.plan_id !== marker.plan_id ||
+      saved.plan.review_revision_sha256 === marker.base_revision_sha256) {
+    throw new Error("The distinct replacement has not been durably activated.");
+  }
+  const { canonical, source } = await verifyPersistedRuntimePlan(artifactsDir, saved);
+  const original = await readReplanBase(artifactsDir, marker, source);
+  if (executionPlanRevision(canonical.plan, original.source_sha256, original.context_files) === original.revision_sha256) {
+    throw new Error("The persisted replacement does not change the original reviewed plan semantics.");
+  }
+  const projectionPath = join(artifactsDir, "remediation_plan.json");
+  if (stableStringify(await readOptionalJsonFile<unknown>(projectionPath)) !== stableStringify(saved.plan)) {
+    await writeJsonFile(projectionPath, saved.plan);
+  }
+  await clearPendingReplan(artifactsDir);
+}
+
+async function continuePlanRevision(
   root: string, artifactsDir: string, previous: RemediationState,
-): Promise<RemediationState | { kind: "blocked"; reason: string; archivePath?: string } | {kind:"planning_step";step:RemediationStep} | null> {
-  admitRemediationDirtyBaseline(previous);
-  const step=await buildNextContractPipelineStep({root,artifactsDir,runId:requireStateRunId(previous),forceRevision:false});
-  if(step)return {kind:"planning_step",step};
-  const approved = await readApprovedExecutionPlan(artifactsDir);
-  if (!approved) return { kind: "blocked", reason: "Revise and independently approve the current executable plan before replanning. Accepted execution history is preserved." };
-  const activated = await activateApprovedPlan(root, artifactsDir, previous, "existing_run");
-  if (activated.kind === "blocked") return activated;
-  // Activation already carries unchanged history and applies CURRENT owner
-  // decisions. Reapplying old items here would undo a newly declined unit.
-  return activated.state;
+): Promise<PlanActivationOutcome | { kind: "planning_step"; step: RemediationStep }> {
+  const step = await buildNextContractPipelineStep({ root, artifactsDir, runId: requireStateRunId(previous) });
+  return step ? { kind: "planning_step", step } : activateApprovedPlan(root, artifactsDir, previous, "existing_run");
 }
 
 /**
@@ -742,6 +766,7 @@ async function buildImplementDispatchStep(ctx: {
   options: NextStepOptions;
   store: StateStore;
   runLogger: RunLogger;
+  reconcileOnly?: boolean;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, store, runLogger } = ctx;
   const runId = requireStateRunId(state);
@@ -792,7 +817,7 @@ async function buildImplementDispatchStep(ctx: {
 
   const conformance = ingested.issues.filter(issue => issue.review_request_path !== undefined);
   if (conformance.length > 0) {
-    const nextCommand = loaderCommand("next-step");
+    const nextCommand = loaderCommand(ctx.reconcileOnly && ctx.options.forceReplan ? ["next-step", "--force-replan"] : ["next-step"]);
     const unavailable = conformance.some(issue => issue.code === "conformance_review_unavailable");
     const repair = conformance.some(issue => issue.code === "conformance_review_insufficient");
     return {
@@ -823,6 +848,18 @@ async function buildImplementDispatchStep(ctx: {
     };
   }
 
+  if (ctx.reconcileOnly) {
+    const next = loaderCommand(ctx.options.forceReplan ? ["next-step", "--force-replan"] : ["next-step"]);
+    return { kind: "emit", step: await writeCurrentStep({
+      stepKind: "contract_pipeline", status: "blocked", runId, repoRoot: root, artifactsDir,
+      prompt: [
+        "The existing host handoff still has bound work outstanding. Return its exact results before replanning; no new work was dispatched.",
+        ...remediationIngestReportLines(ingested),
+        `Then run ${next} to reconcile the bound results before revising the plan.`,
+      ].join("\n\n"),
+      allowedCommands: [next], stopCondition: "Return only results from the existing bound handoff.", artifactPaths: {},
+    }) };
+  }
   const baselineCommit = await headCommit(root);
   if (!baselineCommit) {
     throw new Error("Cannot prepare remediation host work without a repository HEAD commit.");
@@ -2683,18 +2720,11 @@ async function buildConfirmResumeOrRestartStep(ctx: {
       "   ```",
       `   Then delete \`${artifactsDir}\` and re-run with \`--input <path>\`.`,
       "",
-      "3. **Merge new recommendations into existing plan** — carry the current plan",
-      "   forward with additional findings merged in. Write to the ack file:",
-      "   ```json",
-      '   { "choice": "merge" }',
-      "   ```",
-      `   Then re-run with \`--input <path>\` pointing at your new recommendations.`,
-      "",
       `Write your choice to: \`${ackPath}\``,
     ].join("\n"),
     allowedCommands: [nextCommand, loaderCommand("next-step --input <path>")],
     stopCondition:
-      "Stop after presenting the resume/restart/merge choice to the user and writing the ack.",
+      "Stop after presenting the resume/restart choice to the user and writing the ack.",
     artifactPaths: {
       state_file: join(artifactsDir, STATE_FILENAME),
       confirm_resume_ack: ackPath,
@@ -3050,13 +3080,11 @@ export function buildPreIntakeObligations(
       // "unchanged" notion, so any guidance file against an advanced run conflicts;
       // bare follow-ups don't set the flag). Derives from the frozen entry state.
       id: "input_conflict",
-      derive: () =>
-        (selectionAlreadyBound && inputSelectionChanged) ||
-        (((inputResolution.supplied && !suppliedInputUnchanged) ||
-          inputSelectionChanged || guidanceFileSupplied) &&
-        (sourceAlreadyBound || (entryState != null && entryState.status !== "pending")))
-          ? "missing"
-          : "satisfied",
+      derive: () => hasIntakeConflict({
+        selectionAlreadyBound: Boolean(selectionAlreadyBound), inputSelectionChanged: Boolean(inputSelectionChanged),
+        suppliedInput: inputResolution.supplied, suppliedInputUnchanged,
+        guidanceFileSupplied, sourceAlreadyBound: Boolean(sourceAlreadyBound), entryState,
+      }) ? "missing" : "satisfied",
       execute: async (_state, c) => {
         const s = entryState ?? { status: "pending" as const };
         await c.countStep(entryState);
@@ -3068,7 +3096,7 @@ export function buildPreIntakeObligations(
       },
     },
     {
-      // Bare re-invocation without bound returned work: present resume/restart/merge
+      // Bare re-invocation without bound returned work: present resume/restart
       // once (gated on the ack file) rather than silently resuming. An ack of
       // choice==='resume' is satisfied — fall through to normal dispatch. Derives
       // from the frozen entry state (a resume is of a *pre-existing* run).
@@ -3682,12 +3710,17 @@ async function advanceUnderPhaseLock(deps: {
   // Loaded FRESH under the mutex: a peer may have advanced and persisted state
   // between the entry read and this process winning the lock.
   let state = await store.loadState();
+  let pendingReplan: Awaited<ReturnType<typeof readPendingReplan>>;
+  try { pendingReplan = await readPendingReplan(artifactsDir); }
+  catch (error) {
+    return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: `Cannot verify the pending replan marker: ${errorMessage(error)}` });
+  }
   try {
     await assertNoUnresolvedClosingAction(artifactsDir);
   } catch (error) {
     if (!(error instanceof UnresolvedClosingActionError)) throw error;
     let unresolved = error;
-    if (state) {
+    if (state && !pendingReplan) {
       try {
         const completed = await retryClosing(state);
         if (completed) return completed;
@@ -3709,7 +3742,7 @@ async function advanceUnderPhaseLock(deps: {
   const currentCanonical = state?.plan ? await readCanonicalPlan(artifactsDir) : undefined;
   const pendingPlanSubmission = existsSync(executionPlanPaths(artifactsDir).submission);
   const revisionMismatch = Boolean(currentCanonical && currentCanonical.revision_sha256 !== state?.plan?.review_revision_sha256);
-  const unchangedPlan = !pendingPlanSubmission && !revisionMismatch;
+  const unchangedPlan = !pendingReplan && !pendingPlanSubmission && !revisionMismatch;
   // Bind the flag to a run that was already closing on entry. Do not carry
   // approval into a new closing phase, a revised plan, or a combined request.
   const finalizeCurrentClosing = state?.status === "closing" && unchangedPlan &&
@@ -3775,28 +3808,6 @@ async function advanceUnderPhaseLock(deps: {
   };
 
   const inputResolution = await resolveInputPaths(root, options.input);
-
-  // Preamble — forceReplan re-grounds from existing intake. The whole decide loop
-  // runs once per host call (the engine folds planning → implementing → … through
-  // transitions, never a recursive decideNextStepLoop), so this fires at most once.
-  const replanRequested = Boolean(options.forceReplan || pendingPlanSubmission || revisionMismatch);
-  const deferredReplan = replanRequested && pendingWaveSimplification(state) !== undefined;
-  if (state != null && replanRequested && !deferredReplan) {
-    await countStep(state);
-    const replanOutcome = await forceReplanFromExistingIntake(
-      root,
-      artifactsDir,
-      state,
-    );
-    // A discarded plan is REPORTED here, not collapsed into `state = null`. Once
-    // it is null the loop can no longer tell "the plan was destroyed, and here is
-    // why" from "there was never an input", and it emits the second.
-    if (replanOutcome !== null && "kind" in replanOutcome) {
-      if(replanOutcome.kind==="planning_step")return replanOutcome.step;
-      return emitPlanRevisionBlockedStep(root, artifactsDir, replanOutcome);
-    }
-    state = replanOutcome;
-  }
 
   // Pre-read the once-async signals the pre-intake derive()s consume
   // synchronously (no transition inside this advance call rewrites either file).
@@ -3865,6 +3876,67 @@ async function advanceUnderPhaseLock(deps: {
     boundSource?.sources.map(source => source.path).filter(path => resolve(path) !== resolve(ip.brief)),
   );
 
+  const guidanceSupplied = Boolean(options.guidanceFileSupplied || options.guidanceFile || options.guidanceText !== undefined);
+  const conflictingInput = hasIntakeConflict({
+    selectionAlreadyBound: recordedSelection !== undefined, inputSelectionChanged, suppliedInput: inputResolution.supplied,
+    suppliedInputUnchanged, guidanceFileSupplied: guidanceSupplied, sourceAlreadyBound: boundSource !== undefined, entryState: state,
+  });
+  const replanRequested = Boolean(pendingReplan || options.forceReplan || pendingPlanSubmission || revisionMismatch);
+  const deferredReplan = replanRequested && pendingWaveSimplification(state) !== undefined;
+
+  if (replanRequested && !conflictingInput) {
+    if (pendingReplan && (!state?.plan || state.plan.plan_id !== pendingReplan.plan_id || !boundSource ||
+        state.host_handoff || deferredReplan)) {
+      return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: "The pending replan does not match an idle bound run. Restore its original reviewed state before continuing." });
+    }
+    if (state && !deferredReplan) {
+      if (state.host_handoff) {
+        const reconciled = await buildImplementDispatchStep({ root, artifactsDir, state, options, store, runLogger, reconcileOnly: true });
+        if (reconciled.kind === "emit") return reconciled.step;
+        const next = loaderCommand(options.forceReplan ? ["next-step", "--force-replan"] : ["next-step"]);
+        return writeCurrentStep({
+          stepKind: "contract_pipeline", status: "ready", runId: requireStateRunId(state), repoRoot: root, artifactsDir,
+          prompt: `Existing host results were reconciled without dispatching new work. Run ${next} to continue.`,
+          allowedCommands: [next], stopCondition: "Resume without launching another work wave.", artifactPaths: {},
+        });
+      }
+      if (!pendingReplan && options.forceReplan && state.plan && currentCanonical && !revisionMismatch) {
+        if (state.status === "closing") {
+          if (await hasPreparedClosingRecord(artifactsDir)) {
+            return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: "A closing action is already prepared. Resolve its existing closing continuation before requesting a revised plan." });
+          }
+          const completed = await retryClosing(state);
+          if (completed) return completed;
+        }
+        try {
+          const marker = { plan_id: state.plan.plan_id, base_revision_sha256: currentCanonical.revision_sha256 };
+          await beginPendingReplan(artifactsDir, marker);
+          pendingReplan = marker;
+        } catch (error) {
+          return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: errorMessage(error) });
+        }
+      }
+      try {
+        if (pendingReplan && state.plan?.review_revision_sha256 !== pendingReplan.base_revision_sha256) {
+          // A crash can fall between activation's state save and its normal projection.
+          // Verify persisted B against the live exact receipts, then finish the projection
+          // before lifting the fence. Never recover approval from the historical bundle.
+          await finishPendingReplan(artifactsDir, store, pendingReplan);
+        } else {
+          await countStep(state);
+          const outcome = await continuePlanRevision(root, artifactsDir, state);
+          if (outcome.kind === "planning_step") return outcome.step;
+          if (outcome.kind === "blocked") return emitPlanRevisionBlockedStep(root, artifactsDir, outcome);
+          state = outcome.state;
+          if (pendingReplan) await finishPendingReplan(artifactsDir, store, pendingReplan);
+        }
+      } catch (error) {
+        if (!pendingReplan) throw error;
+        return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: `The pending replan could not finish: ${errorMessage(error)}` });
+      }
+    }
+  }
+
   // The linear pre-intake gates run as obligations through the shared advance
   // loop. An emit returns to the host; a transition re-scans within this call;
   // exhausting them (step === null) means the run is past intake and falls
@@ -3899,7 +3971,7 @@ async function advanceUnderPhaseLock(deps: {
     inputSelectionChanged,
     selectionAlreadyBound: recordedSelection !== undefined,
     selectedSourceChanged,
-    guidanceFileSupplied: Boolean(options.guidanceFileSupplied || options.guidanceFile || options.guidanceText !== undefined),
+    guidanceFileSupplied: guidanceSupplied,
   });
   const preIntake = await advance(
     {
