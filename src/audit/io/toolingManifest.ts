@@ -135,16 +135,13 @@ export async function readPackageVersion(
   packageRoot: string,
 ): Promise<string | null> {
   const packageJsonPath = join(packageRoot, "package.json");
-  if (!(await pathExists(packageJsonPath))) {
-    return null;
-  }
-
   try {
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
       version?: unknown;
     };
     return typeof packageJson.version === "string" ? packageJson.version : null;
   } catch (error) {
+    if (isFileMissingError(error)) return null;
     process.stderr.write(
       `[audit-code] readPackageVersion: failed to read/parse ${packageJsonPath}: ${errorMessage(error)}\n`,
     );
