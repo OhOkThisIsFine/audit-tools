@@ -15,17 +15,23 @@ export interface AuditQuestionBinding {
   dependencies: ReviewAcceptedAnswer["dependency_bindings"];
 }
 
+export class QuestionSourceValidationError extends Error {
+  constructor(readonly failure: { kind: "source_scope" } | { kind: "source_span"; lineCount: number }) {
+    super(failure.kind === "source_scope" ? "Source is outside this assignment" : "Source span is outside the issued file");
+  }
+}
+
 export function validateQuestionSource(binding: AuditQuestionBinding, ref: ReviewSourceRef): void {
   const scope = binding.assignment.authorized_scope;
   const source = binding.sourceFiles.find((item) => item.path === ref.path);
   if (!source || !scope.include.some((path) => pathMatchesPrefix(ref.path, path)) ||
       scope.exclude.some((path) => pathMatchesPrefix(ref.path, path))) {
-    throw new Error(`Source is outside this assignment: ${ref.path}`);
+    throw new QuestionSourceValidationError({ kind: "source_scope" });
   }
   if ((ref.start_line !== undefined && (!Number.isInteger(ref.start_line) || ref.start_line < 1)) ||
       (ref.end_line !== undefined && (!Number.isInteger(ref.end_line) || ref.end_line < (ref.start_line ?? 1))) ||
       (ref.end_line ?? ref.start_line ?? 0) > source.line_count) {
-    throw new Error(`Source span is outside the issued file: ${ref.path}`);
+    throw new QuestionSourceValidationError({ kind: "source_span", lineCount: source.line_count });
   }
 }
 

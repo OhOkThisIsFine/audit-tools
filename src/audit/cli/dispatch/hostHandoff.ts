@@ -9,6 +9,7 @@ import {
   hashContent,
   hostHandoffResultPath,
   isFileMissingError,
+  isSha256,
   isJsonParseError,
   readJsonFile,
   resolveContainedPath,
@@ -53,11 +54,13 @@ import {
 import type { ArtifactBundle } from "../../io/artifacts.js";
 import { projectQuestionForReport } from "../../reporting/questionReport.js";
 import { renderAuditCommand } from "../prompts.js";
-import { prepareReviewerCbm } from "../reviewerCodebaseMemory.js";
+import { prepareReviewerCbm, ReviewerCbmSchema } from "../reviewerCodebaseMemory.js";
 import { buildReviewerGraph } from "../reviewGraphCommand.js";
+import { CODEBASE_MEMORY } from "../../orchestrator/analyzerCalibration.js";
 import {
   acceptQuestionReview,
   projectQuestionReview,
+  QuestionSourceValidationError,
   validateQuestionSource,
   type AuditQuestionBinding,
 } from "./questionReviewAcceptance.js";
@@ -154,7 +157,7 @@ async function readQuestionLedger(paths: ResolvedBoundaryPaths) {
   return ledger;
 }
 
-const reviewerGraphIndex = (artifactsDir: string, digest: string) =>
+export const reviewerGraphIndex = (artifactsDir: string, digest: string) =>
   join(artifactsDir, "review-graph-index", digest + ".json");
 
 /** Existing issued workloads did not encode which graph layout issued them. */
@@ -278,33 +281,68 @@ export async function publishAuditEvidenceGraph(
   sourceFiles: readonly { path: string; fingerprint: string }[],
   graph: ArtifactBundle["graph_bundle"],
   indexSourceOnly: boolean | "native-only" = false,
+  indexAttempt?: string,
+  acquisition?: ArtifactBundle["external_analyzer_acquisition"],
 ) {
   const files = sourceFiles.map(({ path, fingerprint }) => ({ path, fingerprint }))
     .sort((a, b) => compareCodeUnits(a.path, b.path));
+  const sourceFingerprint = hashContent(stableStringify(files));
   let indexed;
   let graphIndexError: string | undefined;
-  if (indexSourceOnly !== "native-only" && (graph || indexSourceOnly)) {
-    try { indexed = await prepareReviewerCbm(artifactsDir, sourceRoot, files); }
+  let graphIndexFailureReused = false;
+  const measurement = acquisition?.codebase_memory;
+  if (indexSourceOnly !== "native-only" && (graph || indexSourceOnly || measurement)) {
+    try {
+      const handle = measuredCodebaseMemoryHandle(artifactsDir, acquisition);
+      if (handle) {
+        const measured = await readFile(handle.graphIndex, "utf8");
+        if (hashContent(measured) !== handle.graphSha256) throw new Error("Calibrated graph does not match the measured fingerprint.");
+        const receipt = z.looseObject({ source_sha256: z.string().optional(), indexed: ReviewerCbmSchema }).parse(JSON.parse(measured));
+        // A changed admitted scope must not reuse an index over different source bytes.
+        if (receipt.source_sha256 === sourceFingerprint) indexed = receipt.indexed;
+      }
+      if (measurement?.status === "failed") graphIndexError = measurement.error ?? "The measured Codebase Memory attempt failed.";
+      if (!indexed && (!measurement || measurement.status === "success")) {
+        const result = await prepareReviewerCbm(artifactsDir, sourceRoot, files, indexAttempt ?? latestCodebaseMemoryAttempt(acquisition));
+        indexed = result.indexed;
+        graphIndexError = result.failure;
+        graphIndexFailureReused = result.reusedFailure === true;
+      }
+    }
     catch (error) {
       graphIndexError = errorMessage(error);
-      console.warn("[audit-code] Codebase Memory index unavailable: " + graphIndexError);
     }
+    if (graphIndexError) console.warn("[audit-code] Codebase Memory index unavailable: "
+      + (graphIndexFailureReused ? "reused unchanged fallback; no index attempted. " : "") + graphIndexError);
   }
   // An empty native graph is an index transport only after source indexing
   // actually succeeded. Failed or unconfigured indexing must not publish it.
   const indexedOnly = graph === undefined && indexed !== undefined;
   const graphText = graph || indexedOnly
-    ? buildReviewerGraph(graph ?? { graphs: {} }, files.map(({ path }) => path), indexed)
+    ? buildReviewerGraph(graph ?? { graphs: {} }, files.map(({ path }) => path), indexed, sourceFingerprint)
     : undefined;
   const graphSha256 = graphText === undefined ? undefined : hashContent(graphText);
   const graphIndex = graphSha256 === undefined ? undefined : reviewerGraphIndex(artifactsDir, graphSha256);
   if (graphIndex !== undefined && graphText !== undefined) await saveImmutableReviewText(graphIndex, graphText);
-  return { graphIndex, graphSha256, indexed, indexedOnly, graphIndexFailed: graphIndexError !== undefined, graphIndexError };
+  return { graphIndex, graphSha256, indexed, indexedOnly, graphIndexFailed: graphIndexError !== undefined, graphIndexError, graphIndexFailureReused };
+}
+
+export function latestCodebaseMemoryAttempt(acquisition: ArtifactBundle["external_analyzer_acquisition"]) {
+  return acquisition?.calibration_retries?.filter(retry => retry.tools.some(row => row.tool === CODEBASE_MEMORY)).at(-1)?.input_sha256;
+}
+
+export function measuredCodebaseMemoryHandle(artifactsDir: string, acquisition: ArtifactBundle["external_analyzer_acquisition"]) {
+  const receipt = acquisition?.codebase_memory;
+  const digest = receipt?.index_sha256;
+  return receipt?.status === "success" && digest && isSha256(digest)
+    ? { graphIndex: reviewerGraphIndex(artifactsDir, digest), graphSha256: digest }
+    : undefined;
 }
 
 export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
   sourceRoot: string; bindings: readonly AuditQuestionBinding[]; inventoryOmissionCount?: number;
   graph?: ArtifactBundle["graph_bundle"];
+  acquisition?: ArtifactBundle["external_analyzer_acquisition"];
 }) {
   const paths = resolveBoundaryPaths(params);
   const ids = new Set<string>();
@@ -325,7 +363,7 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
     }
   }
   const { graphSha256, indexed, graphIndexFailed } =
-    await publishAuditEvidenceGraph(paths.artifactsDir, params.sourceRoot, sourceFiles, params.graph);
+    await publishAuditEvidenceGraph(paths.artifactsDir, params.sourceRoot, sourceFiles, params.graph, false, undefined, params.acquisition);
   const workload = QuestionWorkloadSchema.parse({
     contract_version: REVIEW_QUESTION_CONTRACT_VERSION, run_id: paths.runId, source_root: toPosixPath(params.sourceRoot),
     source_files: sourceFiles,
@@ -527,24 +565,32 @@ export async function submitAuditQuestionResult(params: QuestionBoundary & { ass
       await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, answers: [...ledger.answers, accepted.record] });
     }
     return accepted;
+  }).catch((error: unknown) => {
+    if (error instanceof QuestionSourceValidationError) throw new Error(questionResultCorrection(error));
+    throw error;
   });
 }
 
 /** Raw fallback errors may quote submitted text, paths, or schema values. */
-function questionResultCorrection(reason: string): string {
-  return "Bound answer rejected: " + questionSemanticGuidance(reason);
+function questionResultCorrection(error: unknown): string {
+  return "Bound answer rejected: " + questionSemanticGuidance(error);
 }
 
-function questionSemanticGuidance(reason: string): string {
+function questionSemanticGuidance(error: unknown): string {
+  if (error instanceof QuestionSourceValidationError) {
+    const { failure } = error;
+    if (failure.kind === "source_scope") {
+      return "Source reference outside scope. Check the current assignment's authorized_scope include/exclude lists and frozen source inventory; remove the reference or use an admitted source.";
+    }
+    const { lineCount } = failure;
+    const bounds = lineCount === 0 ? "The issued file has 0 lines, so there is no valid numbered span."
+      : `Use 1-based bounds 1–${lineCount} (issued line count: ${lineCount}), with end_line at or after start_line.`;
+    return "Invalid source citation span. Check start_line and end_line against the current frozen evidence. " + bounds;
+  }
+  const reason = errorMessage(error);
   if (reason === "Result assignment differs from its destination" ||
       reason === "Review submission does not match the current issued assignment, question revision and snapshot") {
     return "Binding mismatch. Copy the assignment, question, revision, and snapshot IDs from the current workload.";
-  }
-  if (reason.startsWith("Source is outside this assignment:")) {
-    return "Source is outside the assignment. Use only source admitted in the current binding.";
-  }
-  if (reason.startsWith("Source span is outside the issued file:")) {
-    return "Source lines are outside the issued file. Check the span against the frozen source.";
   }
   if (reason.startsWith("Evidence was not issued for this assignment:") ||
       reason.startsWith("Observation links unavailable or unissued evidence:")) {
@@ -622,7 +668,7 @@ export async function ingestAuditQuestionResults(params: QuestionBoundary, curre
         const decision = acceptQuestionReview(answers, hydrateQuestionBinding(workload, item.binding), submission, new Date().toISOString());
         if (decision.kind === "accepted") answers.push(decision.record);
       } catch (error) {
-        reject(questionResultCorrection(errorMessage(error)));
+        reject(questionResultCorrection(error));
       }
     }
     const accepted_count = answers.length - ledger.answers.length;

@@ -213,6 +213,8 @@ export const ExternalAnalyzerToolStatusSchema = z
      * A non-zero count means the run under-reports; it is never a clean scan.
      */
     dropped_rows: z.number().optional(),
+    /** Valid findings intentionally withheld outside the frozen manifest. Not a scan failure. */
+    scope_omitted_rows: z.number().int().positive().optional(),
     /**
      * Items that named a path + line but whose source could not be read, so their
      * content-anchored provenance was dropped. Distinguishes a broken read seam from
@@ -333,6 +335,11 @@ export const ExternalAnalyzerAcquisitionMarkerSchema = z
     generated_at: z.string().optional(),
     enabled: z.boolean(),
     tool_statuses: z.array(ExternalAnalyzerToolStatusSchema),
+    codebase_memory: z.strictObject({
+      status: z.enum(["success", "failed", "not_resolved"]),
+      index_sha256: z.string().optional(),
+      error: z.string().optional(),
+    }).optional(),
     calibration_retries: z.array(z.object({
       input_sha256: z.string(),
       at: z.string(),

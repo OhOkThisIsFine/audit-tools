@@ -27,7 +27,7 @@ export interface ProjectSignals {
   package_private: boolean | null;
   /** package.json carries a name and a version and is not private. */
   package_publishable: boolean;
-  /** npm scripts whose name starts with `release` or `publish`. */
+  /** Nonblank npm scripts whose name starts with `release` or `publish`. */
   release_scripts: string[];
   /** CI configuration present at the root, repo-relative. */
   ci_config: string[];
@@ -93,8 +93,11 @@ function readPackageJson(root: string): Record<string, unknown> | null {
 function releaseScripts(pkg: Record<string, unknown> | null): string[] {
   const scripts = pkg?.scripts;
   if (scripts === null || typeof scripts !== "object") return [];
-  return Object.keys(scripts as Record<string, unknown>)
-    .filter((name) => /^(release|publish)/.test(name))
+  return Object.entries(scripts)
+    .filter(([name, body]) =>
+      /^(release|publish)/.test(name) && typeof body === "string" && body.trim().length > 0
+    )
+    .map(([name]) => name)
     .sort();
 }
 

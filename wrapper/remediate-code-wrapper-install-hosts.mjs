@@ -868,7 +868,7 @@ export async function verifyInstalledBootstrap(argv) {
       );
     }
     return {
-      summary: 'No legacy local /remediate-code command or skill surfaces were found.',
+      summary: 'No removable legacy local /remediate-code command or skill surfaces were found.',
     };
   });
 

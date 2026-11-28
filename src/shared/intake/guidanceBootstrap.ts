@@ -19,12 +19,11 @@ export function applyGuidanceFile(
 ): string {
   const target = join(artifactsDir, "intake", "conversation-start.md");
   const resolvedSource = resolve(guidanceFilePath);
+  const incoming = readFileSync(resolvedSource);
   if (resolve(target) === resolvedSource) {
-    // The guidance file already IS the target — nothing to copy, and reading
-    // then rewriting it would be a pointless self-write.
+    // The readable source already is the target; leave it untouched.
     return target;
   }
-  const incoming = readFileSync(resolvedSource);
   return writeGuidance(artifactsDir, incoming, resolvedSource);
 }
 

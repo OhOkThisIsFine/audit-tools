@@ -2,14 +2,22 @@
 import type { ReviewRequirement } from "../../shared/types/reviewIndependence.js";
 import type { AdversarialDepth } from "../riskSignal.js";
 import type { PlanReviewRole, PlanSource, CanonicalPlan, PlanReviewHistory } from "../contractPipeline/executionPlan.js";
+import type { ExecutionUnit } from "../../shared/types/executionPlan.js";
 
 export function reviewRequirementForRole(role: PlanReviewRole, depth?: AdversarialDepth): ReviewRequirement {
   return role === "judge" || depth !== "light" ? "independent" : "degraded_allowed";
 }
 
+export function renderLockedPlanHistory(acceptedUnits: ReadonlyMap<string, ExecutionUnit>): string {
+  if (!acceptedUnits.size) return "";
+  const locked = Object.fromEntries([...acceptedUnits].map(([id, unit]) => [id, unit.requirement_ids]));
+  return `Accepted history (locked execution unit IDs → locked requirement IDs): ${JSON.stringify(locked)}.
+Keep each entire listed execution unit and each entire linked requirement unchanged. Do not edit, remove, or retire these values, even if their IDs stay the same. Add explicit follow-up requirements and units with new IDs instead.`;
+}
+
 export function renderPlanAuthorPrompt(params: {
   root: string; source: PlanSource; canonical?: CanonicalPlan; history: PlanReviewHistory;
-  sourcePath: string; planPath: string; outputPath: string; reason?: string; graphHint?: string;
+  sourcePath: string; planPath: string; outputPath: string; reason?: string; graphHint?: string; lockedHistory?: string;
 }): string {
   const findingIds = params.source.findings.map(f => f.id);
   return `# ${params.canonical ? "Revise" : "Author"} the executable change plan
@@ -18,6 +26,7 @@ Goal: make the agreed changes and demonstrate that they work. Plan cohesive impl
 Read ${params.sourcePath}${params.canonical ? ` and ${params.planPath}` : ""}. Source finding identities and payloads are immutable provenance. You may inspect repository source/tests/configuration relevant to this request beneath ${params.root}. Inspect actual source before deciding the affected behavior and boundaries.
 ${params.graphHint ?? ""}
 ${params.reason ? `\nRequired corrections:\n${params.reason}\n` : ""}
+${params.lockedHistory ?? ""}
 ${params.history.accepted_ids.length ? `Accepted counterexamples that must remain addressed:\n${JSON.stringify(params.history, null, 2)}` : ""}
 ${params.source.question_report ? params.source.request
   ? "This is mixed input. The approved canonical findings and the operator's separate request are distinct. Preserve finding provenance for work that addresses a finding; keep request-only work in separate units without a finding ID. Scope those units to the explicit request and present them for operator approval before execution. Do not import additional design work from report prose."
@@ -34,19 +43,21 @@ ${JSON.stringify({
         { kind: "positive", description: "<falsifiable success case>", scope_paths: ["<affected source/test>"] },
         { kind: "negative", description: "<falsifiable failure/regression case>", scope_paths: ["<affected source/test>"] },
       ] }],
-      units: [{ id: "UNIT-stable-name", title: "<cohesive change>", description: "<exact implementation intent>", source_finding_ids: findingIds, requirement_ids: ["REQ-stable-name"], dependencies: [], read_paths: ["<existing source/test>"], allowed_files: ["<every source/test/config file to edit or create>"], required_tests: ["<one executable command per entry>"], affected_interfaces: [], addresses_counterexample_ids: params.history.accepted_ids }],
+      units: [{ id: "UNIT-stable-name", title: "<cohesive change>", description: "<exact implementation intent>", source_finding_ids: findingIds, requirement_ids: ["REQ-stable-name"], dependencies: [], read_paths: ["<existing source/test>"], allowed_files: ["<every source/test/config file to edit or create>"], required_tests: ["<one executable command per entry>"], affected_interfaces: [
+        { name: "<affected interface name>", description: "<how this boundary is changed or endangered>" },
+      ], addresses_counterexample_ids: params.history.accepted_ids }],
       source_dispositions: [],
     },
     retired_requirements: [],
   }, null, 2)}
 
-Stable IDs identify requirements and units, not array positions. Preserve existing IDs when unrelated work is inserted/reordered. To remove a requirement, supply retired_requirements: [{id,reason,replaced_by:[]}]. This is a complete semantic revision, not patch operations. Never change or remove a previously accepted execution unit; add an explicit follow-up unit instead.
+Stable IDs identify requirements and units, not array positions. Preserve existing IDs when unrelated work is inserted/reordered. To remove an unlocked requirement, supply retired_requirements: [{id,reason,replaced_by:[]}]. This is a complete semantic revision, not patch operations.
 
 For question-report findings, keep every original source and its verification obligations attached to the approved canonical finding. Plan each original assertion with its exact expected text, all referenced scope paths and source_obligation:{finding_id,obligation_id}; add separate regression assertions as needed. Identify actual dependencies and integration checks; the close step reruns each required analyzer separately. An opportunity, lead, or unresolved question is context, not permission to implement it. For a canonical finding presented as a \`Design option:\`, do not assume the present behavior is broken. Carry forward the option and its tradeoff to the existing plan decision. If the operator has authorized the change, define the chosen endpoint and prove that required behavior survives; otherwise propose a \`deferred\` disposition with the local evidence and the choice still open. Do not label an unchosen or deferred option \`refuted\` unless the evidence actually refutes its premise.
 
 Each source finding must be covered by execution units OR one source_dispositions entry {finding_id,status:"already_fixed"|"refuted"|"deferred",reason,evidence:[...]}. Evidence must explain the actual source/test basis; these decisions are independently reviewed. Do not invent tasks for an already-fixed or empty scope. Requirements and units may both be empty when no implementation is appropriate. A conversation request with no units must carry request_disposition:{status:"already_satisfied"|"deferred",reason,evidence:[...]}; an objective alone is not a completion claim.
 
-Behavior changes need scoped positive and negative assertions; additions need at least one. Structural requirements still need an executable verification command or an explicit inapplicable_reason for independent assessment. An inapplicable requirement carries no assertions. Keep source and tests together. List actual dependencies explicitly; no module-token or separate obligation graph is authored. affected_interfaces is only for boundaries changed or endangered by this work, not every module interface.
+Behavior changes need scoped positive and negative assertions; additions need at least one. Structural requirements still need an executable verification command or an explicit inapplicable_reason for independent assessment. An inapplicable requirement carries no assertions. Keep source and tests together. List actual dependencies explicitly; no module-token or separate obligation graph is authored. affected_interfaces is only for boundaries changed or endangered by this work, not every module interface. Use affected_interfaces: [] when no boundary is changed or endangered.
 
 Choose focused required_tests for each unit. Leave repository-wide verification to the final check and declared landing gates to the merged-tree close. If a broad check is indispensable for a particular unit, explain what only it can verify instead of repeating it by default. Do not omit required evidence to save time.
 

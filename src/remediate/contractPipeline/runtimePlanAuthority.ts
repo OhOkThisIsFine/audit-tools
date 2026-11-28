@@ -3,7 +3,7 @@ import { stableStringify } from "audit-tools/shared";
 import { errorMessage } from "../../shared/io/json.js";
 import { ExecutableChangePlanSchema } from "../../shared/types/executionPlan.js";
 import type { RemediationState } from "../state/store.js";
-import { executionPlanRevision, readApprovedExecutionPlan } from "./executionPlan.js";
+import { executionPlanRevision, readApprovedExecutionPlan, readPendingReplan } from "./executionPlan.js";
 
 /** A recoverable authority failure; it never invalidates or deletes accepted evidence. */
 export class RemediationPlanAuthorityError extends Error {
@@ -16,6 +16,19 @@ export class RemediationPlanAuthorityError extends Error {
 
 /** The immutable reviewed record, not a runtime-supplied digest, grants work and closing. */
 export async function assertApprovedRuntimePlan(artifactsDir: string, state: RemediationState) {
+  let pending: Awaited<ReturnType<typeof readPendingReplan>>;
+  try { pending = await readPendingReplan(artifactsDir); }
+  catch (error) {
+    throw new RemediationPlanAuthorityError(`The pending replan marker cannot be verified: ${errorMessage(error)}`);
+  }
+  if (pending) throw new RemediationPlanAuthorityError(
+    "A same-source replacement is pending. Resume revision and approval before dispatch, acceptance or closing.",
+  );
+  return verifyPersistedRuntimePlan(artifactsDir, state);
+}
+
+/** Exact readback for next-step's activation recovery; this does not grant execution. */
+export async function verifyPersistedRuntimePlan(artifactsDir: string, state: RemediationState) {
   try {
     const approved = await readApprovedExecutionPlan(artifactsDir);
     const plan = state.plan;
@@ -44,4 +57,19 @@ export async function assertApprovedRuntimePlan(artifactsDir: string, state: Rem
       `The current reviewed plan authority cannot be verified: ${errorMessage(error)}`,
     );
   }
+}
+
+// sites-pinned: tests/plan-authority.test.mjs
+/** Accepted changes explain context drift for both revision authoring and fresh host dispatch. */
+export function acceptedExecutionContext(state: Pick<RemediationState, "plan" | "items" | "wave_simplifications">) {
+  const accepted = (state.plan?.units ?? []).flatMap(unit => {
+    const item = state.items?.[unit.id];
+    return item?.host_landed_commit ? [{ allowed_files: [...unit.allowed_files], landed_commit: item.host_landed_commit }] : [];
+  });
+  for (const wave of state.wave_simplifications ?? []) {
+    if (wave.response?.disposition === "applied" && wave.applied_files) accepted.push({
+      landed_commit: wave.response.commit, allowed_files: wave.applied_files,
+    });
+  }
+  return accepted;
 }

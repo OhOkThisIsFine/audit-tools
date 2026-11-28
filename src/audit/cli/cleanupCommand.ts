@@ -64,6 +64,7 @@ export async function cmdCleanup(argv: string[]): Promise<void> {
       artifacts_dir: artifactsDir,
       action: result.action,
       status: result.status,
+      ...(result.action === "already-complete" ? { reason: "The default working directory is empty; nothing was removed." } : {}),
       dry_run: dryRun,
     },
   );

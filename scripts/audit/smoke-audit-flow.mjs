@@ -7,17 +7,6 @@
 // submissions, finalization — is one flow, and it used to exist as two ~900-line
 // copies that had already drifted (only the packaged copy answered the
 // present_report friction gate).
-//
-// ⚠ `buildSyntheticResults` below is the ONLY AuditResult construction site in
-// `scripts/`, and it VALIDATES its own output against the contract's own
-// validator before returning. That is not belt-and-braces — `scripts/` is
-// covered by neither `tsconfig.json` (`include: ["src"]`) nor
-// `tsconfig.test.json` (`include: ["src","tests"]`, `checkJs: false`), so no
-// typechecker sees this file. The `reviewed_clean` affirmation was added with a
-// `tests/**` fixture sweep, went green four ways locally, and failed release CI
-// *here*, because a hand-built contract payload cannot fail on a contract it
-// never consults. Validating at the construction site makes the next contract
-// change break cheaply, at `npm test`, instead of in a packaged smoke in CI.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -26,74 +15,6 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
 export const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
-
-async function countLines(root, path) {
-  const content = await readFile(join(root, path), "utf8");
-  if (content.length === 0) {
-    return 0;
-  }
-  return content.endsWith("\n")
-    ? content.split(/\r?\n/).length - 1
-    : content.split(/\r?\n/).length;
-}
-
-// The contract's own validator, loaded from the built tree. Imported lazily so
-// this module still loads before a build; the failure names the missing build
-// rather than surfacing as an opaque resolution error at import time.
-async function loadAuditResultValidator() {
-  try {
-    const mod = await import("../../dist/audit/validation/auditResults.js");
-    return mod.validateAuditResults;
-  } catch (cause) {
-    throw new Error(
-      "smoke flow: cannot load the AuditResult validator from dist/ — run `npm run build` first. " +
-        "The synthetic-result producer validates its own output against the contract and cannot " +
-        "be run unvalidated.",
-      { cause },
-    );
-  }
-}
-
-// Synthesize one AuditResult per assigned task. See the contract note at the top
-// of this file before changing the shape.
-export async function buildSyntheticResults(tasks, root, smokeLabel) {
-  const validateAuditResults = await loadAuditResultValidator();
-  const results = await Promise.all(tasks.map(async (task) => ({
-    task_id: task.task_id,
-    unit_id: task.unit_id,
-    pass_id: task.pass_id,
-    lens: task.lens,
-    agent_role: "smoke-reviewer",
-    file_coverage: await Promise.all(
-      task.file_paths.map(async (path) => ({
-        path,
-        total_lines: await countLines(root, path),
-      })),
-    ),
-    findings: [],
-    // Zero-finding results must affirm they were reviewed; see validateResultFindings.
-    reviewed_clean: true,
-    notes: [`Synthetic completion result for ${smokeLabel} smoke coverage.`],
-    requires_followup: false,
-  })));
-
-  // Refuse to hand back a payload the contract rejects. Warnings are left to
-  // the ingest path that owns their policy (e.g. the deliberately-downgraded
-  // total_lines mismatch); only errors are a broken producer.
-  const errors = validateAuditResults(results, tasks).filter(
-    (issue) => issue.severity === "error",
-  );
-  if (errors.length > 0) {
-    throw new Error(
-      `smoke flow: the synthetic AuditResult payload is contract-invalid — ` +
-        `${errors.length} error(s). This producer is an AuditResult construction site and must be ` +
-        `swept alongside the contract:\n` +
-        errors.map((e) => `  - [${e.task_id}] ${e.field}: ${e.message}`).join("\n"),
-    );
-  }
-
-  return results;
-}
 
 // Scripted hosts copy the actual emitted contract, never mint a request binding.
 async function emittedExample(promptPath, contractVersion) {
@@ -174,7 +95,7 @@ async function advanceToDispatchReady(runNextStep, log) {
       const reason = "Offline smoke fixture";
       const answer = step.step_kind === "analyzer_selection"
         ? { input_sha256, decisions: tools.map(tool => ({ tool, action: "omit", reason })), additional_checks: [], gaps: [] }
-        : { input_sha256, decisions: tools.map(tool => ({ tool, action: "limited", reason, coverage: "No independent coverage claimed" })), unresolved: [] };
+        : { input_sha256, decisions: tools.map(tool => ({ tool, action: "limited", reason, coverage: "No independent coverage claimed", recovery: { failure: "complete", disposition: "exhausted", detail: "Hermetic smoke runs without external analyzer coverage" } })), unresolved: [] };
       await writeFile(step.artifact_paths[step.step_kind], JSON.stringify(answer, null, 2) + "\n");
       continue;
     }

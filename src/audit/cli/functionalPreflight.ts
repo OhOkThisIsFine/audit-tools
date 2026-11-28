@@ -31,6 +31,18 @@ export const FunctionalPreflightSchema = z.object({
 });
 
 export const functionalPreflightPath = (artifactsDir: string): string => join(artifactsDir, "functional-preflight.json");
+export type FunctionalPreflightScope = { mode: "ready" } | { mode: "degraded"; limitation: string };
+type PreflightResolution = { scope: FunctionalPreflightScope; step?: never } |
+  { scope?: never; step: Parameters<typeof writeCurrentStep>[0] };
+
+/** Check requested dials before the ordinary checkpoint reader can salvage invalid fields. */
+export function degradedDepthConflict(scope: FunctionalPreflightScope, checkpoint: unknown): string | undefined {
+  if (scope.mode !== "degraded" || !checkpoint || typeof checkpoint !== "object" || !("design_review" in checkpoint)) return;
+  const settings = checkpoint.design_review;
+  if (!settings || typeof settings !== "object") return;
+  if (!("conceptual_depth" in settings && settings.conceptual_depth === "deep") && !("perspectives" in settings)) return;
+  return `The operator approved shallow review only. Limitation: ${scope.limitation} Reconfirm shallow in intent_checkpoint.json and omit perspectives, or rerun functional preflight with newly observed working source and relationship inspection before confirming deep review.`;
+}
 
 /** Read the current operator report without creating consent or recording feedback. */
 export async function readFunctionalPreflight(artifactsDir: string, runId: string, canonicalRoot: string) {
@@ -54,10 +66,10 @@ export async function readFunctionalPreflight(artifactsDir: string, runId: strin
 }
 
 /** One run-bound functional declaration; never a provider or installed-tool inventory. */
-export async function functionalPreflightStep(
+export async function resolveFunctionalPreflight(
   root: string, artifactsDir: string,
-): Promise<Parameters<typeof writeCurrentStep>[0] | undefined> {
-  return withArtifactTreeHold(artifactsDir, undefined, async () => {
+): Promise<PreflightResolution> {
+  return withArtifactTreeHold(artifactsDir, undefined, async (): Promise<PreflightResolution> => {
     // The host echoes the root it was shown, and writeStepContract forward-slashes every
     // win32 path in the prompt body: emit and bind the prompt-path token form, or a raw
     // backslashed root reaches the host rewritten and the report never matches this run.
@@ -77,8 +89,26 @@ export async function functionalPreflightStep(
         const line = JSON.stringify(reflection);
         // Preserve every other line, including malformed feedback; never silently repair another writer's data.
         if (!prior.split(/\r?\n/).includes(line)) await writeTextFile(feedbackPath, prior + (prior && !prior.endsWith("\n") ? "\n" : "") + line + "\n");
+        const scope = { mode: "degraded", limitation: observation.report.limitation! } as const;
+        const intentPath = join(artifactsDir, "intent_checkpoint.json");
+        const checkpoint = await readOptionalJsonFile<unknown>(intentPath).catch(error => {
+          // Malformed JSON remains the ordinary intent gate's responsibility.
+          if (!isJsonParseError(error)) throw error;
+        });
+        const conflict = degradedDepthConflict(scope, checkpoint);
+        if (conflict) {
+          const next = nextStepCommand(root, artifactsDir);
+          return { step: {
+            artifactsDir, repoRoot: root, runId: run.run_id, stepKind: "confirm_intent", status: "blocked",
+            allowedCommands: [next], artifactPaths: { intent_checkpoint: intentPath, functional_preflight: reportPath },
+            access: { read_paths: [intentPath, reportPath], write_paths: [intentPath, reportPath] },
+            progress: { summary: conflict }, stopCondition: conflict,
+            prompt: `# Resolve incompatible conceptual depth\n\n${conflict}\n\nThen run: ${next}`,
+          } };
+        }
+        return { scope };
       }
-      return undefined;
+      return { scope: { mode: "ready" } };
     }
     const problem = observation.summary;
     const next = nextStepCommand(root, artifactsDir);
@@ -88,7 +118,7 @@ export async function functionalPreflightStep(
       relationship_inspection: { available: false, evidence: "Describe a dependency/call/structural relationship actually inspected, or the concrete failure." },
       decision: "stop", operator_approved_degraded: false, limitation: "State missing coverage, if any.",
     };
-    return {
+    return { step: {
       artifactsDir, repoRoot: root, runId: run.run_id, stepKind: "functional_preflight",
       status: observation.state === "stopped" ? "blocked" : "ready", allowedCommands: [next],
       artifactPaths: { functional_preflight: reportPath },
@@ -107,12 +137,20 @@ export async function functionalPreflightStep(
         `Write the complete JSON report to ${reportPath}:`, "```json", JSON.stringify(example, null, 2), "```", "",
         `After a ready or approved degraded report, run ${next}. If the decision is stop, stop and preserve the work until the operator changes it.`,
       ].join("\n"),
-    };
+    } };
   });
+}
+
+/** Compatibility view for callers that only need the blocking step. */
+export async function functionalPreflightStep(root: string, artifactsDir: string) {
+  return (await resolveFunctionalPreflight(root, artifactsDir)).step;
 }
 
 /** Direct semantic CLI actions cannot skip the same entry requirement. */
 export async function requireFunctionalPreflight(root: string, artifactsDir: string): Promise<void> {
   const pending = await functionalPreflightStep(root, artifactsDir);
-  if (pending) throw new Error(`${pending.progress?.summary} Complete functional preflight first: ${nextStepCommand(root, artifactsDir)}`);
+  if (pending) {
+    const instruction = pending.stepKind === "functional_preflight" ? "Complete functional preflight first" : "Resolve the incompatible intent first";
+    throw new Error(`${pending.progress?.summary} ${instruction}: ${nextStepCommand(root, artifactsDir)}`);
+  }
 }

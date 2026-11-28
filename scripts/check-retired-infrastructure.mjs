@@ -41,7 +41,8 @@ const root = process.cwd();
 // like `llm-relay` must be captured whole. The marker's own grammar always
 // puts whitespace before the em-dash (`id — reason`), so dropping `-` from
 // the exclusion set does not let the id swallow the reason that follows it.
-export const EXEMPT_MARKER = /<!--\s*retired-infrastructure-exempt:\s*([^\s—>]+)[^>]*-->/;
+export const EXEMPT_MARKER = /<!--\s*retired-infrastructure-exempt:\s*([^\s—>]+)([^>]*?)-->/;
+const EXEMPT_REASON = /^\s+—\s+.*\S/;
 
 /**
  * Every mention of retired infrastructure on one line.
@@ -63,8 +64,8 @@ export function findRetiredMentions(line, lineAbove = "") {
   for (const text of [lineAbove, line]) {
     for (const match of text.matchAll(new RegExp(EXEMPT_MARKER, "g"))) {
       const id = match[1];
-      if (knownIds.has(id)) exemptIds.add(id);
-      else unknownIds.push(id);
+      if (!knownIds.has(id)) unknownIds.push(id);
+      else if (EXEMPT_REASON.test(match[2])) exemptIds.add(id);
     }
   }
 

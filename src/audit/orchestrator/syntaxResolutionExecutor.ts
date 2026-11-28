@@ -1,3 +1,4 @@
+import { admitAnalyzerRows, analyzerManifestPathSet, analyzerPathMembership, analyzerScopeDiagnostic } from "../io/analyzerResultScope.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import {
@@ -425,14 +426,21 @@ export async function runSyntaxResolutionExecutor(
 ): Promise<ExecutorRunResult> {
   const items: ExternalAnalyzerResultItem[] = [];
   const toolStatuses: ExternalAnalyzerToolStatus[] = [];
+  const isAdmitted = analyzerPathMembership(analyzerManifestPathSet(bundle.repo_manifest));
+  let scopeOmitted = 0;
+  const collect = ({ results, status }: { results: ExternalAnalyzerResultItem[]; status: ExternalAnalyzerToolStatus }) => {
+    const { admitted, omitted } = admitAnalyzerRows(results, isAdmitted);
+    items.push(...admitted);
+    scopeOmitted += omitted;
+    toolStatuses.push(omitted ? { ...status, scope_omitted_rows: omitted } : status);
+  };
 
   if (
     hasTypeScriptConfig(root) &&
     bundle.file_disposition?.files.some((f) => f.path.endsWith(".ts"))
   ) {
     const tsc = await runTsc(root, options.analyzerConsent);
-    items.push(...tsc.results);
-    toolStatuses.push(tsc.status);
+    collect(tsc);
   }
   if (
     bundle.file_disposition?.files.some(
@@ -440,8 +448,7 @@ export async function runSyntaxResolutionExecutor(
     )
   ) {
     const eslint = await runEslint(root, options.analyzerConsent);
-    items.push(...eslint.results);
-    toolStatuses.push(eslint.status);
+    collect(eslint);
   }
 
   const existing =
@@ -497,6 +504,7 @@ export async function runSyntaxResolutionExecutor(
       `Phase 2 Syntax Resolution complete. Extracted ${items.length} unfixable syntax/lint errors` +
       (diagnosticCount > 0
         ? ` with ${diagnosticCount} analyzer diagnostic(s).`
-        : ", triggering high-priority LLM resolution tasks."),
+        : scopeOmitted && !items.length ? "." : ", triggering high-priority LLM resolution tasks.") +
+      analyzerScopeDiagnostic(scopeOmitted),
   };
 }

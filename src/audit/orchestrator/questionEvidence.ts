@@ -7,10 +7,21 @@ import { isDegradedExternalAnalyzerStatus, type ExternalAnalyzerResults, type Ex
 import { hashContent } from "../../shared/hash.js";
 import { projectRuleEvidenceKey, projectRuleExcerpts, projectRuleScopeNote } from "./projectRuleEvidence.js";
 import { stableStringify } from "../../shared/stableStringify.js";
-import type { ReviewDependency, ReviewEvidence } from "../../shared/types/reviewQuestion.js";
+import type { ReviewDependency, ReviewEvidence, ReviewSourceRef } from "../../shared/types/reviewQuestion.js";
 
 const sortedUnique = (values: readonly string[]): string[] => [...new Set(values)].sort();
 const keyOf = ({ kind, key }: ReviewDependency) => JSON.stringify([kind, key]);
+
+/** A file ref contains its regions; a bounded ref requires a contained span or matching symbol. */
+export function reviewSourceRefContains(outer: ReviewSourceRef, inner: ReviewSourceRef): boolean {
+  if (outer.path !== inner.path) return false;
+  if (outer.start_line !== undefined) {
+    if (inner.start_line === undefined) return false;
+    return outer.start_line <= inner.start_line &&
+      (inner.end_line ?? inner.start_line) <= (outer.end_line ?? outer.start_line);
+  }
+  return outer.symbol === undefined || outer.symbol === inner.symbol;
+}
 
 /** Bind the exact analyzer finding, not just its shared run receipt. */
 export function analyzerReceiptFingerprint(provenance: NonNullable<ReviewEvidence["analyzer_provenance"]>): string {

@@ -30,7 +30,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, resolve, relative, basename } from "node:path";
+import { dirname, join, resolve, relative, basename, sep } from "node:path";
 import { isGeneratedRender } from "./shared/generated-renders.mjs";
 import { compareCodeUnits, isScriptEntry, resolveWithinRoot } from './shared/primitives.mjs';
 
@@ -95,15 +95,25 @@ function lineAt(source, index) {
 }
 
 /**
- * A sibling whose name differs only by case. Detects the class that is green on
- * a case-insensitive filesystem and dead in Linux CI.
+ * First inexact component of an otherwise resolvable path. Walk the actual
+ * spelling from the root so a mismatched ancestor works on case-sensitive
+ * filesystems too. Prefer an exact entry if two siblings differ only by case.
  */
-function caseInsensitiveMatch(absolute) {
-  const dir = dirname(absolute);
-  if (!existsSync(dir)) return null;
-  const wanted = basename(absolute).toLowerCase();
+function caseMismatch(absolute) {
+  const inside = resolveWithinRoot(root, absolute) !== null;
+  let dir = inside ? root : dirname(absolute);
+  const segments = inside ? relative(root, absolute).split(sep).filter(Boolean) : [basename(absolute)];
+  let mismatch = null;
   try {
-    return readdirSync(dir).find((e) => e.toLowerCase() === wanted) ?? null;
+    for (const segment of segments) {
+      const names = readdirSync(dir);
+      const actual = names.includes(segment) ? segment
+        : names.find((name) => name.toLowerCase() === segment.toLowerCase());
+      if (actual === undefined) return null;
+      if (actual !== segment) mismatch ??= actual;
+      dir = join(dir, actual);
+    }
+    return mismatch;
   } catch {
     return null;
   }
@@ -126,8 +136,8 @@ function classify(sourceFile, target) {
   const absolute = resolve(fromDir, decoded);
 
   if (existsSync(absolute)) {
-    const actual = caseInsensitiveMatch(absolute);
-    if (actual && actual !== basename(absolute)) {
+    const actual = caseMismatch(absolute);
+    if (actual) {
       return { kind: "case-mismatch", target, detail: `on-disk name is \`${actual}\`` };
     }
     return null;
@@ -146,7 +156,7 @@ function classify(sourceFile, target) {
     }
   }
 
-  const actual = caseInsensitiveMatch(absolute);
+  const actual = caseMismatch(absolute);
   if (actual) {
     return { kind: "case-mismatch", target, detail: `did you mean \`${actual}\`?` };
   }

@@ -5,6 +5,7 @@ import { AccessDeclarationSchema } from "../types/accessDeclaration.js";
 import { mkdir, writeFile, readFile, readdir, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { stepsDir } from "./auditToolsPaths.js";
+import { FileLockOwnershipLostError } from "./fileLock.js";
 import { errorMessage, writeJsonFile } from "./json.js";
 import {
   normalizePromptBodyPaths,
@@ -259,6 +260,8 @@ export interface WriteStepContractInput<
    * writes the prompt verbatim. Defaults to `false` (verbatim).
    */
   trimPromptStart?: boolean;
+  /** Optional outer transaction fence, checked at each durable publication seam. */
+  assertOwnership?: () => Promise<void>;
 }
 
 /**
@@ -279,11 +282,13 @@ export async function writeStepContract<
   const stepsDirPath = stepsDir(input.artifactsDir);
   const agentId = processAgentId();
   const agentSlotDir = join(stepsDirPath, agentId);
+  await input.assertOwnership?.();
   await mkdir(agentSlotDir, { recursive: true });
   // Liveness signal for the GC (and any external reaper): the owning pid. The
   // id grammar already embeds it, but the marker is explicit, survives a rename
   // of the id grammar, and is what makes "is this peer still running?" a read
   // instead of an inference.
+  await input.assertOwnership?.();
   await writeFile(
     join(agentSlotDir, SLOT_OWNER_FILE),
     `${JSON.stringify({ pid: process.pid })}\n`,
@@ -305,6 +310,7 @@ export async function writeStepContract<
   const promptContent = normalizePromptBodyPaths(
     input.trimPromptStart ? input.prompt.trimStart() : input.prompt,
   );
+  await input.assertOwnership?.();
   await writeFile(promptPath, promptContent, "utf8");
 
   const callerArtifactPaths = input.artifactPaths ?? {};
@@ -345,6 +351,7 @@ export async function writeStepContract<
     artifact_paths: normalizedArtifactPaths,
   } as unknown as TStep;
 
+  await input.assertOwnership?.();
   await writeJsonFile(stepPath, step);
 
   // Shared "latest" pointer: mirror this step's prompt + JSON into the shared
@@ -353,10 +360,12 @@ export async function writeStepContract<
   // and helper-based readers (`currentPromptPath(artifactsDir)`). Last-writer-
   // wins under concurrency, which is fine because nothing correctness-critical
   // reads it (peers use the returned per-agent prompt_path / stdout contract).
+  await input.assertOwnership?.();
   await writeFile(currentPromptPath(input.artifactsDir), promptContent, "utf8");
+  await input.assertOwnership?.();
   await writeJsonFile(currentStepPath(input.artifactsDir), step);
 
-  await gcStaleAgentSlots(stepsDirPath, agentId);
+  if (!input.assertOwnership) await gcStaleAgentSlots(stepsDirPath, agentId);
   return step;
 }
 
@@ -441,6 +450,7 @@ export async function runWithBlockedStepBackstop<T>(
   try {
     return await body();
   } catch (error) {
+    if (error instanceof FileLockOwnershipLostError) throw error;
     const reason = errorMessage(error);
     try {
       await writeBlockedStep(reason);

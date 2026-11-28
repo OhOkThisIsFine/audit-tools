@@ -1,9 +1,10 @@
 import { requestedFindingSelection, selectAuditFindings, renderFindingSelection, type FindingSelectionOptions } from "../intakeSelection.js";
 
-// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/intake-resolver.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { hashContent, isRecord, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
+import { readFile, rm, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
+import { hashContent, isJsonParseError, isRecord, readOptionalJsonFile, toPromptPathToken, writeJsonFile } from "audit-tools/shared";
+import { writeFileAtomic } from "../../shared/io/json.js";
 import { isAuditFindingsReport } from "../phases/plan.js";
 import { QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION, QuestionAuditFindingsReportSchema } from "../../shared/types/questionReviewReport.js";
 import { writeCurrentStep } from "./stepWriter.js";
@@ -13,7 +14,9 @@ import {
   buildDocumentSourceManifest,
   buildStructuredAuditSourceManifest,
   buildMixedSourceManifest,
-  manifestIsInputBound,
+  DiscoveredInputBindingSchema,
+  type DiscoveredInputBinding,
+  type VerifiedDiscoveredInput,
   intakePaths,
   type IntakePaths,
   intakeSummaryContentErrors,
@@ -71,7 +74,9 @@ function parseSuppliedInput(
 
 export type IntakeResult =
   | { kind: "step"; step: RemediationStep }
-  | { kind: "pipeline_ready" };
+  | { kind: "pipeline_ready"; discoveredInput?: VerifiedDiscoveredInput };
+
+export type DiscoveryRead = { path: string; input: VerifiedDiscoveredInput | undefined };
 
 type IntakeStepParams = {
   root: string;
@@ -80,6 +85,8 @@ type IntakeStepParams = {
   inputResolution: InputResolution;
   loaderCommand: (cmd: string) => string;
   randomRunId: (prefix?: string) => string;
+  archivePriorSourceIntake?: () => Promise<void>;
+  discoveryRead?: DiscoveryRead;
   collectStartingPointPrompt: (
     root: string,
     checked: string[],
@@ -140,7 +147,7 @@ export async function resolveIntakeStep(params: IntakeStepParams): Promise<Intak
   const source = await selectIntakeSource(params, paths, previousManifest, intake.conversationStart,
     requestedSelection, collectStartingPointStep);
   if (source.kind === "step") return source;
-  const { manifest } = source;
+  const { manifest, discoveredInput } = source;
   const manifestRefreshed = !sourceManifestsEquivalent(previousManifest, manifest);
   if (manifest.finding_selection?.selected_count === 0) {
     return { kind: "step", step: await writeCurrentStep({
@@ -152,7 +159,7 @@ export async function resolveIntakeStep(params: IntakeStepParams): Promise<Intak
     }) };
   }
 
-  const sourceResolution = resolveManifestSources(root, manifest);
+  const sourceResolution = resolveManifestSources(root, manifest, discoveredInput?.path);
   if (sourceResolution.missing.length > 0) {
     return collectStartingPointStep(
       sourceResolution.missing.map((source) => source.path),
@@ -228,29 +235,38 @@ export async function resolveIntakeStep(params: IntakeStepParams): Promise<Intak
   // One builder for every synthesize_intake emit. `reason` is set when the
   // previous summary was refused; the step then comes back with the reason
   // appended, so the host rewrites the one file it owns.
-  const synthesizeIntakeStep = async (reason?: string): Promise<IntakeResult> => ({
-    kind: "step",
-    step: await writeCurrentStep({
-      stepKind: "synthesize_intake",
-      status: "ready",
-      runId: params.randomRunId("INTAKE"),
-      repoRoot: root,
-      artifactsDir,
-      prompt: `${params.synthesizeIntakePrompt(
-        sourceResolution.resolved,
-        paths,
-        Boolean(clarificationResolution),
-      )}${renderFindingSelection(manifest.finding_selection)}${reason ? `\n**Rewrite required.** ${reason}\n` : ""}`,
-      allowedCommands: [params.loaderCommand("next-step")],
-      stopCondition: reason
-        ? "Stop after rewriting the intake summary, then rerunning next-step."
-        : "Stop after writing the intake summary, then rerunning next-step.",
-      artifactPaths: {
-        intake_summary: paths.summary,
-        intake_clarifications: paths.clarificationResolution,
-      },
-    }),
-  });
+  const snapshotPath = discoveredInput && join(paths.discoveredInputSnapshots, discoveredInput.sha256, basename(discoveredInput.path));
+  const synthesizeIntakeStep = async (reason?: string): Promise<IntakeResult> => {
+    // Read the same approved revision even if the original changes while the
+    // host is synthesizing. A projected finding subset already has its own file.
+    if (discoveredInput && snapshotPath && sourceResolution.resolved.some(source => source.path === discoveredInput.path)) {
+      await writeFileAtomic(snapshotPath, discoveredInput.bytes);
+    }
+    return {
+      kind: "step",
+      step: await writeCurrentStep({
+        stepKind: "synthesize_intake",
+        status: "ready",
+        runId: params.randomRunId("INTAKE"),
+        repoRoot: root,
+        artifactsDir,
+        prompt: `${params.synthesizeIntakePrompt(
+          sourceResolution.resolved.map(source => snapshotPath && source.path === discoveredInput?.path
+            ? { ...source, path: snapshotPath } : source),
+          paths,
+          Boolean(clarificationResolution),
+        )}${renderFindingSelection(manifest.finding_selection)}${reason ? `\n**Rewrite required.** ${reason}\n` : ""}`,
+        allowedCommands: [params.loaderCommand("next-step")],
+        stopCondition: reason
+          ? "Stop after rewriting the intake summary, then rerunning next-step."
+          : "Stop after writing the intake summary, then rerunning next-step.",
+        artifactPaths: {
+          intake_summary: paths.summary,
+          intake_clarifications: paths.clarificationResolution,
+        },
+      }),
+    };
+  };
 
   if (!summary) return synthesizeIntakeStep(summaryRefusal);
   if (!isIntakeReady(summary) && Boolean(clarificationResolution)) {
@@ -298,11 +314,114 @@ export async function resolveIntakeStep(params: IntakeStepParams): Promise<Intak
 
   // Intake is ready. Both structured_audit and document/conversation sources
   // enter the contract pipeline. Signal the caller to route to the pipeline.
-  return { kind: "pipeline_ready" };
+  return { kind: "pipeline_ready", discoveredInput };
 }
 
-// Select and persist the source manifest before interpreting any saved readiness
-// artifacts. A host-facing source choice can pause this phase without starting intake.
+function sameDiscoveredInput(a: unknown, b: DiscoveredInputBinding): boolean {
+  return isRecord(a) && a.path === b.path && a.sha256 === b.sha256;
+}
+
+export async function readDiscoveredInput(path: string): Promise<VerifiedDiscoveredInput | undefined> {
+  const bytes = await readFile(path).catch(() => undefined);
+  return bytes && { path, sha256: hashContent(bytes), bytes };
+}
+
+async function selectDiscoveredInput(
+  params: IntakeStepParams,
+  paths: IntakePaths,
+  prior: DiscoveredInputBinding | undefined,
+  collectStartingPointStep: CollectStartingPointStep,
+): Promise<VerifiedDiscoveredInput | IntakePause> {
+  const { root, artifactsDir, inputResolution } = params;
+  const ack = await readOptionalJsonFile<unknown>(paths.discoveredInputAck).catch(error => {
+    if (!isJsonParseError(error)) throw error;
+    return undefined;
+  });
+  if (isRecord(ack) && ack.status === "declined") {
+    return collectStartingPointStep([], "Stop after collecting an explicit remediation source (--input <path>) and rerunning next-step.");
+  }
+
+  // The tool-owned offer records what was actually displayed, rather than
+  // letting a host echo (or a changed ranking) define the subject retroactively.
+  const readCandidate = (path: string) => params.discoveryRead?.path === path
+    ? Promise.resolve(params.discoveryRead.input) : readDiscoveredInput(path);
+  const offer = DiscoveredInputBindingSchema.safeParse(await readOptionalJsonFile<unknown>(paths.discoveredInputOffer));
+  const offered = offer.success && inputResolution.allExisting.includes(offer.data.path)
+    ? await readCandidate(offer.data.path) : undefined;
+  const unchanged = offered !== undefined && offer.success && sameDiscoveredInput(offer.data, offered);
+  if (unchanged && ((isRecord(ack) && ack.status === "confirmed" &&
+      ack.path === toPromptPathToken(offered.path) && ack.sha256 === offered.sha256) ||
+      (ack === undefined && sameDiscoveredInput(prior, offered)))) {
+    return offered;
+  }
+
+  // An invalid acknowledgement must not revive if the previous bytes reappear.
+  if (isRecord(ack) && ack.status === "confirmed") await rm(paths.discoveredInputAck, { force: true });
+  const best = inputResolution.existing[0];
+  const selected = unchanged ? offered : best
+    ? (offered?.path === best ? offered : await readCandidate(best))
+    : undefined;
+  if (!selected) {
+    if (offer.success) await writeJsonFile(paths.discoveredInputOffer, null);
+    return collectStartingPointStep(offer.success ? [offer.data.path] : [],
+      "Stop after collecting a valid remediation starting point and rerunning next-step.");
+  }
+  const binding = { path: selected.path, sha256: selected.sha256 };
+  await writeJsonFile(paths.discoveredInputOffer, binding);
+
+  const sourceRows: string[] = [];
+  for (const path of inputResolution.allExisting) {
+    const modified = await stat(path).then(file => file.mtime.toISOString(), () => undefined);
+    let findingCount: number | undefined;
+    if (path.toLowerCase().endsWith(".json")) {
+      try {
+        const parsed: unknown = JSON.parse(path === selected.path
+          ? selected.bytes.toString("utf8") : await readFile(path, "utf8"));
+        if (isAuditFindingsReport(parsed)) findingCount = parsed.findings.length;
+      } catch { /* Metadata for other candidates is best-effort. */ }
+    }
+    const details = [findingCount === undefined ? "type: document" : "type: structured_audit",
+      modified ? "modified " + modified : undefined,
+      findingCount === undefined ? undefined : findingCount + " finding(s)"].filter(Boolean);
+    sourceRows.push("- `" + toPromptPathToken(path) + "` - " + details.join(", "));
+  }
+
+  return {
+    kind: "step",
+    step: await writeCurrentStep({
+      stepKind: "confirm_auto_discovered_input",
+      status: "blocked",
+      runId: params.randomRunId("INPUT"),
+      repoRoot: root,
+      artifactsDir,
+      prompt: [
+        "# Confirm discovered remediation source(s)",
+        "",
+        "No `--input`/`--guidance-file` was supplied. Confirm the displayed report and exact revision with the user.",
+        "Selected: `" + toPromptPathToken(binding.path) + "` (SHA-256: `" + binding.sha256 + "`).",
+        "",
+        "**Discovered sources:**",
+        ...sourceRows,
+        "",
+        "To use the selected revision, write the following to `" + toPromptPathToken(paths.discoveredInputAck) + "`:",
+        "",
+        "```json",
+        JSON.stringify({ status: "confirmed", path: toPromptPathToken(binding.path), sha256: binding.sha256 }),
+        "```",
+        "",
+        "To use a different report, re-run with `--input <path>`. To use guidance alone, pass `--guidance-file <path>`.",
+        'To reject all discovered defaults, write `{ "status": "declined" }` to `' + toPromptPathToken(paths.discoveredInputAck) + "`.",
+        "",
+        "Then run: `" + params.loaderCommand("next-step") + "`",
+      ].join("\n"),
+      allowedCommands: [params.loaderCommand("next-step"), params.loaderCommand("next-step --input <path>")],
+      stopCondition: "Stop after presenting the discovered sources to the user and writing the ack.",
+      artifactPaths: { confirm_auto_discovered_input_ack: paths.discoveredInputAck },
+    }),
+  };
+}
+
+// Select and persist the source manifest before interpreting saved readiness.
 async function selectIntakeSource(
   params: IntakeStepParams,
   paths: IntakePaths,
@@ -310,136 +429,23 @@ async function selectIntakeSource(
   conversationStart: string | undefined,
   requestedSelection: ReturnType<typeof requestedFindingSelection>,
   collectStartingPointStep: CollectStartingPointStep,
-): Promise<IntakePause | { kind: "selected"; manifest: IntakeSourceManifest }> {
-  const { root, artifactsDir, inputResolution } = params;
-  let manifest: IntakeSourceManifest | undefined = previousManifest;
-  // Classification and native selection must use the same report bytes.
+): Promise<IntakePause | { kind: "selected"; manifest: IntakeSourceManifest; discoveredInput?: VerifiedDiscoveredInput }> {
+  // sites-pinned: tests/plan-authority.test.mjs
+  const { inputResolution } = params;
+  let manifest = previousManifest;
+  let discoveredInput: VerifiedDiscoveredInput | undefined;
   let classifiedAudit: { path: string; content: string; parsed: unknown } | undefined;
-
-  if (
-    !inputResolution.supplied &&
-    manifest &&
-    !manifestIsInputBound(manifest) &&
-    inputResolution.existing.length > 0
-  ) {
-    // Re-derive the manifest from the current default candidates so on-disk
-    // changes are picked up. Whether this actually invalidates downstream intake
-    // artifacts is decided below by comparing against the persisted manifest —
-    // an unchanged candidate set must NOT discard a ready summary/brief.
-    //
-    // BUT never clobber an `input`-bound manifest: the loader re-passes `--input`
-    // on every next-step, yet a bare next-step (no flag) must NOT silently swap the
-    // user's explicit input for a default candidate (a stale `audit-findings.json`
-    // in `.audit-tools/` would otherwise hijack the run). An input-bound run's
-    // source set is fixed by the user, so it is preserved across bare calls.
+  let selectedPaths = inputResolution.existing;
+  if (!inputResolution.supplied && !conversationStart && (!manifest || manifest.created_from === "default_candidates")) {
+    const selected = await selectDiscoveredInput(params, paths, manifest?.discovered_input, collectStartingPointStep);
+    if ("kind" in selected) return selected;
+    discoveredInput = selected;
+    selectedPaths = [selected.path];
     manifest = undefined;
   }
-
-  // Discovered-sources gate: on a fresh run (no manifest ever written) with no
-  // explicit source — neither `--input` (inputResolution.supplied) NOR
-  // `--guidance-file` (which lands as conversationStart) — surface EVERY
-  // auto-discovered candidate to the host as a context manifest before writing
-  // source-manifest.json. The host decides (confirm the auto-selected best, or
-  // pass `--input <path>` to pick another / a new file). Awareness never blocks
-  // an explicit source: when the host supplied one, this gate is skipped entirely
-  // (that is what broke the old decline→re-offer loop — a `--guidance-file` reply
-  // used to re-trigger the identical single-candidate prompt). Re-derivation
-  // (previousManifest set but cleared above) does NOT re-trigger it.
-  if (
-    !inputResolution.supplied &&
-    !conversationStart &&
-    inputResolution.existing.length > 0 &&
-    !manifest &&
-    !previousManifest
-  ) {
-    const ackPath = join(artifactsDir, "confirm_auto_discovered_input_ack.json");
-    const ack = await readOptionalJsonFile<{ status?: string }>(ackPath);
-    if (ack?.status === "declined") {
-      // Host explicitly rejected the discovered defaults — do NOT silently build a
-      // manifest from the very candidate they declined; ask for an explicit source
-      // instead. This breaks the loop even without a `--guidance-file` reply.
-      return collectStartingPointStep(
-        [],
-        "Stop after collecting an explicit remediation source (--input <path>) and rerunning next-step.",
-      );
-    }
-    if (ack?.status !== "confirmed") {
-      // Build one manifest row per discovered source, each with provenance the
-      // host can weigh (type, mtime, finding count) — the full context set, not
-      // just the single best match the pipeline would auto-select.
-      const sourceRows: string[] = [];
-      for (const candidatePath of inputResolution.allExisting) {
-        let sourceTypeLabel = "document";
-        let findingCount: number | undefined;
-        let mtimeStr: string | undefined;
-        try {
-          const fileStat = await stat(candidatePath);
-          mtimeStr = fileStat.mtime.toISOString();
-        } catch { /* best-effort */ }
-        if (candidatePath.toLowerCase().endsWith(".json")) {
-          try {
-            const content = await readFile(candidatePath, "utf8");
-            const parsed = JSON.parse(content);
-            if (isAuditFindingsReport(parsed)) {
-              sourceTypeLabel = "structured_audit";
-              findingCount = parsed.findings.length;
-            }
-          } catch { /* best-effort */ }
-        }
-        const meta = [
-          `type: ${sourceTypeLabel}`,
-          mtimeStr ? `modified ${mtimeStr}` : undefined,
-          findingCount !== undefined ? `${findingCount} finding(s)` : undefined,
-        ].filter((s): s is string => Boolean(s));
-        sourceRows.push(`- \`${candidatePath}\` — ${meta.join(", ")}`);
-      }
-      const autoSelected = inputResolution.existing[0];
-
-      return {
-        kind: "step",
-        step: await writeCurrentStep({
-          stepKind: "confirm_auto_discovered_input",
-          status: "blocked",
-          runId: params.randomRunId("INPUT"),
-          repoRoot: root,
-          artifactsDir,
-          prompt: [
-            "# Confirm discovered remediation source(s)",
-            "",
-            "No `--input`/`--guidance-file` was supplied. The following remediation",
-            "source(s) were auto-discovered on disk. Review them and decide with the user",
-            "which to use — the tool would otherwise auto-select the highest-priority one",
-            `(\`${autoSelected}\`).`,
-            "",
-            "**Discovered sources:**",
-            ...sourceRows,
-            "",
-            `To proceed with the auto-selected source (\`${autoSelected}\`), write to \`${ackPath}\`:`,
-            "",
-            "```json",
-            '{ "status": "confirmed" }',
-            "```",
-            "",
-            "To use a DIFFERENT discovered source, or a file not listed, re-run with",
-            "`--input <path>` (it takes the lossless structured fast-path for a `.json`).",
-            "",
-            `To reject all discovered defaults, write \`{ "status": "declined" }\` to \`${ackPath}\``,
-            "and re-run with an explicit `--input <path>`.",
-            "",
-            `Then run: \`${params.loaderCommand("next-step")}\``,
-          ].join("\n"),
-          allowedCommands: [
-            params.loaderCommand("next-step"),
-            params.loaderCommand("next-step --input <path>"),
-          ],
-          stopCondition:
-            "Stop after presenting the discovered sources to the user and writing the ack.",
-          artifactPaths: {
-            confirm_auto_discovered_input_ack: ackPath,
-          },
-        }),
-      };
-    }
+  // Explicit guidance can replace a discovery that has not yet become a plan source.
+  if (!inputResolution.supplied && conversationStart && manifest?.created_from === "default_candidates") {
+    manifest = undefined;
   }
 
   if (inputResolution.supplied && inputResolution.missing.length > 0) {
@@ -449,27 +455,16 @@ async function selectIntakeSource(
     );
   }
 
-  if (
-    inputResolution.existing.length > 0 &&
-    // A present conversation-start.md (a `--guidance-file` this invocation, or a
-    // leftover from a prior guidance run) is an explicit source and must win over
-    // any stale default candidate on disk: without this guard a leftover
-    // `.audit-tools/audit-findings.json` would be registered as
-    // `default_candidates` here and shadow the just-written guidance (the
-    // conversation branch below is only reached when `!manifest`). An explicit
-    // `--input` still takes precedence over conversation-start. Consistent with the
-    // discovered-sources gate above, which likewise skips on `conversationStart`.
-    (inputResolution.supplied || (!manifest && !conversationStart))
-  ) {
-    const singleInput = inputResolution.existing[0];
+  if (selectedPaths.length > 0 && (inputResolution.supplied || discoveredInput)) {
+    const singleInput = selectedPaths[0];
     let nextManifest: IntakeSourceManifest | undefined;
     const shouldTryAuditFastPath =
-      inputResolution.existing.length === 1 &&
+      selectedPaths.length === 1 &&
       singleInput.toLowerCase().endsWith(".json");
 
-    if (inputResolution.existing.length > 1) {
+    if (selectedPaths.length > 1) {
       const reports: string[] = [];
-      for (const path of inputResolution.existing.filter(path => path.toLowerCase().endsWith(".json"))) {
+      for (const path of selectedPaths.filter(path => path.toLowerCase().endsWith(".json"))) {
         const content = await readFile(path, "utf8");
         const validation = parseSuppliedInput(path, content, true);
         if (!validation.ok) return collectStartingPointStep([path], validation.reason);
@@ -482,13 +477,13 @@ async function selectIntakeSource(
       if (reports.length === 1) {
         const from = inputResolution.supplied ? "input" : "default_candidates";
         const audit = buildStructuredAuditSourceManifest(reports[0]!, from);
-        const guidance = buildDocumentSourceManifest(inputResolution.existing.filter(path => path !== reports[0]), from);
+        const guidance = buildDocumentSourceManifest(selectedPaths.filter(path => path !== reports[0]), from);
         nextManifest = { ...audit, sources: [...audit.sources, ...guidance.sources] };
       }
     }
 
     if (shouldTryAuditFastPath) {
-      const content = await readFile(singleInput, "utf8");
+      const content = discoveredInput?.bytes.toString("utf8") ?? await readFile(singleInput, "utf8");
       // Recognize an explicit audit even alongside guidance, while preserving
       // mixed document intake's existing fallback for non-audit JSON content.
       const allowDocumentFallback = !inputResolution.supplied || (Boolean(conversationStart) && requestedSelection === undefined && previousManifest?.finding_selection === undefined);
@@ -510,7 +505,7 @@ async function selectIntakeSource(
 
     if (!nextManifest) {
       nextManifest = buildDocumentSourceManifest(
-        inputResolution.existing,
+        selectedPaths,
         inputResolution.supplied ? "input" : "default_candidates",
       );
     }
@@ -522,6 +517,10 @@ async function selectIntakeSource(
       manifest = buildMixedSourceManifest(nextManifest, paths.conversationStart);
     } else {
       manifest = nextManifest;
+      if (discoveredInput) {
+        const { path, sha256 } = discoveredInput;
+        manifest.discovered_input = { path, sha256 };
+      }
     }
 
     // Persist after the optional selection has been validated below.
@@ -559,6 +558,9 @@ async function selectIntakeSource(
     } };
     await writeJsonFile(projectedPath, selected);
   }
+  if (previousManifest?.created_from === "default_candidates" && !sourceManifestsEquivalent(previousManifest, manifest)) {
+    await params.archivePriorSourceIntake?.();
+  }
   await writeJsonFile(paths.sourceManifest, manifest);
-  return { kind: "selected", manifest };
+  return { kind: "selected", manifest, discoveredInput };
 }

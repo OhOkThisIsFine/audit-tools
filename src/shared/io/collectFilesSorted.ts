@@ -25,8 +25,11 @@ export async function collectFilesSorted(path: string, policy: WalkPolicy = {}):
       const files: string[] = [];
       for (const entry of entries.sort((a, b) => compareCodeUnits(a.name, b.name))) {
         const child = join(current, entry.name);
-        if (entry.isDirectory() || policy.followSymlinks) files.push(...await walk(child, nextAncestors));
-        else files.push(child);
+        if (entry.isDirectory() || policy.followSymlinks) {
+          for (const file of await walk(child, nextAncestors)) files.push(file);
+        } else {
+          files.push(child);
+        }
       }
       return files;
     } catch (error) {

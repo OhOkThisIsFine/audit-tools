@@ -75,6 +75,7 @@ export async function verifyAnalyzerLeads(params: {
   state: RemediationState;
   root: string;
   overrides?: AnalyzerLeadVerifyOverrides;
+  assertOwnership?: () => Promise<void>;
 }): Promise<AnalyzerLeadVerifyOutcome> {
   const { state, root, overrides } = params;
   type Target = {
@@ -161,9 +162,11 @@ export async function verifyAnalyzerLeads(params: {
     }
     // Binary-runner candidates resolve offline (PATH probe / verified warm cache)
     // ahead of the async engine, exactly as the audit draw does.
+    await params.assertOwnership?.();
     const resolved = await resolveBinaryCandidates([candidate], root, engineOptions);
     // Resolution owns binary failure. Do not ask the engine to produce a second status.
     const unresolved = resolved.unresolvedStatuses[0];
+    if (!unresolved) await params.assertOwnership?.();
     const outcome = unresolved ? undefined : await runExternalAnalyzer(candidate, root, {
       ...engineOptions,
       resolvedBinaries: resolved.resolvedBinaries,

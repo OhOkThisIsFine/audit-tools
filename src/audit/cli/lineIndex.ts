@@ -14,8 +14,7 @@ import { errorMessage } from "../../shared/io/json.js";
 const LINE_COUNT_BATCH_SIZE = 25;
 
 /**
- * Sentinel line-count value marking a file as UNMEASURED (a read failure, or —
- * via {@link isUnmeasuredLineCount} — a key entirely absent from the index),
+ * Sentinel line-count value marking a file as UNMEASURED after a read failure,
  * distinct from a genuine zero-line file (CP-NODE-6). Deliberately stays within
  * the `number` domain (`Record<string, number>` is unchanged as the index's
  * shape, so no consumer's type signature needs to change to read it) while
@@ -26,21 +25,6 @@ const LINE_COUNT_BATCH_SIZE = 25;
  * `z.number().int().min(0)`) must never persist this value.
  */
 export const UNMEASURED_LINE_COUNT = Number.NaN;
-
-/**
- * True when `value` denotes "unmeasured" rather than a genuine line count:
- * either the key is entirely ABSENT from the index (`undefined` — e.g. a
- * caller queries a path the index was never built for, or a normalization
- * mismatch against the index's key form) or present but marked
- * {@link UNMEASURED_LINE_COUNT} (a read failure). A real zero-line file reads
- * as `0`, which is neither. Prefer this predicate over a bare `?? 0` fallback
- * so a read failure or a missing key is never silently treated as a genuine
- * empty file — the distinction is a VALUE this module emits, not a habit each
- * call site must remember to reimplement (CP-NODE-6).
- */
-export function isUnmeasuredLineCount(value: number | undefined): boolean {
-  return value === undefined || Number.isNaN(value);
-}
 
 /** Measure the adapter's exact sequence, including repeated manifest paths. */
 async function measureLinePaths(
