@@ -1,19 +1,7 @@
 import { readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readTextIfExists } from './audit-code-wrapper-io.mjs';
-
-function normalizeNewlines(value) {
-  return value.replace(/\r\n/g, '\n');
-}
-
-function looksLikeAuditCodeSkill(content) {
-  const normalized = normalizeNewlines(content);
-  return (
-    /^name:\s*audit-code\b/mu.test(normalized)
-    || normalized.includes('Conversation-first autonomous code auditing workflow for the /audit-code command.')
-    || normalized.includes('The canonical entrypoint is `/audit-code` in conversation.')
-  );
-}
+import { legacySkillOwnershipMatcher, normalizeNewlines } from './shared-install-hosts.mjs';
 
 function looksLikeAuditCodePrompt(content) {
   const normalized = normalizeNewlines(content);
@@ -44,12 +32,13 @@ function looksLikeAuditCodeInterfaceMetadata(content) {
 }
 
 export async function buildLegacyAuditCodeSurfaceTargets(root) {
+  const ownsLegacySkill = await legacySkillOwnershipMatcher('audit-code');
   const targets = [
     {
       host: 'codex',
       surface: 'skill',
       path: join(root, '.codex', 'skills', 'audit-code', 'SKILL.md'),
-      matches: looksLikeAuditCodeSkill,
+      matches: ownsLegacySkill,
     },
     {
       host: 'codex',
@@ -67,7 +56,7 @@ export async function buildLegacyAuditCodeSurfaceTargets(root) {
       host: 'opencode',
       surface: 'skill',
       path: join(root, '.opencode', 'skills', 'audit-code', 'SKILL.md'),
-      matches: looksLikeAuditCodeSkill,
+      matches: ownsLegacySkill,
     },
     {
       host: 'opencode',
