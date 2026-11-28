@@ -37,7 +37,7 @@ import type { AnalyzerPolicy } from "audit-tools/shared";
 // like every other cross-area shared module this area reaches for.
 import { createStepEmissionScaffold } from "../../shared/steps/stepEmissionScaffold.js";
 import { analyzerSelectionContext, incompleteAnalyzerStatuses, type ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
-import { cleanupStaleArtifactsDir } from "./cleanup.js";
+import { cleanupStaleArtifactsDir, TerminalCleanupError } from "./cleanup.js";
 import { rollOverFinishedRun } from "../io/rollover.js";
 import { hasPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { recoverFoldReceipt } from "./foldTransaction.js";
@@ -319,6 +319,8 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   const artifactsDir = resolveContainedPath(root, getArtifactsDir(argv),
     "next-step --artifacts-dir (for example, <root>/.audit-tools/audit)");
   warnIfNotGitRepo(root);
+  await cleanupStaleArtifactsDir(artifactsDir, { repositoryRoot: root, terminalOnly: true });
+  let terminalFailure: TerminalCleanupError | undefined;
   // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): ANY throw
   // out of the body — a host-handoff abort, a mis-shaped-submission parse crash,
   // an IO failure — writes a blocked step naming the cause before propagating,
@@ -332,6 +334,12 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     async () => {
       try { await cmdNextStepBody(argv, root, artifactsDir); }
       catch (error) {
+        // A newly begun sweep can fail in its terminal tail too. Propagate
+        // after the backstop scope so its writer cannot spoil the inventory.
+        if (error instanceof TerminalCleanupError) {
+          terminalFailure = error;
+          return;
+        }
         if (!(error instanceof ReviewUnavailableError)) throw error;
         const continueCommand = nextStepCommand(root, artifactsDir);
         await NEXT_STEP_EMISSION.emitPlan(currentStepPlan({
@@ -354,6 +362,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         reason,
       }),
   );
+  if (terminalFailure) throw terminalFailure;
 }
 
 async function cmdNextStepBody(
