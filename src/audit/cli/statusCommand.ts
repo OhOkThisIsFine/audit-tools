@@ -1,5 +1,5 @@
 // sites-pinned: tests/audit/status-command.test.ts
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
@@ -24,6 +24,7 @@ import { readAuditReviewBinding } from "./auditReviewBindings.js";
 import { AUDIT_GATE_SUBMISSION_SCOPE, laneSubmissionId, laneSubmissionPath, systemicChallengeLane } from "./laneSubmissions.js";
 import { systemicChallengeSchemaForBundle, systemicPremiseToken, systemicReviewInputRevision } from "../orchestrator/systemicChallengeExecutor.js";
 import { systemicChallengeEnded } from "../types/systemicChallenge.js";
+import { inspectPublishedConceptualProgress } from "./conceptualDispatch.js";
 import { parseReviewSubmissionEnvelope } from "../../shared/types/reviewIndependence.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
@@ -220,6 +221,22 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     questionReviewUnreadable = !isFileMissingError(error);
   }
 
+  let conceptual: Awaited<ReturnType<typeof inspectPublishedConceptualProgress>> | undefined;
+  if (step && (step.step_kind === "design_review_conceptual" || step.step_kind === "design_review_parallel")) {
+    try {
+      await access(join(artifactsDir, "run-ended.json"));
+      conceptual = { state: "stale", summary: "The audit run has ended." };
+    } catch (error) {
+      if (!isFileMissingError(error)) {
+        conceptual = { state: "unavailable", summary: "Could not inspect the audit run." };
+      } else {
+        conceptual = auditState.status === "complete"
+          ? { state: "stale", summary: "The audit run has completed." }
+          : await inspectPublishedConceptualProgress(artifactsDir, step, loadBundle);
+      }
+    }
+  }
+
   // Legacy task counts describe an archive, not current dispatch.
   let pendingTasksSummary: {
     run_id: string;
@@ -260,6 +277,7 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     archived_pending_tasks_state: archivedTasksState,
     question_review_handoff: handoff,
     systemic_challenge_continuation: systemic,
+    ...(conceptual ? { conceptual_review_progress: conceptual } : {}),
     question_review: questionReview,
     question_review_unreadable: questionReviewUnreadable,
   });
