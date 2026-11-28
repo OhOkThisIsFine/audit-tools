@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -51,9 +51,7 @@ async function fixture(t, { closing = false, requestDriven = true } = {}) {
   const project = file => join(root, file);
   const git = (...args) => execFileSync("git", args, { cwd: root, windowsHide: true, encoding: "utf8" }).trim();
   git("init", "--template=", "-q");
-  git("config", "user.name", "Fixture");
-  git("config", "user.email", "fixture@example.invalid");
-  git("config", "commit.gpgsign", "false");
+  await appendFile(join(root, ".git", "config"), "\n[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n[commit]\n\tgpgsign = false\n");
   const initialInput = "Inspect the fixture.";
   await writeFile(readPath, "original reviewed context");
   await writeFile(requestPath, initialInput);

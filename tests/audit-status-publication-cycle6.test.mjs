@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { format, promisify } from "node:util";
+import { runCli } from "../dist/audit/cli.js";
 import { prepareConceptualDispatch } from "../dist/audit/cli/conceptualDispatch.js";
 import { functionalPreflightPath, functionalPreflightStep } from "../dist/audit/cli/functionalPreflight.js";
 import { writeCurrentStep } from "../dist/audit/cli/steps.js";
@@ -25,7 +26,25 @@ async function fixture(t) {
   const artifactsDir = join(root, ".audit-tools", "audit");
   const steps = join(artifactsDir, "steps");
   await mkdir(steps, { recursive: true });
-  const status = async expectedExitCode => {
+  const status = async (expectedExitCode, { subprocess = false } = {}) => {
+    // One packaged process proves argument, stdout and exit-code wiring.
+    // The remaining distinct publication states exercise the same CLI dispatch directly.
+    if (!subprocess) {
+      let stdout = "", stderr = "";
+      const exitCode = process.exitCode;
+      const log = t.mock.method(console, "log", (...args) => { stdout += format(...args) + "\n"; });
+      const error = t.mock.method(console, "error", (...args) => { stderr += format(...args) + "\n"; });
+      try {
+        process.exitCode = undefined;
+        await runCli([process.execPath, cli, "status", "--root", root]);
+        assert.equal(process.exitCode ?? 0, expectedExitCode, stderr);
+        return JSON.parse(stdout);
+      } finally {
+        log.mock.restore();
+        error.mock.restore();
+        process.exitCode = exitCode;
+      }
+    }
     const response = await exec(process.execPath, [cli, "status", "--root", root], {
       cwd: root, windowsHide: true, timeout: 15000,
     }).then(result => ({ code: 0, ...result }), error => error);
@@ -53,7 +72,7 @@ function assertUnavailable(report, stepPath) {
 
 test("before state exists, only absence reports no active audit; verified preflight still offers continuation", async t => {
   const { root, artifactsDir, stepPath, status } = await fixture(t);
-  assert.equal((await status(1)).status, "no_active_audit");
+  assert.equal((await status(1, { subprocess: true })).status, "no_active_audit");
   for (const [description, damage] of damagedPublications) {
     await t.test(description, async () => {
       await damage(stepPath);

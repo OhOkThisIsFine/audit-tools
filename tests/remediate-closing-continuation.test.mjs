@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
-import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import test, { after } from "node:test";
 import { contentSha256 as hash, currentPromptPath, currentStepPath, FileLockOwnershipLostError, hashContent, runWithBlockedStepBackstop } from "../dist/shared/index.js";
 import {
   executionPlanPaths, ingestExecutionPlan, readCanonicalPlan, readExecutionIntent,
@@ -41,17 +41,35 @@ function afterFileRead(t, target, callback) {
   };
 }
 
+const fixtureGit = (cwd, ...args) =>
+  execFileSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).trim();
+
+let baseline, baselineDir;
+after(() => baselineDir && rm(baselineDir, { recursive: true, force: true, maxRetries: 3 }));
+function fixtureBaseline() {
+  return baseline ??= (async () => {
+    const parent = await realpath(tmpdir());
+    const seed = await mkdtemp(join(parent, "remediate-continuation-baseline-"));
+    assert.equal(await realpath(seed), seed);
+    assert.equal(dirname(seed), parent);
+    baselineDir = seed;
+    fixtureGit(seed, "init", "--template=", "-q");
+    await appendFile(join(seed, ".git", "config"),
+      "\n[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n[commit]\n\tgpgsign = false\n");
+    await writeFile(join(seed, "fixture.txt"), "fixture\n");
+    fixtureGit(seed, "add", "fixture.txt");
+    fixtureGit(seed, "commit", "-qm", "Fixture baseline");
+    return seed;
+  })();
+}
+
 async function fixture(t, parent = tmpdir()) {
   const root = await mkdtemp(join(await realpath(parent), "remediate-closing-continuation-"));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 3 }));
+  // Each case has its own real repository. Only the initial bytes are reused.
+  await cp(await fixtureBaseline(), root, { recursive: true });
   const artifactsDir = join(root, ".audit-tools", "remediation");
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }).trim();
-  git("init", "--template=", "-q");
-  await appendFile(join(root, ".git", "config"),
-    "\n[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n[commit]\n\tgpgsign = false\n");
-  await writeFile(join(root, "fixture.txt"), "fixture\n");
-  git("add", "fixture.txt");
-  git("commit", "-qm", "Fixture baseline");
+  const git = (...args) => fixtureGit(root, ...args);
   const cli = (verb, ...args) => JSON.parse(execFileSync(process.execPath, [entry, verb, ...args], {
     cwd: root, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, REMEDIATE_SKIP_FINAL_GATE: "1" },
@@ -274,8 +292,8 @@ test("delivery approval is reconstructed solely from durable local preparation; 
   assert.equal(closingActionCompleted({ ...result, commands: result.commands.slice(0, -1) }), false);
 });
 
-test("unattributed, unknown and raced delivery never produce successful remote evidence", async t => {
-  for (const [name, behavior, pushCount, attemptedCommit] of [
+test("unattributed, unknown and raced delivery never produce successful remote evidence", { concurrency: 3 }, async t => {
+  const cases = [
     ["precommitted clean checkout", { dirty: false }, 0, 0],
     ["unrelated earlier ahead history", { remoteInitiallyAtAncestor: true }, 0, 1],
     ["ordinary Git selects a different push remote", { conflictingPushDefault: true }, 0, 1],
@@ -286,7 +304,8 @@ test("unattributed, unknown and raced delivery never produce successful remote e
     ["tip moved backward at the update boundary", { race: true }, 1, 1],
     ["tip already equals candidate at the update boundary", { alreadyCandidate: true }, 1, 1],
     ["push receipt names a different destination", { wrongReceiptDestination: true }, 1, 1],
-  ]) await t.test(name, async t => {
+  ];
+  await Promise.all(cases.map(([name, behavior, pushCount, attemptedCommit]) => t.test(name, async t => {
     const f = await fakeDelivery(t, "push", { ...behavior, legacy: true });
     const first = await f.next(true);
     if (behavior.unknownLocalCommit) {
@@ -311,16 +330,17 @@ test("unattributed, unknown and raced delivery never produce successful remote e
     assert.equal(f.calls.pushes.length, pushCount);
     assert.equal(f.calls.localCommits, attemptedCommit);
     assert.equal(f.calls.prs.length, 0);
-  });
+  })));
 });
 
-test("PR requires the successful exact update and corroborated candidate head; partial receipts are never green", async t => {
-  for (const [name, behavior] of [
+test("PR requires the successful exact update and corroborated candidate head; partial receipts are never green", { concurrency: 3 }, async t => {
+  const cases = [
     ["matching post-push head", {}],
     ["post-push head unavailable", { unavailablePrHead: true }],
     ["post-push head drifted", { driftPrHead: true }],
     ["created PR points at a different head OID", { unverifiedPr: true }],
-  ]) await t.test(name, async t => {
+  ];
+  await Promise.all(cases.map(([name, behavior]) => t.test(name, async t => {
     const success = Object.keys(behavior).length === 0;
     const f = await fakeDelivery(t, "open-pr", { ...behavior, legacy: true });
     const preview = await f.next(true);
@@ -340,11 +360,11 @@ test("PR requires the successful exact update and corroborated candidate head; p
       assert.equal((await f.next()).step_kind, "present_report");
       assert.equal(f.calls.pushes.length, 1);
     }
-  });
+  })));
 });
 
-test("terminal push receipt recovery is report-only; missing terminal receipts stay unresolved", async t => {
-  for (const incomplete of [false, true]) await t.test(incomplete ? "incomplete" : "exact", async t => {
+test("terminal push receipt recovery is report-only; missing terminal receipts stay unresolved", { concurrency: 2 }, async t => {
+  await Promise.all([false, true].map(incomplete => t.test(incomplete ? "incomplete" : "exact", async t => {
     const f = await fakeDelivery(t, "push", { legacy: true });
     assert.equal((await f.next(true)).step_kind, "close_run");
     // Make only report promotion fail after the fake push completes.
@@ -367,7 +387,7 @@ test("terminal push receipt recovery is report-only; missing terminal receipts s
     }
     assert.equal(f.calls.pushes.length, 1);
     assert.equal(f.calls.localCommits, 1);
-  });
+  })));
 });
 
 test("the native emitted finalize command advances only a current, approved closing preview", async t => {

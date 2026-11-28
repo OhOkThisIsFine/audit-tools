@@ -215,22 +215,66 @@ test("even exact lint cannot lend guard green after changing installed runtime b
   assert.doesNotMatch(report,/Reused observation/);
 });
 
-test("a changed lint invocation runs but never lends guard green", async t => {
-  const {trace, report} = await closeFixture(t,{landing:"lint",scripts:{"check:lint":"eslint --no-cache ."}});
-  assert.deepEqual(trace.slice(-2), ["lint:--no-cache .","suite:test:built:start"]);
-  assert.doesNotMatch(report,/Reused observation/);
+test("native landing reuse recognizes only exact hook-free lint scripts and guard aliases", async t => {
+  // The end-to-end witness above exercises actual discovery, execution, and
+  // reuse. Script eligibility itself needs no Git, builds, or npm processes.
+  const { nativePriorLandingCheck, nativeGuardAlias } = await load("remediate/steps/gateCommands.js");
+  const parent = join(await realpath(checkout), ".audit-tools");
+  await mkdir(parent, { recursive: true });
+  const root = await mkdtemp(join(await realpath(parent), "close-suite-policy-"));
+  t.after(async () => {
+    assert.equal(await realpath(root), root);
+    await rm(root, { recursive: true, force: true });
+  });
+  const putScripts = scripts => writeFile(join(root, "package.json"), JSON.stringify({ name: "audit-tools", scripts }));
+  const lint = "npm run check:lint";
+  const exact = { "check:lint": "eslint .", "verify:guards": "npm run test:built" };
+  await putScripts(exact);
+  assert.equal(nativePriorLandingCheck(root, lint), true);
+  assert.equal(nativeGuardAlias(root), true);
+  for (const scripts of [
+    { ...exact, "check:lint": "eslint --no-cache ." },
+    { ...exact, "precheck:lint": "node scripts/hook.mjs" },
+    { ...exact, "postcheck:lint": "node scripts/hook.mjs" },
+  ]) {
+    await putScripts(scripts);
+    assert.equal(nativePriorLandingCheck(root, lint), false);
+    assert.equal(nativeGuardAlias(root), true);
+  }
+  for (const hook of ["preverify:guards", "postverify:guards"]) {
+    await putScripts({ ...exact, [hook]: "node scripts/hook.mjs" });
+    assert.equal(nativePriorLandingCheck(root, lint), true);
+    assert.equal(nativeGuardAlias(root), false);
+  }
 });
 
-test("a lint lifecycle hook runs and requires an independent guard", async t => {
-  const {trace, report} = await closeFixture(t,{landing:"lint",scripts:{"precheck:lint":"node scripts/hook.mjs"}});
-  assert.deepEqual(trace.slice(-3), ["hook","lint:.","suite:test:built:start"]);
-  assert.doesNotMatch(report,/Reused observation/);
-});
-
-test("an advisory wrapper with a hook is not borrowed", async t => {
-  const {trace, report} = await closeFixture(t,{landing:"glossary",scripts:{"preverify:guards":"node scripts/hook.mjs"}});
-  assert.deepEqual(trace.slice(-3), ["glossary","hook","suite:test:built:start"]);
-  assert.doesNotMatch(report,/Reused observation/);
+test("a non-native prior landing script runs and breaks the reuse chain", async t => {
+  const { verifyLandingGates } = await load("remediate/phases/closeVerifyLandingGates.js");
+  const parent = join(await realpath(checkout), ".audit-tools");
+  await mkdir(parent, { recursive: true });
+  const root = await mkdtemp(join(await realpath(parent), "close-suite-landing-"));
+  t.after(async () => {
+    assert.equal(await realpath(root), root);
+    await rm(root, { recursive: true, force: true });
+  });
+  await writeFile(join(root, "trace.mjs"),
+    'import { appendFileSync } from "node:fs"; appendFileSync("trace", process.argv[2] + "\\n");');
+  await writeFile(join(root, "package.json"), JSON.stringify({
+    name: "audit-tools", scripts: {
+      "check:lint": "node trace.mjs lint",
+      "precheck:lint": "node trace.mjs hook",
+      "verify:guards": "npm run test:built",
+      "test:built": "node trace.mjs suite",
+    },
+  }));
+  const outcome = await verifyLandingGates({
+    root, timeoutMs: 60_000,
+    recheckNativeGuard: async () => { assert.fail("must not consult the earlier observation"); },
+  });
+  assert.equal(outcome.passed, true, JSON.stringify(outcome.gates));
+  assert.deepEqual(outcome.gates.map(gate => [gate.command, gate.reused_from]),
+    [["npm run check:lint", undefined], ["npm run verify:guards", undefined]]);
+  assert.equal(await readFile(join(root, "trace"), "utf8"), "hook\nlint\nsuite\n");
 });
 
 test("an explicit distinct command is not borrowed", async t => {

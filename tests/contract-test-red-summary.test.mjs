@@ -50,25 +50,9 @@ function createFixture(t, body) {
 
 const runFixture = (t, body) => createFixture(t, body).run();
 
-test("an early failure stays named in the retained gate stderr after a long passing TAP tail", t => {
-  const result = runFixture(t, `
-    test('early failure identity', () => { throw new Error('fixture-body-only-secret'); });
-    for (let i = 0; i < 200; i++) test('passing tail ' + i, () => {});
-  `);
-  assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stdout, /^not ok 1 - early failure identity/m);
-  assert.match(result.stdout, /fixture-body-only-secret/);
-  assert.match(result.stdout, /^ok 201 - passing tail 199/m);
-  assert.match(result.stdout, /^# fail 1/m);
-  assert.doesNotMatch(result.stdout.slice(-4_000), /early failure identity/);
-  const retained = result.stderr.slice(-4_000);
-  assert.match(retained, /Failing contract tests:\r?\n  early failure identity/);
-  assert.match(retained, /Contract tests exited 1/);
-  assert.doesNotMatch(retained, /fixture-body-only-secret|passing tail/);
-});
-
-test("stderr names are bounded and omit diagnostic bodies and path or payload tokens", t => {
+test("stderr retains early failure names across a long passing tail while bounding and redacting them", t => {
   const result = runFixture(t, String.raw`
+    test('early failure identity', () => { throw new Error('fixture-body-only-secret'); });
     test('named failure C:\\private\\sensitive personal.txt', () => {
       throw new Error('fixture-diagnostic-secret\nnot ok 99 - misleading-diagnostic');
     });
@@ -78,28 +62,26 @@ test("stderr names are bounded and omit diagnostic bodies and path or payload to
     for (let i = 0; i < 25; i++) test('long failure ' + i + ' ' + 'a'.repeat(500), () => {
       throw new Error('fixture-body-only-secret');
     });
+    for (let i = 0; i < 200; i++) test('passing tail ' + i, () => {});
   `);
   assert.equal(result.status, 1, result.stderr);
   const summary = result.stderr.match(/Failing contract tests:\r?\n(?:  [^\r\n]+\r?\n)+/)?.[0];
   assert.ok(summary);
   assert.ok(summary.length < 1_300);
+  assert.match(summary, /early failure identity/);
   assert.match(summary, /named failure/);
   assert.match(summary, /second named failure/);
   assert.match(summary, /receipt for \[redacted\]/);
   assert.match(summary, /red fixture \[redacted\]/);
   assert.match(summary, /additional failing tests omitted/);
-  assert.doesNotMatch(summary, /fixture-.*secret|personal\.txt|private\.txt|customer\.csv|misleading-diagnostic|long failure 24|a{141}/);
+  assert.doesNotMatch(summary, /fixture-.*secret|passing tail|personal\.txt|private\.txt|customer\.csv|misleading-diagnostic|long failure 24|a{141}/);
   assert.match(result.stdout, /receipt for customer\.csv/);
   assert.match(result.stdout, /red fixture token: fixture-title-secret/);
-  assert.match(result.stdout, /^# fail 29/m);
-});
-
-test("a green run retains its TAP output without claiming failures", t => {
-  const result = runFixture(t, "test('green identity', () => {});");
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^ok 1 - green identity/m);
-  assert.match(result.stdout, /^# fail 0/m);
-  assert.equal(result.stderr, "");
+  assert.match(result.stdout, /^not ok 1 - early failure identity/m);
+  assert.match(result.stdout, /fixture-body-only-secret/);
+  assert.match(result.stdout, /^ok 230 - passing tail 199/m);
+  assert.match(result.stdout, /^# fail 30/m);
+  assert.doesNotMatch(result.stdout.slice(-4_000), /early failure identity/);
 });
 
 test("suite child timeout is infrastructure red, followed by a stamp on an unchanged full rerun", t => {
@@ -119,6 +101,9 @@ test("suite child timeout is infrastructure red, followed by a stamp on an uncha
 
   const green = fixture.run();
   assert.equal(green.status, 0, green.stderr);
+  assert.match(green.stdout, /^ok 1 - green identity/m);
+  assert.match(green.stdout, /^# fail 0/m);
+  assert.equal(green.stderr, "");
   const stamp = JSON.parse(readFileSync(fixture.stampPath, "utf8"));
   assert.match(stamp.tree, /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
   assert.equal(stamp.run_evidence.tree_before, stamp.tree);

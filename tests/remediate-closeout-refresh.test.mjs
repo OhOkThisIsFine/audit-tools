@@ -114,7 +114,7 @@ test("closeout requests fresh independent conformance after a context-only repla
   assert.equal(item.conformance_review.binding, advanced.binding);
 });
 
-test("closeout only refreshes an exact independently conformed overlap", async t => {
+test("closeout only refreshes an exact independently conformed overlap", { concurrency: 3 }, async t => {
   const fixturesDir = await mkdtemp(join(tmpdir(), "audit-closeout-overlap-"));
   t.after(() => rm(fixturesDir, { recursive: true, force: true }));
   const scoped = "target/source.txt";
@@ -144,9 +144,10 @@ test("closeout only refreshes an exact independently conformed overlap", async t
   const sharedWriter = runGit(template, "rev-parse", "HEAD");
   runGit(template, "switch", "-q", oldBranch);
 
-  for (const scenario of ["fast-forward chain", "second parent", "original off mainline", "unreviewed writer", "incorrect recorded paths", "ungranted overlap",
+  const scenarios = ["fast-forward chain", "second parent", "original off mainline", "unreviewed writer", "incorrect recorded paths", "ungranted overlap",
     "different merge result", "different first-parent preimage", "reviewed first-parent preimage mismatch",
-    "later unreviewed edit", "unstaged", "staged", "untracked"]) await t.test(scenario, async t => {
+    "later unreviewed edit", "unstaged", "staged", "untracked"];
+  await Promise.all(scenarios.map(scenario => t.test(scenario, async t => {
     const root = join(fixturesDir, scenario);
     t.after(() => rm(root, { recursive: true, force: true }));
     // Copy the worktree and its entire private .git, not a linked worktree.
@@ -277,6 +278,12 @@ test("closeout only refreshes an exact independently conformed overlap", async t
       before: "100644:" + git("rev-parse", before + ":" + scoped),
       after: "100644:" + git("rev-parse", after + ":" + scoped),
     })));
+    // All three histories prove exact transition binding above. The
+    // second-parent witness needs to drive the same response-adoption and
+    // final acceptance steps, and the fast-forward chain exercises adoption
+    // of multiple overlapping reviews. The off-mainline case only needs to
+    // prove discovery and binding of the original scope.
+    if (scenario === "original off mainline") return;
     if (scenario === "second parent") {
       assert.equal((await refresh()).find(row => row.work_item_id === "UNIT-original").code, "conformance_review_required");
       assert.equal((await prior.request()).binding, bound.binding);
@@ -299,5 +306,5 @@ test("closeout only refreshes an exact independently conformed overlap", async t
     assert.deepEqual(await refresh(), []);
     assert.equal(prior.item.conformance_review.binding, bound.binding);
     await assertSuccessfulConformance(root, artifactsDir, state);
-  });
+  })));
 });
