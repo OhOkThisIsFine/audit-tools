@@ -65,7 +65,9 @@ writeFileSync(holder, JSON.stringify({ pid: process.pid, startedAt: new Date().t
 try {
   const before = worktreeTrees(root)?.tree ?? null;
   if (!before) throw new Error("Could not bind tests to a Git worktree tree");
-  const timeoutMs = 120_000;
+  // On Windows the full fixture inventory can exceed two minutes while still
+  // making progress. Keep a finite deadline and require the same complete TAP.
+  const timeoutMs = process.platform === "win32" ? 240_000 : 120_000;
   // Windows fixtures frequently launch their own Git or npm process trees.
   const workerArgs = process.platform === "win32"
     ? ["--test-concurrency", String(Math.max(1, Math.floor(availableParallelism() / 2)))]
