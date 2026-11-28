@@ -1,6 +1,6 @@
 import { QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION } from "../../shared/types/questionReviewReport.js";
 import { STATE_FILENAME } from "../state/store.js";
-// sites-pinned: tests/remediate-judge-counterexamples.test.mjs, tests/remediate-mixed-guidance.test.mjs, tests/remediate-closeout-refresh.test.mjs
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs, tests/remediate-mixed-guidance.test.mjs
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -26,6 +26,7 @@ export { readApprovedExecutionPlan } from "../contractPipeline/executionPlan.js"
 
 export interface ContractPipelineStepOptions {
   root: string; artifactsDir: string; runId: string; sourcePaths?: string[]; forceRevision?: boolean;
+  sourceRead?: { path: string; bytes: Buffer };
   planningGraph?: () => Promise<string>;
 }
 
@@ -43,11 +44,17 @@ export async function resolveAdversarialDepth(artifactsDir: string) {
 }
 
 
-async function sourceDigests(paths: readonly string[]): Promise<PlanSource["sources"]> {
-  return Promise.all(uniqueSorted(paths).map(async path => ({ path, sha256: hashContent(await readFile(path, "utf8")) })));
+async function readPlanSourceBytes(paths: readonly string[], verified?: ContractPipelineStepOptions["sourceRead"]) {
+  return Promise.all(uniqueSorted(paths).map(async path => {
+    const bytes = verified?.path === path ? verified.bytes : await readFile(path);
+    return { path, sha256: hashContent(bytes), text: bytes.toString("utf8") };
+  }));
 }
 
-export async function writePathASeedFromFindings(artifactsDir: string, sourcePath: string, payload: unknown, guidancePaths: string[] = []): Promise<void> {
+export async function writePathASeedFromFindings(
+  artifactsDir: string, sourcePath: string, payload: unknown, guidancePaths: string[] = [],
+  sourceRead?: ContractPipelineStepOptions["sourceRead"],
+): Promise<void> {
   const raw = payload as { findings?: unknown[]; audit_read?: unknown; contract_version?: unknown };
   const findings = (raw.findings ?? []).map(finding => FindingSchema.parse(finding));
   const paths = executionPlanPaths(artifactsDir);
@@ -57,11 +64,12 @@ export async function writePathASeedFromFindings(artifactsDir: string, sourcePat
     return;
   }
   const audit = AuditReadSchema.safeParse(raw.audit_read);
-  const sources = await sourceDigests([sourcePath, ...guidancePaths]);
-  const guidanceSources = sources.filter(source => source.path !== sourcePath);
+  const reads = await readPlanSourceBytes([sourcePath, ...guidancePaths], sourceRead);
+  const sources = reads.map(({ path, sha256 }) => ({ path, sha256 }));
+  const guidanceSources = reads.filter(source => source.path !== sourcePath);
   const request = guidanceSources.length > 0 ? {
     id: `request-${randomUUID()}`,
-    text: (await Promise.all(guidanceSources.map(source => readFile(source.path, "utf8")))).join("\n\n"),
+    text: guidanceSources.map(source => source.text).join("\n\n"),
     source_paths: guidanceSources.map(source => source.path),
   } : undefined;
   await writeJsonFile(paths.source, PlanSourceSchema.parse({
@@ -75,8 +83,9 @@ export async function writePathASeedFromFindings(artifactsDir: string, sourcePat
 async function ensureSource(options: ContractPipelineStepOptions): Promise<PlanSource> {
   const existing = await readPlanSource(options.artifactsDir);
   if (existing) return existing;
-  const sources = await sourceDigests(options.sourcePaths ?? []);
-  const requestText = (await Promise.all(sources.map(source => readFile(source.path, "utf8")))).join("\n\n");
+  const reads = await readPlanSourceBytes(options.sourcePaths ?? [], options.sourceRead);
+  const sources = reads.map(({ path, sha256 }) => ({ path, sha256 }));
+  const requestText = reads.map(source => source.text).join("\n\n");
   const id = `plan-${randomUUID()}`;
   const source = PlanSourceSchema.parse({
     plan_id: id, findings: [], audit_read: null, sources, intent: await readExecutionIntent(options.artifactsDir),

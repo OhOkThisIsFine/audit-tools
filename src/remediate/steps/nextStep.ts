@@ -109,7 +109,8 @@ import {
   isVerifiedCompleteStatus,
 } from "../state/itemStatus.js";
 import { applyIntentOrdering } from "../intent/intentOrdering.js";
-import { resolveIntakeStep } from "./intakeResolver.js";
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
+import { readDiscoveredInput, resolveIntakeStep, type DiscoveryRead } from "./intakeResolver.js";
 import { hasStaleReopenedWorkingReport } from "../../audit/cli/questionReviewSession.js";
 import {
   RUNTIME_RESIDUAL_DECLARATION,
@@ -159,6 +160,7 @@ import {
   resolveManifestSources,
   writeRemediationBrief,
   type IntakeSourceManifest,
+  type VerifiedDiscoveredInput,
 } from "../intake.js";
 import {
   ensureIntakeRiskSignal,
@@ -1393,6 +1395,7 @@ async function handleReadyIntakeContractPipeline(
   artifactsDir: string,
   options: NextStepOptions,
   origin: "new_pre_edit_run",
+  discoveredInput?: VerifiedDiscoveredInput,
 ): Promise<RemediationStep | RemediationState | null> {
   // Resume the tool-owned plan without reconstructing completed intake.
   const earlyExtractedPlan = await readApprovedExecutionPlan(artifactsDir);
@@ -1418,7 +1421,7 @@ async function handleReadyIntakeContractPipeline(
   // A persisted manifest names an input; it is not authority for its current
   // contents. Validate every structured source before using any of its findings.
   const manifestSources = intake.manifest
-    ? resolveManifestSources(root, intake.manifest).resolved
+    ? resolveManifestSources(root, intake.manifest, discoveredInput?.path).resolved
     : [];
   const auditSources = manifestSources.filter(source => source.type === "structured_audit");
   const auditSource = auditSources[0];
@@ -1428,7 +1431,11 @@ async function handleReadyIntakeContractPipeline(
   let auditFindings: QuestionAuditFindingsReport | undefined;
   for (const source of auditSources) {
     let raw: unknown;
-    try { raw = JSON.parse(await readFile(source.path, "utf8")); } catch { raw = undefined; }
+    try {
+      const content = source.path === discoveredInput?.path
+        ? discoveredInput.bytes.toString("utf8") : await readFile(source.path, "utf8");
+      raw = JSON.parse(content);
+    } catch { raw = undefined; }
     const parsed = QuestionAuditFindingsReportSchema.safeParse(raw);
     if (!parsed.success) {
       return writeCurrentStep({
@@ -1539,11 +1546,14 @@ async function handleReadyIntakeContractPipeline(
         seedSourcePath,
         approvedPayload,
         guidancePaths,
+        discoveredInput,
       );
     }
   }
 
-  if (auditSource && auditFindings && !await readPlanSource(artifactsDir)) await writePathASeedFromFindings(artifactsDir, auditSource.path, auditFindings, guidancePaths);
+  if (auditSource && auditFindings && !await readPlanSource(artifactsDir)) {
+    await writePathASeedFromFindings(artifactsDir, auditSource.path, auditFindings, guidancePaths, discoveredInput);
+  }
 
   const paths = intakePaths(artifactsDir);
   const sourcePaths = new Set<string>();
@@ -1571,6 +1581,7 @@ async function handleReadyIntakeContractPipeline(
     artifactsDir,
     runId: randomRunId("CONTRACT"),
     sourcePaths: [...sourcePaths],
+    sourceRead: discoveredInput,
   });
   if (step) {
     return step;
@@ -1588,6 +1599,8 @@ async function handlePendingIntake(
   artifactsDir: string,
   options: NextStepOptions,
   origin: "new_pre_edit_run",
+  inputResolution: InputResolution,
+  discoveryRead?: DiscoveryRead,
 ): Promise<RemediationStep | RemediationState | null> {
   // Existing source ownership survives pending review and approval invalidation.
   // The earlier confirm_intent obligation still guards this continuation.
@@ -1600,14 +1613,22 @@ async function handlePendingIntake(
     );
   }
 
-  const inputResolution = await resolveInputPaths(root, options.input);
+  const paths = intakePaths(artifactsDir);
   const intakeResult = await resolveIntakeStep({
     root,
     artifactsDir,
     findingSelection: options,
     inputResolution,
+    discoveryRead,
     loaderCommand,
     randomRunId,
+    // A newly accepted revision must not inherit the prior source's
+    // synthesis or finding approval. Keep those records as history.
+    archivePriorSourceIntake: () => archiveConsumedInputs([
+      paths.summary, paths.clarificationResolution, paths.brief, paths.riskSignal,
+      reviewRequestPath(artifactsDir), reviewResolutionPath(artifactsDir),
+      reviewDecisionPath(artifactsDir), reviewFilterDispositionsPath(artifactsDir),
+    ]),
     collectStartingPointPrompt,
     synthesizeIntakePrompt,
     collectIntakeClarificationsPrompt,
@@ -1621,6 +1642,7 @@ async function handlePendingIntake(
     artifactsDir,
     options,
     origin,
+    intakeResult.discoveredInput,
   );
 }
 
@@ -2893,6 +2915,7 @@ export interface RemediateCtx {
 }
 
 /** The once-async-read signals the pre-intake derive()s consume synchronously. */
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
 export interface PreIntakeSnapshot {
   existingCheckpoint: IntentCheckpoint | undefined;
   /**
@@ -2928,6 +2951,11 @@ export interface PreIntakeSnapshot {
   suppliedInputUnchanged: boolean;
   /** Canonical source ownership starts before a runtime state exists. */
   sourceAlreadyBound?: boolean;
+  /** A displayed discovery is live intake even when the offered path disappeared. */
+  pendingDiscoveredIntake?: boolean;
+  /** Do not ask for approval of a synthesis derived from superseded bytes. */
+  replacingDiscoveredIntake?: boolean;
+  discoveryRead?: DiscoveryRead;
   /** A selected source or its explicit selector changed, including on bare resume. */
   inputSelectionChanged?: boolean;
   selectionAlreadyBound?: boolean;
@@ -2968,7 +2996,7 @@ function requireState(state: RemediationState | null): RemediationState {
   return state;
 }
 
-// sites-pinned: tests/remediate/obligation-priority-coverage.test.ts
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
 /**
  * The linear pre-intake gates as declarative obligations (A3 slice 1). Built per
  * call so each `derive` can close over `ctx` paths + the pre-read `snapshot` and
@@ -3060,6 +3088,7 @@ export function buildPreIntakeObligations(
       // complete/closing — those already confirmed their checkpoint.
       id: "confirm_intent",
       derive: (state) => {
+        if (snapshot.replacingDiscoveredIntake) return "satisfied";
         // A host-confirmed checkpoint carrying a closing_action outside the
         // vocabulary is not a confirmation: the step re-emits naming the value
         // (owner decision 92b0e2dd7cfdc06d — never a silent default).
@@ -3118,6 +3147,7 @@ export function buildPreIntakeObligations(
       // missing or stale sidecar is repaired by re-derivation, never skipped.
       id: "interpret_intent",
       derive: () => {
+        if (snapshot.replacingDiscoveredIntake) return "satisfied";
         if (
           existingCheckpoint?.confirmed_by !== "host" ||
           typeof existingCheckpoint.free_form_intent !== "string" ||
@@ -3219,6 +3249,7 @@ Then run:
           existsSync(ip.conversationStart) ||
           existsSync(executionPlanPaths(artifactsDir).canonical) ||
           sourceAlreadyBound ||
+          snapshot.pendingDiscoveredIntake ||
           (existsSync(ip.summary) && existingCheckpoint?.confirmed_by === "host") ||
           isDefaultCandidateFresherThanReport(inputResolution.existing[0], reportPath);
         return freshIntent ? "satisfied" : "missing";
@@ -3251,6 +3282,8 @@ Then run:
           c.artifactsDir,
           c.options,
           "new_pre_edit_run",
+          c.inputResolution,
+          snapshot.discoveryRead,
         );
         if (outcome && "step_kind" in outcome) {
           return { kind: "emit", step: outcome };
@@ -3679,8 +3712,9 @@ async function advanceUnderPhaseLock(deps: {
     if (options.guidanceText !== undefined) applyGuidanceText(artifactsDir, options.guidanceText);
   }
 
+  // sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
   if (options.verificationCommand !== undefined && state?.plan) {
-    if (parseCommandString(options.verificationCommand).length === 0) {
+    if (!parseCommandString(options.verificationCommand)[0]) {
       throw new Error("--verification-command must name an executable command");
     }
     state.plan.test_command = options.verificationCommand;
@@ -3769,7 +3803,18 @@ async function advanceUnderPhaseLock(deps: {
   const sourceManifest = await readSourceManifest(ip.sourceManifest);
   const requestedSelection = requestedFindingSelection(options);
   const recordedSelection = sourceManifest?.finding_selection;
-  const selectedSourceChanged = recordedSelection !== undefined && (!existsSync(recordedSelection.source_path) ||
+  const pendingDiscoveredIntake = state == null && !boundSource &&
+    (sourceManifest?.created_from === "default_candidates" || existsSync(ip.discoveredInputOffer));
+  const previousDiscovery = sourceManifest?.discovered_input;
+  const explicitReplacement = inputResolution.supplied || existsSync(ip.conversationStart);
+  // The intent gate and intake draw share this observation, so an on-disk
+  // change between them cannot skip intent confirmation for a ready summary.
+  const discoveryRead = pendingDiscoveredIntake && previousDiscovery && !explicitReplacement && existsSync(ip.summary)
+    ? { path: previousDiscovery.path, input: inputResolution.allExisting.includes(previousDiscovery.path)
+        ? await readDiscoveredInput(previousDiscovery.path) : undefined } : undefined;
+  const replacingDiscoveredIntake = pendingDiscoveredIntake && previousDiscovery !== undefined &&
+    (explicitReplacement || (discoveryRead !== undefined && discoveryRead.input?.sha256 !== previousDiscovery.sha256));
+  const selectedSourceChanged = !pendingDiscoveredIntake && recordedSelection !== undefined && (!existsSync(recordedSelection.source_path) ||
     hashContent(await readFile(recordedSelection.source_path, "utf8")) !== recordedSelection.source_hash);
   const inputSelectionChanged = selectedSourceChanged ||
     (requestedSelection !== undefined && JSON.stringify(requestedSelection) !== JSON.stringify(recordedSelection?.criteria));
@@ -3808,6 +3853,9 @@ async function advanceUnderPhaseLock(deps: {
     entryState: state,
     suppliedInputUnchanged,
     sourceAlreadyBound: boundSource !== undefined,
+    pendingDiscoveredIntake,
+    replacingDiscoveredIntake,
+    discoveryRead,
     inputSelectionChanged,
     selectionAlreadyBound: recordedSelection !== undefined,
     selectedSourceChanged,
