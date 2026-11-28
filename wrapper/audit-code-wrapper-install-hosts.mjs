@@ -1,6 +1,6 @@
 // sites-pinned: tests/audit/smoke-fixture-root.test.ts, tests/audit/a7.test.ts
 import { mkdir, mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
-import { assertDirectoryExists, collectVerifyCheck, ensureFile, getFlag, hasFlag, renderPromptFile, requireFlagValue, splitFrontmatter, toRepoRelativePath } from './shared-install-hosts.mjs';
+import { assertDirectoryExists, collectVerifyCheck, ensureFile, getFlag, hasFlag, normalizeNewlines, renderPromptFile, requireFlagValue, splitFrontmatter, toRepoRelativePath } from './shared-install-hosts.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import {
@@ -832,7 +832,7 @@ export async function verifyInstalledBootstrap(argv) {
       );
     }
     return {
-      summary: 'No legacy local /audit-code command or skill surfaces were found.',
+      summary: 'No removable legacy local /audit-code command or skill surfaces were found.',
     };
   });
 
@@ -998,6 +998,13 @@ export async function detectBootstrapRefreshReason(root, host) {
         const antigravitySkill = await readTextIfExists(expectedSkillPath);
         if (antigravitySkill !== null && antigravitySkill.replace(/\r\n/g, '\n') !== sourceSkill) {
           return 'stale_host_asset:antigravity:skill';
+        }
+        const geminiCommand = await readTextIfExists(join(root, '.gemini', 'commands', 'audit-code.toml'));
+        if (geminiCommand === null) {
+          return 'missing_host_asset:antigravity:geminiCommandPath';
+        }
+        if (normalizeNewlines(geminiCommand) !== normalizeNewlines(renderGeminiCommandToml(sourcePromptBody))) {
+          return 'stale_host_asset:antigravity:geminiCommandPath';
         }
         break;
       }

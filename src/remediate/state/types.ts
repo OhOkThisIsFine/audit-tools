@@ -152,6 +152,17 @@ export function isClarificationCategory(
   );
 }
 
+export const ClosingDeliveryTargetSchema = z.object({
+  candidate: z.string(),
+  parent: z.string(),
+  preparation_sha256: z.string(),
+  remote: z.string(),
+  address: z.string(),
+  ref: z.string(),
+  pr: z.object({ repository: z.string(), head: z.string(), base: z.string() }).strict().optional(),
+}).strict();
+export type ClosingDeliveryTarget = z.infer<typeof ClosingDeliveryTargetSchema>;
+
 export const ClosingActionPreviewSchema = z
   .object({
     /** Approval is for this action, never an interchangeable close label. */
@@ -169,8 +180,10 @@ export const ClosingActionPreviewSchema = z
      * alone. Absent/omitted when there is nothing to report.
      */
     leftover_files: z.array(z.string()).optional(),
+    delivery: ClosingDeliveryTargetSchema.optional(),
   })
   .strict();
+export type ClosingActionPreview = z.infer<typeof ClosingActionPreviewSchema>;
 
 export const ClosingPlanSchema = z
   .object({

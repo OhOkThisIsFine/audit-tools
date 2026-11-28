@@ -1,6 +1,7 @@
+import { admitAnalyzerRows, analyzerManifestPathSet, analyzerPathMembership, analyzerScopeDiagnostic } from "../io/analyzerResultScope.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
-  stableStringify, upsertExternalToolResults,
+  ExternalAnalyzerResultItemSchema, stableStringify, upsertExternalToolResults,
   type ExternalAnalyzerResults,
 } from "audit-tools/shared";
 import type { ExecutorRunResult } from "./executorResult.js";
@@ -9,6 +10,16 @@ export function runExternalAnalyzerImportExecutor(
   bundle: ArtifactBundle,
   externalResults: ExternalAnalyzerResults,
 ): ExecutorRunResult {
+  for (const [index, row] of externalResults.results.entries()) {
+    const parsed = ExternalAnalyzerResultItemSchema.safeParse(row);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      throw new Error(`Invalid external analyzer result at results[${index}]${issue?.path.length ? "." + issue.path.join(".") : ""}: ${issue?.message}`);
+    }
+  }
+  const { admitted, omitted } = admitAnalyzerRows(externalResults.results,
+    analyzerPathMembership(analyzerManifestPathSet(bundle.repo_manifest)));
+  const diagnostic = analyzerScopeDiagnostic(omitted);
   const prior = bundle.external_analyzer_results?.find(report => report.tool === externalResults.tool);
   // This door accepts normalized leads, not evidence about an invocation. It
   // cannot replace native receipt provenance or retract earlier positives.
@@ -27,18 +38,21 @@ export function runExternalAnalyzerImportExecutor(
     })];
   };
   const previous = prior?.results ?? [];
-  const results = merge(previous, externalResults.results.map(withoutReceipt), row => stableStringify(withoutReceipt(row)));
+  const results = merge(previous, admitted.map(withoutReceipt), row => stableStringify(withoutReceipt(row)));
   const graph = merge(prior?.graph_edges ?? [], externalResults.graph_edges ?? []);
   const roots = merge(prior?.ownership_roots ?? [], externalResults.ownership_roots ?? []);
+  if (!prior && omitted && !results.length && !graph.length && !roots.length) {
+    return { updated: bundle, artifacts_written: [], progress_summary: diagnostic.trimStart() };
+  }
   if (prior && results.length === previous.length && graph.length === (prior.graph_edges?.length ?? 0) &&
       roots.length === (prior.ownership_roots?.length ?? 0)) {
-    return { updated: bundle, artifacts_written: [], progress_summary: `Reused existing normalized findings from ${externalResults.tool}.` };
+    return { updated: bundle, artifacts_written: [], progress_summary: `Reused existing normalized findings from ${externalResults.tool}.` + diagnostic };
   }
   const merged: ExternalAnalyzerResults = {
     ...prior, tool: externalResults.tool, generated_at: externalResults.generated_at ?? prior?.generated_at, results,
     ...(graph.length ? { graph_edges: graph } : {}), ...(roots.length ? { ownership_roots: roots } : {}),
   };
-  const summary = `Imported ${results.length - previous.length} new normalized findings from ${externalResults.tool}.`;
+  const summary = `Imported ${results.length - previous.length} new normalized findings from ${externalResults.tool}.` + diagnostic;
   return {
     updated: {
       ...bundle,

@@ -39,6 +39,7 @@ export const StepKindSchema = z.enum([
   "critical_flow_fallback",
   "synthesis_narrative",
   "present_report",
+  "resume",
   "blocked",
 ]);
 export type StepKind = z.infer<typeof StepKindSchema>;

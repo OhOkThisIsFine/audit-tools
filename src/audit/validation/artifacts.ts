@@ -1,3 +1,4 @@
+import { analyzerPathMembership } from "../io/analyzerResultScope.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
   ExternalAnalyzerResultsSchema,
@@ -302,8 +303,9 @@ function validateRuntimeValidationReport(bundle: ArtifactBundle, idx: BundleInde
 
 function validateExternalAnalyzerResults(bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
   if (!bundle.external_analyzer_results) return;
+  const isAdmitted = analyzerPathMembership(bundle.repo_manifest ? idx.repoPaths : undefined);
   for (const item of idx.externalAnalyzerResults) {
-    if (!idx.repoPaths.has(item.path) && bundle.repo_manifest) {
+    if (!isAdmitted(item.path)) {
       pushValidationIssue(issues, `external_analyzer_results:${item.id}`, `External analyzer result references unknown path ${item.path}`);
     }
   }

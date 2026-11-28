@@ -1,7 +1,7 @@
 // sites-pinned: tests/remediate/executable-plan-identity.test.ts, tests/remediate/executable-plan-context.test.ts, tests/remediate/executable-plan-safety.test.ts, tests/remediate/execution-unit-runtime.test.ts
 import { join } from "node:path";
 import type { Stats } from "node:fs";
-import { mkdir, rename, readFile, lstat, readdir } from "node:fs/promises";
+import { mkdir, rename, readFile, lstat, readdir, rm } from "node:fs/promises";
 import { z } from "zod";
 import { contentSha256, hashContent, stableStringify, readOptionalJsonFile, writeJsonFile, repoRelativePath, toPosixPath, commandLeavesDeclaredShape, FindingSchema, AuditReadSchema, readIntentCheckpoint, fileExclusionReason, pathMatchesPrefix, EXCLUDED_OVERRIDE_STATUSES, AUDIT_TOOLS_DIRNAME, compareCodeUnits } from "audit-tools/shared";
 import { IntentCheckpointSchema } from "../../shared/types/intentCheckpoint.js";
@@ -10,6 +10,7 @@ import { ContractReviewProvenanceSchema, reviewIndependenceIssue } from "../../s
 import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../../shared/tooling/exec.js";
 import { errorMessage } from "../../shared/io/json.js";
 import { intakePaths } from "../intake.js";
+import type { RemediationState } from "../state/store.js";
 
 const text = z.string().trim().min(1);
 const digest = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -121,6 +122,8 @@ export function executionPlanPaths(artifactsDir: string) {
     submission: join(directory, "plan.input.json"),
     history: join(directory, "review-history.json"),
     approval: join(directory, "approval.json"),
+    pendingReplan: join(directory, "replan-pending.json"),
+    approvalHistory: (revision: string) => join(directory, "history", `${revision}-approval-evidence.json`),
     ownerDecision: join(directory, "owner-decision.json"),
     riskDecisions: join(directory, "risk-decisions.json"),
     review: (role: PlanReviewRole) => ({
@@ -129,6 +132,95 @@ export function executionPlanPaths(artifactsDir: string) {
       accepted: join(directory, `${role}.json`),
     }),
   };
+}
+
+const PendingReplanSchema = z.object({ plan_id: z.string().min(1), base_revision_sha256: digest }).strict();
+export type PendingReplan = z.infer<typeof PendingReplanSchema>;
+
+export async function readPendingReplan(artifactsDir: string): Promise<PendingReplan | undefined> {
+  const raw = await readOptionalJsonFile<unknown>(executionPlanPaths(artifactsDir).pendingReplan);
+  return raw === undefined ? undefined : PendingReplanSchema.parse(raw);
+}
+
+const HistorySchema = z.object({
+  counterexamples: z.array(PlanCounterexampleSchema), accepted_ids: z.array(text), repair_rounds: z.number().int().nonnegative(),
+  repair_revision: digest.optional(), repair_reason: text.optional(),
+}).strict();
+
+const DecisionEvidenceSchema = z.discriminatedUnion("present", [
+  z.object({ present: z.literal(false) }).strict(),
+  z.object({ present: z.literal(true), value: z.json() }).strict(),
+]);
+const ApprovalEvidenceSchema = z.object({
+  canonical: CanonicalPlanSchema,
+  approval: z.object({
+    revision_sha256: digest, judge_input_sha256: digest, owner_decision_sha256: digest,
+    risk_decision_sha256: digest, history_sha256: digest,
+    review_sha256: z.object({ critique: digest, critic: digest, judge: digest }).strict(),
+  }).strict(),
+  owner_decision: DecisionEvidenceSchema,
+  risk_decision: DecisionEvidenceSchema,
+  history: HistorySchema,
+  reviews: z.object({ critique: PlanReviewReceiptSchema, critic: PlanReviewReceiptSchema, judge: PlanReviewReceiptSchema }).strict(),
+}).strict();
+
+function verifiedReplanBase(raw: unknown, marker: PendingReplan, source: PlanSource): CanonicalPlan {
+  const { canonical, approval, owner_decision, risk_decision, history, reviews } = ApprovalEvidenceSchema.parse(raw);
+  const revision = marker.base_revision_sha256;
+  if (canonical.plan.plan_id !== marker.plan_id || source.plan_id !== marker.plan_id ||
+      canonical.revision_sha256 !== revision || approval.revision_sha256 !== revision ||
+      canonical.source_sha256 !== contentSha256(source) ||
+      executionPlanRevision(canonical.plan, canonical.source_sha256, canonical.context_files) !== revision ||
+      approval.owner_decision_sha256 !== contentSha256(owner_decision.present ? owner_decision.value : null) ||
+      approval.risk_decision_sha256 !== contentSha256(risk_decision.present ? risk_decision.value : null) ||
+      approval.history_sha256 !== contentSha256(history) ||
+      approval.judge_input_sha256 !== reviews.judge.input_sha256 ||
+      PLAN_REVIEW_ROLES.some(role => reviews[role].role !== role || reviews[role].revision_sha256 !== revision ||
+        reviews[role].provenance.reviewed_content_hash !== revision || approval.review_sha256[role] !== contentSha256(reviews[role]))) {
+    throw new Error("The historical approval evidence does not match the pending replan's original revision.");
+  }
+  return canonical;
+}
+
+/** Historical evidence is for authoring only, never a source of runtime approval. */
+export async function readReplanBase(artifactsDir: string, marker: PendingReplan, source: PlanSource): Promise<CanonicalPlan> {
+  const raw = await readOptionalJsonFile<unknown>(executionPlanPaths(artifactsDir).approvalHistory(marker.base_revision_sha256));
+  return verifiedReplanBase(raw, marker, source);
+}
+
+/** Called only by next-step under the phase lock, before shared review slots can change. */
+export async function beginPendingReplan(artifactsDir: string, marker: PendingReplan): Promise<void> {
+  const paths = executionPlanPaths(artifactsDir);
+  const approved = await readApprovedExecutionPlan(artifactsDir);
+  if (!approved || approved.canonical.revision_sha256 !== marker.base_revision_sha256) {
+    throw new Error("No current exact approval can be preserved for same-source replanning.");
+  }
+  const path = paths.approvalHistory(marker.base_revision_sha256);
+  const previous = await readOptionalJsonFile<unknown>(path);
+  if (previous !== undefined) {
+    verifiedReplanBase(previous, marker, approved.source);
+  } else {
+    const decisionValue = async (decisionPath: string) => {
+      const value = await readOptionalJsonFile<unknown>(decisionPath);
+      return value === undefined ? { present: false } : { present: true, value };
+    };
+    const evidence = {
+      canonical: await readOptionalJsonFile<unknown>(paths.canonical),
+      approval: await readOptionalJsonFile<unknown>(paths.approval),
+      owner_decision: await decisionValue(paths.ownerDecision),
+      risk_decision: await decisionValue(paths.riskDecisions),
+      history: await readOptionalJsonFile<unknown>(paths.history),
+      reviews: Object.fromEntries(await Promise.all(PLAN_REVIEW_ROLES.map(async role =>
+        [role, await readOptionalJsonFile<unknown>(paths.review(role).accepted)]))),
+    };
+    verifiedReplanBase(evidence, marker, approved.source);
+    await writeJsonFile(path, evidence);
+  }
+  await writeJsonFile(paths.pendingReplan, PendingReplanSchema.parse(marker));
+}
+
+export async function clearPendingReplan(artifactsDir: string): Promise<void> {
+  await rm(executionPlanPaths(artifactsDir).pendingReplan);
 }
 
 /** Canonical order ignores unrelated insert/reorder, but command order is semantic. */
@@ -160,9 +252,7 @@ export async function readPlanReviewHistory(artifactsDir: string): Promise<PlanR
 
 async function readExistingPlanReviewHistory(artifactsDir: string): Promise<PlanReviewHistory | undefined> {
   const raw = await readOptionalJsonFile<unknown>(executionPlanPaths(artifactsDir).history);
-  return raw === undefined ? undefined : z.object({
-    counterexamples: z.array(PlanCounterexampleSchema), accepted_ids: z.array(text), repair_rounds: z.number().int().nonnegative(), repair_revision: digest.optional(), repair_reason: text.optional(),
-  }).strict().parse(raw);
+  return raw === undefined ? undefined : HistorySchema.parse(raw);
 }
 
 /** Normalize spelling before review; the canonical grant remains the reviewed grant. */
@@ -264,6 +354,7 @@ export function executionPlanIssues(root: string, source: PlanSource, plan: Exec
 export async function ingestExecutionPlan(params: {
   root: string; artifactsDir: string;
   acceptedUnits?: ReadonlyMap<string, unknown>;
+  replanBase?: CanonicalPlan;
 }): Promise<{ changed: boolean; issues: string[] }> {
   const paths = executionPlanPaths(params.artifactsDir);
   const raw = await readOptionalJsonFile<unknown>(paths.submission);
@@ -277,6 +368,10 @@ export async function ingestExecutionPlan(params: {
   try { next = normalizeExecutionPlanPaths(params.root, parsed.data.plan); }
   catch (error) { return { changed: false, issues: [errorMessage(error)] }; }
   const previous = await readCanonicalPlan(params.artifactsDir);
+  const original = params.replanBase;
+  if (original && executionPlanRevision(next, original.source_sha256, original.context_files) === original.revision_sha256) {
+    return { changed: false, issues: ["The replacement must change reviewed plan semantics, not only recapture context. Revise the current canonical base while preserving accepted work."] };
+  }
   if (parsed.data.base_revision_sha256 !== (previous?.revision_sha256 ?? null)) {
     // A crash after the canonical write but before consuming its input must be
     // resumable. Identical accepted semantics are replay, never a new revision.
@@ -363,6 +458,20 @@ export async function captureExecutionContext(root:string,plan:ExecutableChangeP
   return [...files].sort(([a],[b])=>compareCodeUnits(a,b)).map(([path,sha256])=>({path,sha256}));
 }
 
+/** Accepted changes explain context drift for both revision authoring and fresh host dispatch. */
+export function acceptedExecutionContext(state: Pick<RemediationState, "plan" | "items" | "wave_simplifications">) {
+  const accepted = (state.plan?.units ?? []).flatMap(unit => {
+    const item = state.items?.[unit.id];
+    return item?.host_landed_commit ? [{ allowed_files: [...unit.allowed_files], landed_commit: item.host_landed_commit }] : [];
+  });
+  for (const wave of state.wave_simplifications ?? []) {
+    if (wave.response?.disposition === "applied" && wave.applied_files) accepted.push({
+      landed_commit: wave.response.commit, allowed_files: wave.applied_files,
+    });
+  }
+  return accepted;
+}
+
 /** Preparation checks reviewed premises; result ingestion instead checks its bound baseline. */
 export async function executionPlanContextIssues(root: string, canonical: CanonicalPlan,
   accepted: readonly { allowed_files: readonly string[]; landed_commit: string }[] = []): Promise<string[]> {
@@ -404,7 +513,8 @@ export async function readApprovedExecutionPlan(artifactsDir: string): Promise<{
   if (!canonical || !source || canonical.source_sha256 !== contentSha256(source)) return undefined;
   if(stableStringify(source.intent??null)!==stableStringify(await readExecutionIntent(artifactsDir)??null))return undefined;
   for (const entry of source.sources) {
-    try { if (hashContent(await readFile(entry.path, "utf8")) !== entry.sha256) return undefined; }
+    // sites-pinned: tests/plan-authority.test.mjs
+    try { if (hashContent(await readFile(entry.path)) !== entry.sha256) return undefined; }
     catch { return undefined; }
   }
   const paths=executionPlanPaths(artifactsDir);

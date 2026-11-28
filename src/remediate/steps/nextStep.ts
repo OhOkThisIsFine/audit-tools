@@ -3,7 +3,7 @@ import { backtickList } from "../../shared/reporting/markdown.js";
 import { readPlanClarificationResolutions, planClarificationRefusal, pausedClarifications, type PlanClarificationResolution } from "./clarificationResolution.js";
 import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "../state/dirtyBaseline.js";
 import { CLARIFICATION_RESOLUTION_FILENAME, TRIAGE_RESOLUTION_FILENAME, readDecisionSnapshot, decisionContextDigest } from "../state/decisionConsumption.js";
-import { RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
+import { RemediationPlanAuthorityError, verifyPersistedRuntimePlan } from "../contractPipeline/runtimePlanAuthority.js";
 import { refreshReplannedHostConformance, reopenStaleTriageSuccesses } from "../phases/triageConformance.js";
 import { stateRunId, requireStateRunId, currentHostBoundaryState } from "../state/runIdentity.js";
 import { presentReportStep } from "./frictionCloseout.js";
@@ -73,9 +73,11 @@ import { buildCoverageLedger } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import {
   assertNoUnresolvedClosingAction,
+  hasPreparedClosingRecord,
   retryIncompleteCloseReport,
   runClosePhase,
   UnresolvedClosingActionError,
+  type ClosingCommandRunner,
 } from "../phases/close.js";
 import { hasBoundRemediationSubmission, ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
 import { RETIRED_DISPATCH_SHAPE_MESSAGE, type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
@@ -109,7 +111,8 @@ import {
   isVerifiedCompleteStatus,
 } from "../state/itemStatus.js";
 import { applyIntentOrdering } from "../intent/intentOrdering.js";
-import { resolveIntakeStep } from "./intakeResolver.js";
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
+import { readDiscoveredInput, resolveIntakeStep, type DiscoveryRead } from "./intakeResolver.js";
 import { hasStaleReopenedWorkingReport } from "../../audit/cli/questionReviewSession.js";
 import {
   RUNTIME_RESIDUAL_DECLARATION,
@@ -123,11 +126,13 @@ import {
   type GateRunner,
   type ToolOwnedFinalGateResult,
 } from "./finalGate.js";
+// sites-pinned: tests/plan-authority.test.mjs
 import {
   renderGateAttribution,
   worktreeContentId,
   type GateRedAttribution,
   finalGateBinding,
+  toolOwnedFinalGateCommands,
 } from "./gateCommands.js";
 import {
   buildNextContractPipelineStep,
@@ -135,7 +140,10 @@ import {
   writePathASeedFromFindings,
 } from "./contractPipeline.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
-import { executionPlanPaths, readCanonicalPlan, readPlanSource } from "../contractPipeline/executionPlan.js";
+import {
+  beginPendingReplan, clearPendingReplan, executionPlanPaths, executionPlanRevision, readCanonicalPlan,
+  readPendingReplan, readPlanSource, readReplanBase,
+} from "../contractPipeline/executionPlan.js";
 import { completeWaveSimplification, pendingWaveSimplification, waveResponsePath, waveWritablePaths } from "./waveSimplification.js";
 import type { ExecutionUnit } from "../../shared/types/executionPlan.js";
 import {
@@ -159,6 +167,7 @@ import {
   resolveManifestSources,
   writeRemediationBrief,
   type IntakeSourceManifest,
+  type VerifiedDiscoveredInput,
 } from "../intake.js";
 import {
   ensureIntakeRiskSignal,
@@ -205,6 +214,8 @@ export interface NextStepOptions extends FindingSelectionOptions {
   finalizeClosing?: boolean;
   /** Explicit operator-supplied test role; retained in the current plan. */
   verificationCommand?: string;
+  /** Bypass a matching red phase-boundary verdict after external prerequisites change. */
+  retryFinalGate?: boolean;
   forceReplan?: boolean;
   /** Persist a stop after successful planning, before implementation. */
   planOnly?: boolean;
@@ -235,6 +246,8 @@ export interface NextStepOptions extends FindingSelectionOptions {
    * deterministically in tests. Unset in production → real env-scrubbed builds.
    */
   finalGateRunner?: GateRunner;
+  /** In-process test seam; CLI never supplies it. */
+  closingCommandRunner?: ClosingCommandRunner;
 }
 
 const SESSION_INTENT_RESULT: unique symbol = Symbol("session-intent-result");
@@ -675,19 +688,40 @@ async function saveStateForPlan(
   return state;
 }
 
-async function forceReplanFromExistingIntake(
+function hasIntakeConflict(input: {
+  selectionAlreadyBound: boolean; inputSelectionChanged: boolean; suppliedInput: boolean; suppliedInputUnchanged: boolean;
+  guidanceFileSupplied: boolean; sourceAlreadyBound: boolean; entryState: RemediationState | null;
+}): boolean {
+  return (input.selectionAlreadyBound && input.inputSelectionChanged) ||
+    (((input.suppliedInput && !input.suppliedInputUnchanged) || input.inputSelectionChanged || input.guidanceFileSupplied) &&
+      (input.sourceAlreadyBound || (input.entryState != null && input.entryState.status !== "pending")));
+}
+
+async function finishPendingReplan(
+  artifactsDir: string, store: StateStore, marker: NonNullable<Awaited<ReturnType<typeof readPendingReplan>>>,
+): Promise<void> {
+  const saved = await store.loadState();
+  if (saved?.status !== "planning" || saved.plan?.plan_id !== marker.plan_id ||
+      saved.plan.review_revision_sha256 === marker.base_revision_sha256) {
+    throw new Error("The distinct replacement has not been durably activated.");
+  }
+  const { canonical, source } = await verifyPersistedRuntimePlan(artifactsDir, saved);
+  const original = await readReplanBase(artifactsDir, marker, source);
+  if (executionPlanRevision(canonical.plan, original.source_sha256, original.context_files) === original.revision_sha256) {
+    throw new Error("The persisted replacement does not change the original reviewed plan semantics.");
+  }
+  const projectionPath = join(artifactsDir, "remediation_plan.json");
+  if (stableStringify(await readOptionalJsonFile<unknown>(projectionPath)) !== stableStringify(saved.plan)) {
+    await writeJsonFile(projectionPath, saved.plan);
+  }
+  await clearPendingReplan(artifactsDir);
+}
+
+async function continuePlanRevision(
   root: string, artifactsDir: string, previous: RemediationState,
-): Promise<RemediationState | { kind: "blocked"; reason: string; archivePath?: string } | {kind:"planning_step";step:RemediationStep} | null> {
-  admitRemediationDirtyBaseline(previous);
-  const step=await buildNextContractPipelineStep({root,artifactsDir,runId:requireStateRunId(previous),forceRevision:false});
-  if(step)return {kind:"planning_step",step};
-  const approved = await readApprovedExecutionPlan(artifactsDir);
-  if (!approved) return { kind: "blocked", reason: "Revise and independently approve the current executable plan before replanning. Accepted execution history is preserved." };
-  const activated = await activateApprovedPlan(root, artifactsDir, previous, "existing_run");
-  if (activated.kind === "blocked") return activated;
-  // Activation already carries unchanged history and applies CURRENT owner
-  // decisions. Reapplying old items here would undo a newly declined unit.
-  return activated.state;
+): Promise<PlanActivationOutcome | { kind: "planning_step"; step: RemediationStep }> {
+  const step = await buildNextContractPipelineStep({ root, artifactsDir, runId: requireStateRunId(previous) });
+  return step ? { kind: "planning_step", step } : activateApprovedPlan(root, artifactsDir, previous, "existing_run");
 }
 
 /**
@@ -729,6 +763,28 @@ export function reportNamesResultFiles(
   );
 }
 
+// sites-pinned: tests/plan-authority.test.mjs
+export function renderRepositoryFloorPreview(
+  root: string,
+  state: RemediationState,
+  options: NextStepOptions,
+): string[] {
+  if (finalGateDisabledReason(options) !== null) return [];
+  const commands = toolOwnedFinalGateCommands(root, explicitFinalGateTestCommand(state));
+  if (!commands.length) return [];
+  return [
+    "## Repository verification prerequisites (orchestrator, before delegation)",
+    "",
+    "Planned repository verification commands, as currently declared (not executed here):",
+    ...commands.map(spec => "- " + spec.layer + ": " + renderPromptCommand(spec.argv) +
+      (spec.package_dir ? " (cwd: " + spec.package_dir + ")" : "")),
+    "",
+    "Inspect these commands and their repository setup instructions now for required runtimes, dependencies, and fixtures. For necessary fixtures, establish isolated startup, readiness, and teardown with focused checks; surface anything unavailable or requiring separate authorization before dispatch. Do not use live services or production credentials as fixture substitutes.",
+    "Do not repeat an adequate prerequisite check unless the commands or environment change. Do not run the repository-wide suite here; the gate re-resolves and runs verification on the current checkout.",
+    "",
+  ];
+}
+
 async function buildImplementDispatchStep(ctx: {
   root: string;
   artifactsDir: string;
@@ -736,6 +792,7 @@ async function buildImplementDispatchStep(ctx: {
   options: NextStepOptions;
   store: StateStore;
   runLogger: RunLogger;
+  reconcileOnly?: boolean;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, store, runLogger } = ctx;
   const runId = requireStateRunId(state);
@@ -786,7 +843,7 @@ async function buildImplementDispatchStep(ctx: {
 
   const conformance = ingested.issues.filter(issue => issue.review_request_path !== undefined);
   if (conformance.length > 0) {
-    const nextCommand = loaderCommand("next-step");
+    const nextCommand = loaderCommand(ctx.reconcileOnly && ctx.options.forceReplan ? ["next-step", "--force-replan"] : ["next-step"]);
     const unavailable = conformance.some(issue => issue.code === "conformance_review_unavailable");
     const repair = conformance.some(issue => issue.code === "conformance_review_insufficient");
     return {
@@ -817,6 +874,18 @@ async function buildImplementDispatchStep(ctx: {
     };
   }
 
+  if (ctx.reconcileOnly) {
+    const next = loaderCommand(ctx.options.forceReplan ? ["next-step", "--force-replan"] : ["next-step"]);
+    return { kind: "emit", step: await writeCurrentStep({
+      stepKind: "contract_pipeline", status: "blocked", runId, repoRoot: root, artifactsDir,
+      prompt: [
+        "The existing host handoff still has bound work outstanding. Return its exact results before replanning; no new work was dispatched.",
+        ...remediationIngestReportLines(ingested),
+        `Then run ${next} to reconcile the bound results before revising the plan.`,
+      ].join("\n\n"),
+      allowedCommands: [next], stopCondition: "Return only results from the existing bound handoff.", artifactPaths: {},
+    }) };
+  }
   const baselineCommit = await headCommit(root);
   if (!baselineCommit) {
     throw new Error("Cannot prepare remediation host work without a repository HEAD commit.");
@@ -894,6 +963,7 @@ async function buildImplementDispatchStep(ctx: {
     "",
     `\`${handoff.workload_path}\``,
     "",
+    ...renderRepositoryFloorPreview(root, state, ctx.options),
     "The file lists the issued wave. Give each item's prompt to a worker. Do not start unissued units; units with overlapping write scope wait for a later wave.",
     "",
     ...report,
@@ -985,8 +1055,9 @@ async function handleComplete(
   root: string,
   artifactsDir: string,
   state: RemediationState | null,
+  assertOwnership?: AssertLockOwnership,
 ): Promise<RemediationStep> {
-  return presentReportStep(root, artifactsDir, state);
+  return presentReportStep(root, artifactsDir, state, assertOwnership);
 }
 
 type PlanActivationOutcome =
@@ -994,8 +1065,8 @@ type PlanActivationOutcome =
   | { kind: "blocked"; reason: string; archivePath?: string };
 
 /** Render the step that STATES a discard, rather than asking for an input again. */
-async function emitPlanRevisionBlockedStep(root:string,artifactsDir:string,blocked:{reason:string}):Promise<RemediationStep>{
-  return writeCurrentStep({stepKind:"contract_pipeline",status:"blocked",runId:null,repoRoot:root,artifactsDir,
+async function emitPlanRevisionBlockedStep(root:string,artifactsDir:string,blocked:{reason:string},assertOwnership?:AssertLockOwnership):Promise<RemediationStep>{
+  return writeCurrentStep({assertOwnership,stepKind:"contract_pipeline",status:"blocked",runId:null,repoRoot:root,artifactsDir,
     prompt:`# Executable plan requires attention\n\n${blocked.reason}\nThe current plan and accepted execution history are preserved. Revise the plan through its tool-issued submission and obtain fresh review before continuing.`,
     allowedCommands:[loaderCommand("next-step")],stopCondition:"Resolve the named plan/review issue before implementation.",artifactPaths:{execution_plan:executionPlanPaths(artifactsDir).canonical}});
 }
@@ -1393,6 +1464,7 @@ async function handleReadyIntakeContractPipeline(
   artifactsDir: string,
   options: NextStepOptions,
   origin: "new_pre_edit_run",
+  discoveredInput?: VerifiedDiscoveredInput,
 ): Promise<RemediationStep | RemediationState | null> {
   // Resume the tool-owned plan without reconstructing completed intake.
   const earlyExtractedPlan = await readApprovedExecutionPlan(artifactsDir);
@@ -1418,7 +1490,7 @@ async function handleReadyIntakeContractPipeline(
   // A persisted manifest names an input; it is not authority for its current
   // contents. Validate every structured source before using any of its findings.
   const manifestSources = intake.manifest
-    ? resolveManifestSources(root, intake.manifest).resolved
+    ? resolveManifestSources(root, intake.manifest, discoveredInput?.path).resolved
     : [];
   const auditSources = manifestSources.filter(source => source.type === "structured_audit");
   const auditSource = auditSources[0];
@@ -1428,7 +1500,11 @@ async function handleReadyIntakeContractPipeline(
   let auditFindings: QuestionAuditFindingsReport | undefined;
   for (const source of auditSources) {
     let raw: unknown;
-    try { raw = JSON.parse(await readFile(source.path, "utf8")); } catch { raw = undefined; }
+    try {
+      const content = source.path === discoveredInput?.path
+        ? discoveredInput.bytes.toString("utf8") : await readFile(source.path, "utf8");
+      raw = JSON.parse(content);
+    } catch { raw = undefined; }
     const parsed = QuestionAuditFindingsReportSchema.safeParse(raw);
     if (!parsed.success) {
       return writeCurrentStep({
@@ -1539,11 +1615,14 @@ async function handleReadyIntakeContractPipeline(
         seedSourcePath,
         approvedPayload,
         guidancePaths,
+        discoveredInput,
       );
     }
   }
 
-  if (auditSource && auditFindings && !await readPlanSource(artifactsDir)) await writePathASeedFromFindings(artifactsDir, auditSource.path, auditFindings, guidancePaths);
+  if (auditSource && auditFindings && !await readPlanSource(artifactsDir)) {
+    await writePathASeedFromFindings(artifactsDir, auditSource.path, auditFindings, guidancePaths, discoveredInput);
+  }
 
   const paths = intakePaths(artifactsDir);
   const sourcePaths = new Set<string>();
@@ -1571,6 +1650,7 @@ async function handleReadyIntakeContractPipeline(
     artifactsDir,
     runId: randomRunId("CONTRACT"),
     sourcePaths: [...sourcePaths],
+    sourceRead: discoveredInput,
   });
   if (step) {
     return step;
@@ -1588,6 +1668,8 @@ async function handlePendingIntake(
   artifactsDir: string,
   options: NextStepOptions,
   origin: "new_pre_edit_run",
+  inputResolution: InputResolution,
+  discoveryRead?: DiscoveryRead,
 ): Promise<RemediationStep | RemediationState | null> {
   // Existing source ownership survives pending review and approval invalidation.
   // The earlier confirm_intent obligation still guards this continuation.
@@ -1600,14 +1682,24 @@ async function handlePendingIntake(
     );
   }
 
-  const inputResolution = await resolveInputPaths(root, options.input);
+  const paths = intakePaths(artifactsDir);
   const intakeResult = await resolveIntakeStep({
     root,
     artifactsDir,
     findingSelection: options,
     inputResolution,
+    discoveryRead,
     loaderCommand,
     randomRunId,
+    // sites-pinned: tests/plan-authority.test.mjs
+    // A newly accepted revision must not inherit the prior source's
+    // synthesis, scope confirmation, or finding approval. Keep those records as history.
+    archivePriorSourceIntake: () => archiveConsumedInputs([
+      paths.summary, paths.clarificationResolution, paths.brief, paths.riskSignal,
+      paths.intentCheckpoint, intentInterpretationPath(artifactsDir),
+      reviewRequestPath(artifactsDir), reviewResolutionPath(artifactsDir),
+      reviewDecisionPath(artifactsDir), reviewFilterDispositionsPath(artifactsDir),
+    ]),
     collectStartingPointPrompt,
     synthesizeIntakePrompt,
     collectIntakeClarificationsPrompt,
@@ -1621,6 +1713,7 @@ async function handlePendingIntake(
     artifactsDir,
     options,
     origin,
+    intakeResult.discoveredInput,
   );
 }
 
@@ -1905,6 +1998,7 @@ async function handleImplementing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
+  assertCloseOwnership: AssertLockOwnership,
 ): Promise<RemediateOutcome> {
   const triageStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
@@ -1924,7 +2018,7 @@ async function handleImplementing(
   }
   // Triage may enter closing directly: the close itself owns mandatory final
   // acceptance, so a status transition cannot bypass it.
-  if (triaged.status === "closing") return handleAllTerminalTransition(triaged, store, root, artifactsDir);
+  if (triaged.status === "closing") return handleAllTerminalTransition(triaged, store, root, artifactsDir, assertCloseOwnership);
   await store.saveState(triaged);
   return { kind: "transition", state: triaged };
 }
@@ -1979,6 +2073,7 @@ async function emitFinalGateRedStep(ctx: {
   /** Close has already recorded its red before presentation. */
   recordedPath?: string;
   closingActionWithheld?: boolean;
+  assertOwnership?: AssertLockOwnership;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, scope, gate, runLogger } = ctx;
   admitRemediationDirtyBaseline(state);
@@ -2015,6 +2110,7 @@ async function emitFinalGateRedStep(ctx: {
   // SERVED, not observed. State the id and state exactly what moves it: any
   // edit to a non-ignored file outside the run's own artifacts. This is the
   // same carve-out `worktreeContentId` applies, said in the operator's terms.
+  // sites-pinned: tests/plan-authority.test.mjs
   const bindingBlock =
     ctx.tree === undefined
       ? "The tool keeps no copy of this result. Each next-step runs the full build\n" +
@@ -2028,9 +2124,10 @@ async function emitFinalGateRedStep(ctx: {
           `outside \`${AUDIT_TOOLS_DIRNAME}/\` and outside git-ignored paths changes that tree.\n` +
           "The next next-step then runs the full build and suite again, which takes\n" +
           "minutes. With no edit, next-step shows this same red at once and runs\n" +
-          "nothing. So fix something before you run next-step again.";
+          "nothing. Use --retry-final-gate after fixing an external prerequisite that does not change the tree.";
   const nextCommand = loaderCommand("next-step");
   const recoveryCommand = `${nextCommand} --verification-command "<operator-approved command>"`;
+  const retryCommand = ctx.tree == null ? nextCommand : loaderCommand("next-step --retry-final-gate");
   const declaredTestHint = gate.results.length === 0 ? suggestDeclaredMakeTest(root) : undefined;
   const declaredTestHintText = declaredTestHint
     ? "The root Makefile contains a test target. Candidate: `" + renderPromptCommand(declaredTestHint) +
@@ -2039,6 +2136,7 @@ async function emitFinalGateRedStep(ctx: {
   return {
     kind: "emit",
     step: await writeCurrentStep({
+      assertOwnership: ctx.assertOwnership,
       stepKind: "final_gate_red",
       status: "blocked",
       runId: stateRunId(state),
@@ -2077,13 +2175,13 @@ ${attributionBlock}
 Do these steps:
 
 1. Fix the failing command, or confirm that it was already broken before this run.
-2. Run \`${nextCommand}\`.
+2. Run \`${retryCommand}\`.
 
 When the suite is green, the run continues from where it stopped.
 
 ${bindingBlock}
 `,
-      allowedCommands: gate.results.length === 0 ? [nextCommand, recoveryCommand] : [nextCommand],
+      allowedCommands: gate.results.length === 0 ? [nextCommand, recoveryCommand] : [retryCommand],
       stopCondition:
         gate.results.length === 0
           ? "Stop. Obtain an explicit verification command from the operator or leave this run paused."
@@ -2167,7 +2265,8 @@ async function runPhaseBoundaryGate(ctx: {
   // known and was already recorded. A HIT is therefore a full substitute,
   // including for a RED one (see {@link readFinalGateVerdict} — the pause is
   // rebuilt from the cached results rather than re-derived).
-  const cached = await readFinalGateVerdict(artifactsDir, scope, tree, binding);
+  // sites-pinned: tests/plan-authority.test.mjs
+  const cached = await readFinalGateVerdict(artifactsDir, scope, tree, binding, options.retryFinalGate);
   if (cached !== undefined) {
     // Recorded as a distinct outcome from a real run: the judge is `history`,
     // not a spawned command, and `commands_run` counts what HISTORY held, never
@@ -2267,6 +2366,7 @@ async function handleAllTerminalTransition(
   store: StateStore,
   root: string,
   artifactsDir: string,
+  assertOwnership: AssertLockOwnership,
 ): Promise<RemediateOutcome> {
   // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
   if (!(await reopenStaleTriageSuccesses(root, artifactsDir, state))) {
@@ -2274,7 +2374,7 @@ async function handleAllTerminalTransition(
     // pauses. A transition carries no executable verification verdict.
     state.status = "closing";
   }
-  await store.saveState(state);
+  await store.saveState(state, assertOwnership);
   return { kind: "transition", state };
 }
 
@@ -2285,18 +2385,21 @@ async function handleClosing(
   runLogger: RunLogger,
   store: StateStore,
   options: NextStepOptions,
+  assertOwnership: AssertLockOwnership,
 ): Promise<RemediateOutcome> {
   // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
   if (await reopenStaleTriageSuccesses(root, artifactsDir, state)) {
-    await store.saveState(state);
+    await store.saveState(state, assertOwnership);
     return { kind: "transition", state };
   }
   const priorBindings = Object.values(state.items ?? {}).map(item => item.conformance_review?.binding);
-  const refreshIssues = await refreshReplannedHostConformance(root, artifactsDir, state);
+  await assertOwnership();
+  const refreshIssues = await refreshReplannedHostConformance(root, artifactsDir, state, assertOwnership);
   if (Object.values(state.items ?? {}).some((item, index) => item.conformance_review?.binding !== priorBindings[index])) {
-    await store.saveState(state);
+    await store.saveState(state, assertOwnership);
   }
   if (refreshIssues.length) return { kind: "emit", step: await writeCurrentStep({
+    assertOwnership,
     stepKind: "review_contract_conformance",
     status: refreshIssues.some(issue => issue.code !== "conformance_review_required") ? "blocked" : "ready",
     runId: stateRunId(state), repoRoot: root, artifactsDir,
@@ -2316,45 +2419,62 @@ async function handleClosing(
   // reflection is owned by this repository's sprint closeout; captured run
   // diagnostics are still archived by runClosePhase before cleanup.
   let paused: RemediateOutcome | undefined;
+  let terminalStep: RemediationStep | undefined;
   let closed: RemediationState;
   try {
     closed = await runClosePhase(state, {
-      root, artifactsDir,
+      root, artifactsDir, assertOwnership,
+      publishReport: async (complete, assertCurrent) => {
+        terminalStep = await handleComplete(root, artifactsDir, complete, assertCurrent);
+      },
       skipFinalGate: options.skipFinalGate,
       finalGateRunner: options.finalGateRunner,
+      closingCommandRunner: options.closingCommandRunner,
       finalizeClosing: options.finalizeClosing,
       onFinalGateRed: async (gate) => {
         paused = await emitFinalGateRedStep({
           root, artifactsDir, state, scope: "all-terminal final gate",
           where: "Before completing the close phase", gate, runLogger, closingActionWithheld: true,
+          assertOwnership,
           recordedPath: finalGateRecordPath(artifactsDir),
         });
       },
     }, runLogger);
   } catch (error) {
     if (error instanceof UnresolvedClosingActionError) {
-      return { kind: "emit", step: await emitUnresolvedClosingStep(root, artifactsDir, state, error) };
+      return { kind: "emit", step: await emitUnresolvedClosingStep(root, artifactsDir, state, error, assertOwnership) };
     }
     if (!(error instanceof RemediationPlanAuthorityError)) throw error;
     return { kind: "emit", step: await emitPlanRevisionBlockedStep(root, artifactsDir, {
       reason: `Closing is paused before any closing action. ${error.message}`,
-    }) };
+    }, assertOwnership) };
   }
   if (paused) return paused;
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
   if (closed.status !== "complete") {
-    await store.saveState(closed);
+    await store.saveState(closed, assertOwnership);
     const preview = closed.closing_plan?.closing_action_preview;
-    if (closed.status === "closing" && preview && !closed.closing_plan?.pre_authorized) {
+    if (closed.status === "closing" && preview && (preview.delivery || !closed.closing_plan?.pre_authorized)) {
       const approveCommand = loaderCommand("next-step --finalize-closing");
+      const target = preview.delivery;
+      const preparing = !target && (preview.action === "push" || preview.action === "open-pr");
       return {
         kind: "emit",
         step: await writeCurrentStep({
+          assertOwnership,
           stepKind: "close_run", status: "ready", runId: stateRunId(closed),
           repoRoot: root, artifactsDir,
           prompt: [
-            "# Approve closing action",
-            `Ask the user to approve the closing action: ${closed.closing_plan?.action}.`,
+            target ? "# Approve delivery" : "# Approve closing action",
+            preparing ? "Ask the user to approve local commit preparation only. No push or PR will run on this approval."
+              : `Ask the user to approve the closing action: ${preview.action}.`,
+            ...(target ? [
+              `Candidate commit: ${target.candidate}`,
+              `Direct parent and expected old tip: ${target.parent}`,
+              `Remote: ${target.remote} (${target.address})`,
+              `Target ref: ${target.ref}`,
+              ...(target.pr ? [`Pull request: ${target.pr.repository}, head ${target.pr.head}, base ${target.pr.base}`] : []),
+            ] : []),
             `Commit message: ${preview.commit_message}`,
             "Files:", ...preview.files.map(file => `- ${file}`),
             ...(preview.leftover_files?.length ? ["Files left untouched:", ...preview.leftover_files.map(file => `- ${file}`)] : []),
@@ -2369,18 +2489,8 @@ async function handleClosing(
     // Re-blocked to triage: persist and re-scan.
     return { kind: "transition", state: closed };
   }
-  // Close-complete CROSSES the engine boundary: `complete` is a pre-intake
-  // obligation, unreachable from a main-engine transition. Emit the durable
-  // report directly, passing exactly what the original recursion reloaded — the
-  // artifact dir is DELETED on a fully-green close (reload → null, and a null
-  // state renders no friction block) and PRESERVED on a not-green complete
-  // (reload → the saved complete state → its plan_id). `store.loadState()`
-  // reproduces both, so present_report is identical to the cascade.
-  // (Regression-locked in next-step-implement-dispatch.)
-  return {
-    kind: "emit",
-    step: await handleComplete(root, artifactsDir, await store.loadState()),
-  };
+  if (!terminalStep) throw new Error("Close completed without publishing its report step.");
+  return { kind: "emit", step: terminalStep };
 }
 
 async function handleZeroDocumentableFindings(
@@ -2642,18 +2752,11 @@ async function buildConfirmResumeOrRestartStep(ctx: {
       "   ```",
       `   Then delete \`${artifactsDir}\` and re-run with \`--input <path>\`.`,
       "",
-      "3. **Merge new recommendations into existing plan** — carry the current plan",
-      "   forward with additional findings merged in. Write to the ack file:",
-      "   ```json",
-      '   { "choice": "merge" }',
-      "   ```",
-      `   Then re-run with \`--input <path>\` pointing at your new recommendations.`,
-      "",
       `Write your choice to: \`${ackPath}\``,
     ].join("\n"),
     allowedCommands: [nextCommand, loaderCommand("next-step --input <path>")],
     stopCondition:
-      "Stop after presenting the resume/restart/merge choice to the user and writing the ack.",
+      "Stop after presenting the resume/restart choice to the user and writing the ack.",
     artifactPaths: {
       state_file: join(artifactsDir, STATE_FILENAME),
       confirm_resume_ack: ackPath,
@@ -2893,6 +2996,7 @@ export interface RemediateCtx {
 }
 
 /** The once-async-read signals the pre-intake derive()s consume synchronously. */
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
 export interface PreIntakeSnapshot {
   existingCheckpoint: IntentCheckpoint | undefined;
   /**
@@ -2928,6 +3032,11 @@ export interface PreIntakeSnapshot {
   suppliedInputUnchanged: boolean;
   /** Canonical source ownership starts before a runtime state exists. */
   sourceAlreadyBound?: boolean;
+  /** A displayed discovery is live intake even when the offered path disappeared. */
+  pendingDiscoveredIntake?: boolean;
+  /** Do not ask for approval of a synthesis derived from superseded bytes. */
+  replacingDiscoveredIntake?: boolean;
+  discoveryRead?: DiscoveryRead;
   /** A selected source or its explicit selector changed, including on bare resume. */
   inputSelectionChanged?: boolean;
   selectionAlreadyBound?: boolean;
@@ -2968,7 +3077,7 @@ function requireState(state: RemediationState | null): RemediationState {
   return state;
 }
 
-// sites-pinned: tests/remediate/obligation-priority-coverage.test.ts
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
 /**
  * The linear pre-intake gates as declarative obligations (A3 slice 1). Built per
  * call so each `derive` can close over `ctx` paths + the pre-read `snapshot` and
@@ -3003,13 +3112,11 @@ export function buildPreIntakeObligations(
       // "unchanged" notion, so any guidance file against an advanced run conflicts;
       // bare follow-ups don't set the flag). Derives from the frozen entry state.
       id: "input_conflict",
-      derive: () =>
-        (selectionAlreadyBound && inputSelectionChanged) ||
-        (((inputResolution.supplied && !suppliedInputUnchanged) ||
-          inputSelectionChanged || guidanceFileSupplied) &&
-        (sourceAlreadyBound || (entryState != null && entryState.status !== "pending")))
-          ? "missing"
-          : "satisfied",
+      derive: () => hasIntakeConflict({
+        selectionAlreadyBound: Boolean(selectionAlreadyBound), inputSelectionChanged: Boolean(inputSelectionChanged),
+        suppliedInput: inputResolution.supplied, suppliedInputUnchanged,
+        guidanceFileSupplied, sourceAlreadyBound: Boolean(sourceAlreadyBound), entryState,
+      }) ? "missing" : "satisfied",
       execute: async (_state, c) => {
         const s = entryState ?? { status: "pending" as const };
         await c.countStep(entryState);
@@ -3021,7 +3128,7 @@ export function buildPreIntakeObligations(
       },
     },
     {
-      // Bare re-invocation without bound returned work: present resume/restart/merge
+      // Bare re-invocation without bound returned work: present resume/restart
       // once (gated on the ack file) rather than silently resuming. An ack of
       // choice==='resume' is satisfied — fall through to normal dispatch. Derives
       // from the frozen entry state (a resume is of a *pre-existing* run).
@@ -3060,6 +3167,7 @@ export function buildPreIntakeObligations(
       // complete/closing — those already confirmed their checkpoint.
       id: "confirm_intent",
       derive: (state) => {
+        if (snapshot.replacingDiscoveredIntake) return "satisfied";
         // A host-confirmed checkpoint carrying a closing_action outside the
         // vocabulary is not a confirmation: the step re-emits naming the value
         // (owner decision 92b0e2dd7cfdc06d — never a silent default).
@@ -3118,6 +3226,7 @@ export function buildPreIntakeObligations(
       // missing or stale sidecar is repaired by re-derivation, never skipped.
       id: "interpret_intent",
       derive: () => {
+        if (snapshot.replacingDiscoveredIntake) return "satisfied";
         if (
           existingCheckpoint?.confirmed_by !== "host" ||
           typeof existingCheckpoint.free_form_intent !== "string" ||
@@ -3219,13 +3328,14 @@ Then run:
           existsSync(ip.conversationStart) ||
           existsSync(executionPlanPaths(artifactsDir).canonical) ||
           sourceAlreadyBound ||
+          snapshot.pendingDiscoveredIntake ||
           (existsSync(ip.summary) && existingCheckpoint?.confirmed_by === "host") ||
           isDefaultCandidateFresherThanReport(inputResolution.existing[0], reportPath);
         return freshIntent ? "satisfied" : "missing";
       },
       execute: async (state, c) => ({
         kind: "emit",
-        step: await handleComplete(c.root, c.artifactsDir, state),
+        step: await handleComplete(c.root, c.artifactsDir, state, c.assertPhaseOwnership),
       }),
     },
     {
@@ -3235,7 +3345,7 @@ Then run:
         await c.countStep(state);
         return {
           kind: "emit",
-          step: await handleComplete(c.root, c.artifactsDir, state),
+          step: await handleComplete(c.root, c.artifactsDir, state, c.assertPhaseOwnership),
         };
       },
     },
@@ -3251,6 +3361,8 @@ Then run:
           c.artifactsDir,
           c.options,
           "new_pre_edit_run",
+          c.inputResolution,
+          snapshot.discoveryRead,
         );
         if (outcome && "step_kind" in outcome) {
           return { kind: "emit", step: outcome };
@@ -3277,6 +3389,7 @@ Then run:
 // sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
 export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false): RemediateObligation[] {
   const { root, artifactsDir, options, runLogger, store, assertPhaseOwnership } = ctx;
+  const assertCloseOwnership = () => store.assertActivePhaseOwnership(assertPhaseOwnership);
   const clarificationResolutionPath = join(
     artifactsDir,
     CLARIFICATION_RESOLUTION_FILENAME,
@@ -3465,14 +3578,14 @@ export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false):
           await store.saveState(s);
           return { kind: "transition", state: s };
         }
-        return handleImplementing(root, artifactsDir, s, runLogger, store);
+        return handleImplementing(root, artifactsDir, s, runLogger, store, assertCloseOwnership);
       },
     },
     {
       id: "triage",
       derive: (state) => (state?.status === "triage" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleImplementing(root, artifactsDir, requireState(state), runLogger, store),
+        handleImplementing(root, artifactsDir, requireState(state), runLogger, store, assertCloseOwnership),
     },
     {
       // planning with zero documentable findings is a user question, not a
@@ -3501,13 +3614,13 @@ export function buildMainObligations(ctx: RemediateCtx, deferredReplan = false):
           ? "missing"
           : "satisfied",
       execute: async (state) =>
-        handleAllTerminalTransition(requireState(state), store, root, artifactsDir),
+        handleAllTerminalTransition(requireState(state), store, root, artifactsDir, assertCloseOwnership),
     },
     {
       id: "closing",
       derive: (state) => (state?.status === "closing" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleClosing(root, artifactsDir, requireState(state), runLogger, store, options),
+        handleClosing(root, artifactsDir, requireState(state), runLogger, store, options, assertCloseOwnership),
     },
     {
       // Catch-all: reached only when no specific obligation matched. Always
@@ -3576,6 +3689,7 @@ async function emitUnresolvedClosingStep(
   artifactsDir: string,
   state: RemediationState | null,
   error: UnresolvedClosingActionError,
+  assertOwnership?: AssertLockOwnership,
 ): Promise<RemediationStep> {
   const resolution = error.reconciliation;
   const prompt = ["# Closing action needs reconciliation", error.message, "Receipt: " + error.receiptPath];
@@ -3589,6 +3703,7 @@ async function emitUnresolvedClosingStep(
     );
   }
   return writeCurrentStep({
+    assertOwnership,
     stepKind: "close_run", status: "blocked", runId: stateRunId(state),
     repoRoot: root, artifactsDir,
     prompt: prompt.join("\n\n"),
@@ -3613,24 +3728,40 @@ async function advanceUnderPhaseLock(deps: {
   assertPhaseOwnership: AssertLockOwnership;
 }): Promise<RemediationStep> {
   const { root, artifactsDir, store, options, runLogger, assertPhaseOwnership } = deps;
+  const assertCloseOwnership = () => store.assertActivePhaseOwnership(assertPhaseOwnership);
+  const retryClosing = async (current: RemediationState): Promise<RemediationStep | undefined> => {
+    let terminalStep: RemediationStep | undefined;
+    await retryIncompleteCloseReport(current, {
+      root, artifactsDir, assertOwnership: assertCloseOwnership,
+      publishReport: async (complete, assertCurrent) => {
+        terminalStep = await handleComplete(root, artifactsDir, complete, assertCurrent);
+      },
+    }, runLogger);
+    return terminalStep;
+  };
   // Loaded FRESH under the mutex: a peer may have advanced and persisted state
   // between the entry read and this process winning the lock.
   let state = await store.loadState();
+  let pendingReplan: Awaited<ReturnType<typeof readPendingReplan>>;
+  try { pendingReplan = await readPendingReplan(artifactsDir); }
+  catch (error) {
+    return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: `Cannot verify the pending replan marker: ${errorMessage(error)}` });
+  }
   try {
     await assertNoUnresolvedClosingAction(artifactsDir);
   } catch (error) {
     if (!(error instanceof UnresolvedClosingActionError)) throw error;
     let unresolved = error;
-    if (state) {
+    if (state && !pendingReplan) {
       try {
-        const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
-        if (completed) return handleComplete(root, artifactsDir, await store.loadState());
+        const completed = await retryClosing(state);
+        if (completed) return completed;
       } catch (reconcileError) {
         if (!(reconcileError instanceof UnresolvedClosingActionError)) throw reconcileError;
         unresolved = reconcileError;
       }
     }
-    return emitUnresolvedClosingStep(root, artifactsDir, state, unresolved);
+    return emitUnresolvedClosingStep(root, artifactsDir, state, unresolved, assertPhaseOwnership);
   }
   const noOtherRequest = options.severity === undefined && options.findingIds === undefined &&
     options.guidanceFile === undefined && options.guidanceText === undefined && options.verificationCommand === undefined &&
@@ -3643,15 +3774,14 @@ async function advanceUnderPhaseLock(deps: {
   const currentCanonical = state?.plan ? await readCanonicalPlan(artifactsDir) : undefined;
   const pendingPlanSubmission = existsSync(executionPlanPaths(artifactsDir).submission);
   const revisionMismatch = Boolean(currentCanonical && currentCanonical.revision_sha256 !== state?.plan?.review_revision_sha256);
-  const unchangedPlan = !pendingPlanSubmission && !revisionMismatch;
+  const unchangedPlan = !pendingReplan && !pendingPlanSubmission && !revisionMismatch;
   // Bind the flag to a run that was already closing on entry. Do not carry
   // approval into a new closing phase, a revised plan, or a combined request.
   const finalizeCurrentClosing = state?.status === "closing" && unchangedPlan &&
     noOtherRequest && inputValues(options.input).length === 0 && options.finalizeClosing === true;
   // sites-pinned: tests/functional-regressions.test.mjs, tests/plan-authority.test.mjs
   if (state && reportOnlyRequest && unchangedPlan) {
-    await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
-    return handleComplete(root, artifactsDir, state);
+    return (await retryClosing(state)) ?? handleComplete(root, artifactsDir, state, assertPhaseOwnership);
   }
   if (state && reportOnlyRequest) admitRemediationDirtyBaseline(state);
   if (state) await store.reconcileDecisionApplications(state);
@@ -3667,8 +3797,13 @@ async function advanceUnderPhaseLock(deps: {
     return buildOperatorControlStep(root, artifactsDir, state, control);
   }
   if (state?.status === "closing" && bareRequest && unchangedPlan) {
-    const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
-    if (completed) return handleComplete(root, artifactsDir, await store.loadState());
+    try {
+      const completed = await retryClosing(state);
+      if (completed) return completed;
+    } catch (error) {
+      if (!(error instanceof UnresolvedClosingActionError)) throw error;
+      return emitUnresolvedClosingStep(root, artifactsDir, state, error, assertCloseOwnership);
+    }
   }
   if (options.guidanceFile && options.guidanceText !== undefined) throw new Error("Choose --guidance or --guidance-file, not both.");
   const boundSource = await readPlanSource(artifactsDir);
@@ -3679,8 +3814,9 @@ async function advanceUnderPhaseLock(deps: {
     if (options.guidanceText !== undefined) applyGuidanceText(artifactsDir, options.guidanceText);
   }
 
+  // sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
   if (options.verificationCommand !== undefined && state?.plan) {
-    if (parseCommandString(options.verificationCommand).length === 0) {
+    if (!parseCommandString(options.verificationCommand)[0]) {
       throw new Error("--verification-command must name an executable command");
     }
     state.plan.test_command = options.verificationCommand;
@@ -3704,28 +3840,6 @@ async function advanceUnderPhaseLock(deps: {
   };
 
   const inputResolution = await resolveInputPaths(root, options.input);
-
-  // Preamble — forceReplan re-grounds from existing intake. The whole decide loop
-  // runs once per host call (the engine folds planning → implementing → … through
-  // transitions, never a recursive decideNextStepLoop), so this fires at most once.
-  const replanRequested = Boolean(options.forceReplan || pendingPlanSubmission || revisionMismatch);
-  const deferredReplan = replanRequested && pendingWaveSimplification(state) !== undefined;
-  if (state != null && replanRequested && !deferredReplan) {
-    await countStep(state);
-    const replanOutcome = await forceReplanFromExistingIntake(
-      root,
-      artifactsDir,
-      state,
-    );
-    // A discarded plan is REPORTED here, not collapsed into `state = null`. Once
-    // it is null the loop can no longer tell "the plan was destroyed, and here is
-    // why" from "there was never an input", and it emits the second.
-    if (replanOutcome !== null && "kind" in replanOutcome) {
-      if(replanOutcome.kind==="planning_step")return replanOutcome.step;
-      return emitPlanRevisionBlockedStep(root, artifactsDir, replanOutcome);
-    }
-    state = replanOutcome;
-  }
 
   // Pre-read the once-async signals the pre-intake derive()s consume
   // synchronously (no transition inside this advance call rewrites either file).
@@ -3769,16 +3883,91 @@ async function advanceUnderPhaseLock(deps: {
   const sourceManifest = await readSourceManifest(ip.sourceManifest);
   const requestedSelection = requestedFindingSelection(options);
   const recordedSelection = sourceManifest?.finding_selection;
-  const selectedSourceChanged = recordedSelection !== undefined && (!existsSync(recordedSelection.source_path) ||
+  const pendingDiscoveredIntake = state == null && !boundSource &&
+    (sourceManifest?.created_from === "default_candidates" || existsSync(ip.discoveredInputOffer));
+  const previousDiscovery = sourceManifest?.discovered_input;
+  const explicitReplacement = inputResolution.supplied || existsSync(ip.conversationStart);
+  // The intent gate and intake draw share this observation, so an on-disk
+  // change between them cannot skip intent confirmation for a ready summary.
+  const discoveryRead = pendingDiscoveredIntake && previousDiscovery && !explicitReplacement && existsSync(ip.summary)
+    ? { path: previousDiscovery.path, input: inputResolution.allExisting.includes(previousDiscovery.path)
+        ? await readDiscoveredInput(previousDiscovery.path) : undefined } : undefined;
+  const replacingDiscoveredIntake = pendingDiscoveredIntake && previousDiscovery !== undefined &&
+    (explicitReplacement || (discoveryRead !== undefined && discoveryRead.input?.sha256 !== previousDiscovery.sha256));
+  const selectedSourceChanged = !pendingDiscoveredIntake && recordedSelection !== undefined && (!existsSync(recordedSelection.source_path) ||
     hashContent(await readFile(recordedSelection.source_path, "utf8")) !== recordedSelection.source_hash);
   const inputSelectionChanged = selectedSourceChanged ||
     (requestedSelection !== undefined && JSON.stringify(requestedSelection) !== JSON.stringify(recordedSelection?.criteria));
   const closingContinuation = finalizeCurrentClosing && !inputSelectionChanged &&
     (resumeAck === undefined || resumeAck.choice === "resume");
+  const rePromptPreparedClosing = state?.status === "closing" && bareRequest && unchangedPlan &&
+    !inputSelectionChanged && (resumeAck === undefined || resumeAck.choice === "resume") &&
+    await hasPreparedClosingRecord(artifactsDir);
   const suppliedInputUnchanged = !inputSelectionChanged && suppliedInputMatchesRun(
     inputResolution, sourceManifest,
     boundSource?.sources.map(source => source.path).filter(path => resolve(path) !== resolve(ip.brief)),
   );
+
+  const guidanceSupplied = Boolean(options.guidanceFileSupplied || options.guidanceFile || options.guidanceText !== undefined);
+  const conflictingInput = hasIntakeConflict({
+    selectionAlreadyBound: recordedSelection !== undefined, inputSelectionChanged, suppliedInput: inputResolution.supplied,
+    suppliedInputUnchanged, guidanceFileSupplied: guidanceSupplied, sourceAlreadyBound: boundSource !== undefined, entryState: state,
+  });
+  const replanRequested = Boolean(pendingReplan || options.forceReplan || pendingPlanSubmission || revisionMismatch);
+  const deferredReplan = replanRequested && pendingWaveSimplification(state) !== undefined;
+
+  if (replanRequested && !conflictingInput) {
+    if (pendingReplan && (!state?.plan || state.plan.plan_id !== pendingReplan.plan_id || !boundSource ||
+        state.host_handoff || deferredReplan)) {
+      return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: "The pending replan does not match an idle bound run. Restore its original reviewed state before continuing." });
+    }
+    if (state && !deferredReplan) {
+      if (state.host_handoff) {
+        const reconciled = await buildImplementDispatchStep({ root, artifactsDir, state, options, store, runLogger, reconcileOnly: true });
+        if (reconciled.kind === "emit") return reconciled.step;
+        const next = loaderCommand(options.forceReplan ? ["next-step", "--force-replan"] : ["next-step"]);
+        return writeCurrentStep({
+          stepKind: "contract_pipeline", status: "ready", runId: requireStateRunId(state), repoRoot: root, artifactsDir,
+          prompt: `Existing host results were reconciled without dispatching new work. Run ${next} to continue.`,
+          allowedCommands: [next], stopCondition: "Resume without launching another work wave.", artifactPaths: {},
+        });
+      }
+      if (!pendingReplan && options.forceReplan && state.plan && currentCanonical && !revisionMismatch) {
+        if (state.status === "closing") {
+          if (await hasPreparedClosingRecord(artifactsDir)) {
+            return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: "A closing action is already prepared. Resolve its existing closing continuation before requesting a revised plan." });
+          }
+          const completed = await retryClosing(state);
+          if (completed) return completed;
+        }
+        try {
+          const marker = { plan_id: state.plan.plan_id, base_revision_sha256: currentCanonical.revision_sha256 };
+          await beginPendingReplan(artifactsDir, marker);
+          pendingReplan = marker;
+        } catch (error) {
+          return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: errorMessage(error) });
+        }
+      }
+      try {
+        if (pendingReplan && state.plan?.review_revision_sha256 !== pendingReplan.base_revision_sha256) {
+          // A crash can fall between activation's state save and its normal projection.
+          // Verify persisted B against the live exact receipts, then finish the projection
+          // before lifting the fence. Never recover approval from the historical bundle.
+          await finishPendingReplan(artifactsDir, store, pendingReplan);
+        } else {
+          await countStep(state);
+          const outcome = await continuePlanRevision(root, artifactsDir, state);
+          if (outcome.kind === "planning_step") return outcome.step;
+          if (outcome.kind === "blocked") return emitPlanRevisionBlockedStep(root, artifactsDir, outcome);
+          state = outcome.state;
+          if (pendingReplan) await finishPendingReplan(artifactsDir, store, pendingReplan);
+        }
+      } catch (error) {
+        if (!pendingReplan) throw error;
+        return emitPlanRevisionBlockedStep(root, artifactsDir, { reason: `The pending replan could not finish: ${errorMessage(error)}` });
+      }
+    }
+  }
 
   // The linear pre-intake gates run as obligations through the shared advance
   // loop. An emit returns to the host; a transition re-scans within this call;
@@ -3798,7 +3987,7 @@ async function advanceUnderPhaseLock(deps: {
     existingCheckpoint,
     rejectedCheckpointFields: checkpointRead?.rejected ?? [],
     resumeAck,
-    closingContinuation,
+    closingContinuation: closingContinuation || rePromptPreparedClosing,
     boundSubmissionReturned: !inputResolution.supplied && resumeAck === undefined && (
       (pendingWaveSimplification(state) !== undefined && existsSync(waveResponsePath(artifactsDir, pendingWaveSimplification(state)!))) ||
       (state?.host_handoff !== undefined && await hasBoundRemediationSubmission({
@@ -3808,10 +3997,13 @@ async function advanceUnderPhaseLock(deps: {
     entryState: state,
     suppliedInputUnchanged,
     sourceAlreadyBound: boundSource !== undefined,
+    pendingDiscoveredIntake,
+    replacingDiscoveredIntake,
+    discoveryRead,
     inputSelectionChanged,
     selectionAlreadyBound: recordedSelection !== undefined,
     selectedSourceChanged,
-    guidanceFileSupplied: Boolean(options.guidanceFileSupplied || options.guidanceFile || options.guidanceText !== undefined),
+    guidanceFileSupplied: guidanceSupplied,
   });
   const preIntake = await advance(
     {

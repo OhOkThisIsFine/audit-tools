@@ -429,7 +429,11 @@ export function seedBaseline(ledger, { commit, commitBlobs, blobs, notes }) {
   /** @type {Record<string, LedgerEntry>} */
   const entries = {};
   for (const path of commitBlobs.keys()) entries[path] = { baseline: id };
-  return { ledger: pruned({ [id]: baseline }, {}, entries, blobs) };
+  const retained = pruned({ [id]: baseline }, {}, entries, blobs);
+  if (Object.keys(retained.entries).length === 0) {
+    return { error: `no loop-core paths from commit ${commit} remain in the index; select a commit with retained paths or review current loop-core files` };
+  }
+  return { ledger: retained };
 }
 
 /**

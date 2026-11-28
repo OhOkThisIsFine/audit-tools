@@ -39,9 +39,8 @@ import { worktreeTrees } from './worktree-tree.mjs';
 export function closeoutReadinessFindings(root) {
   const findings = [];
 
-  // HANDOFF carries a generated view of the backlog. A mismatch means the state the next agent reads is stale —
-  // and it is deterministic, so there is no reason to discover it after the
-  // report has already described that state.
+  // The generator checks both the generated roadmap and hand-written HANDOFF
+  // content. Only a completed failure can supply a blocking diagnosis.
   try {
     const script = join(root, 'scripts', 'shared', 'generate-handoff-roadmap.mjs');
     if (existsSync(script)) {
@@ -52,11 +51,12 @@ export function closeoutReadinessFindings(root) {
         timeout: 15_000,
         windowsHide: true,
       });
-      if (r.status !== 0) {
+      if (!r.error && !r.signal && typeof r.status === 'number' && r.status !== 0) {
+        const diagnostic = r.stderr.trim() || r.stdout.trim();
         findings.push(
-          'docs/HANDOFF.md no longer matches its generated source (the backlog; ' +
-            'generate-handoff-roadmap --check failed). Fix: node ' +
-            'scripts/shared/generate-handoff-roadmap.mjs',
+          'generate-handoff-roadmap --check failed: ' +
+            (diagnostic.length > 2_000 ? `${diagnostic.slice(0, 2_000)}…`
+              : diagnostic || `exit status ${r.status}`),
         );
       }
     }

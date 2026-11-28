@@ -97,7 +97,9 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
 export function stepBoundaryFrictionCategory(
   eventType: StepBoundaryEventType,
 ): FrictionCategory {
-  return STEP_BOUNDARY_CATEGORY[eventType] ?? "inefficient_feeding";
+  return Object.hasOwn(STEP_BOUNDARY_CATEGORY, eventType)
+    ? STEP_BOUNDARY_CATEGORY[eventType]
+    : "inefficient_feeding";
 }
 
 /**

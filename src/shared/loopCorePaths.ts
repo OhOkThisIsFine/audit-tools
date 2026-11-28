@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/loop-core-gate-parity.test.ts, tests/shared/loop-core-closure.test.ts
+// sites-pinned: tests/checked-in-artifacts.test.mjs
 // Single source of truth for the "loop-core" path set — the persisted workflow,
 // host-handoff, verification, and orchestrator-step substrate whose changes carry
 // the highest blast radius. The surviving consumers are pre-build enforcement
@@ -103,6 +103,7 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/contractPipelinePrompts.ts",
   "src/remediate/steps/dispatch/",
+  "src/remediate/steps/intakeResolver.ts",
   "src/remediate/steps/frictionCloseout.ts",
   "src/remediate/steps/nextStep.ts",
   "src/remediate/steps/planningGraph.ts",

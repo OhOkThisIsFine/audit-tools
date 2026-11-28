@@ -4,7 +4,12 @@ import { analyzerRuntimeOverrides, AnalyzerSelectionSchema, runtimeOverrideField
 import { z } from "zod";
 import { hashContent, stableStringify, type ExistingAnalyzerRuntime } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import { incompleteAnalyzerStatuses } from "./acquisitionExecutor.js";
+import { ExternalAnalyzerToolStatusSchema, isDegradedExternalAnalyzerStatus, type ExternalAnalyzerToolStatus } from "../../shared/analyzers/types.js";
+
+export const CODEBASE_MEMORY = "codebase-memory-mcp";
+// sites-pinned: tests/audit-smoke.test.mjs, tests/review-evidence.test.mjs
+type CalibrationRunner = "registered" | "host" | "indexer";
+const measuredSyntax = z.object({ tool_statuses: z.array(ExternalAnalyzerToolStatusSchema) });
 
 const explanation = z.string().trim().min(1).max(2000);
 export const AnalyzerCalibrationSchema = z.strictObject({
@@ -19,7 +24,13 @@ export const AnalyzerCalibrationSchema = z.strictObject({
       kind: z.enum(["environment", "configuration"]),
       detail: explanation,
     }).optional(),
+    measurement: z.strictObject({
+      attempt_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+      outcome: z.enum(["complete", "partial", "failed"]),
+      evidence: explanation,
+    }).optional(),
     recovery: z.strictObject({
+      failure: z.enum(["partial", "complete"]),
       disposition: z.enum(["exhausted", "permission_refused"]),
       detail: explanation,
     }).optional(),
@@ -36,20 +47,51 @@ function retrySignature(runtime: ExistingAnalyzerRuntime | undefined, change: { 
 }
 
 export function analyzerCalibrationRequest(bundle: ArtifactBundle, selection: unknown) {
-  const incomplete = new Set(incompleteAnalyzerStatuses(bundle).map(row => row.tool));
   const parsedSelection = AnalyzerSelectionSchema.safeParse(selection);
   const selectedTools = parsedSelection.success
     ? new Set(parsedSelection.data.decisions.filter(row => row.action === "run").map(row => row.tool))
     : new Set<string>();
-  const statuses = bundle.external_analyzer_acquisition?.tool_statuses.filter(row =>
-    row.status !== "skipped" || selectedTools.has(row.tool)) ?? [];
+  const acquisition = bundle.external_analyzer_acquisition;
+  const statuses = new Map<string, { row: ExternalAnalyzerToolStatus; runner: CalibrationRunner; requestedScope?: string }>();
+  const absent = (tool: string): ExternalAnalyzerToolStatus => ({ tool, status: "not_resolved", resolved: false });
+  const syntax = measuredSyntax.safeParse(bundle.syntax_resolution_status);
+  for (const row of syntax.success ? syntax.data.tool_statuses : []) {
+    if (row.status !== "skipped") statuses.set(row.tool, { row, runner: "host" });
+  }
+  for (const report of bundle.external_analyzer_results ?? []) {
+    if (report.tool_statuses?.length) {
+      for (const row of report.tool_statuses) {
+        if (row.status !== "skipped" && !statuses.has(row.tool)) statuses.set(row.tool, { row, runner: "host" });
+      }
+    } else if (report.tool !== "syntax_resolution_executor" && !statuses.has(report.tool)) {
+      statuses.set(report.tool, { row: absent(report.tool), runner: "host" });
+    }
+  }
+  for (const check of parsedSelection.success ? parsedSelection.data.additional_checks : []) {
+    statuses.set(check.tool, { row: statuses.get(check.tool)?.row ?? absent(check.tool),
+      runner: "host", requestedScope: check.scope });
+  }
+  for (const row of acquisition?.tool_statuses ?? []) {
+    if (row.status !== "skipped" || selectedTools.has(row.tool)) {
+      statuses.set(row.tool, { row, runner: "registered", requestedScope: statuses.get(row.tool)?.requestedScope });
+    }
+  }
+  for (const tool of selectedTools) {
+    if (!statuses.has(tool)) statuses.set(tool, { row: absent(tool), runner: "registered" });
+  }
+  const graph = acquisition?.codebase_memory;
+  if (graph) statuses.set(CODEBASE_MEMORY, { runner: "indexer", row: {
+    tool: CODEBASE_MEMORY, status: graph.status, resolved: graph.status !== "not_resolved", error: graph.error,
+  } });
   const runtimes = new Map(Object.entries(analyzerRuntimeOverrides(parsedSelection.success ? parsedSelection.data.decisions : [])));
   const previousRetries = new Map<string, Set<string>>();
+  const latestRetry = new Map<string, string>();
   for (const retry of bundle.external_analyzer_acquisition?.calibration_retries ?? []) {
     for (const row of retry.tools) {
       const override = analyzerRuntimeOverrides([row])[row.tool];
       if (override) runtimes.set(row.tool, override);
       if (row.change) {
+        latestRetry.set(row.tool, hashContent(stableStringify([retry.input_sha256, retry.at, row.change])));
         const signatures = previousRetries.get(row.tool) ?? new Set<string>();
         signatures.add(retrySignature(runtimes.get(row.tool), row.change));
         previousRetries.set(row.tool, signatures);
@@ -57,14 +99,23 @@ export function analyzerCalibrationRequest(bundle: ArtifactBundle, selection: un
     }
   }
   const admitted = new Set(bundle.file_disposition?.files.filter(file => file.status === "included").map(file => file.path));
-  const tools = statuses.map(row => {
+  const measurementScope = hashContent(stableStringify({
+    files: bundle.repo_manifest?.files, disposition: bundle.file_disposition?.files,
+    selection: parsedSelection.success ? parsedSelection.data.input_sha256 : null,
+  }));
+  const tools = [...statuses.values()].map(({ row, runner, requestedScope }) => {
     const admittedSkipped = row.reported_coverage?.skipped.filter(path => admitted.has(path)) ?? [];
-    return { ...row, admittedSkipped, incomplete: row.status === "skipped" || incomplete.has(row.tool) || admittedSkipped.length > 0,
+    const measurementAttempt = runner === "host" ? hashContent(stableStringify({
+      tool: row.tool, scope: requestedScope, measurementScope,
+      retry: latestRetry.get(row.tool),
+    })) : undefined;
+    return { ...row, runner, requestedScope, measurementAttempt, admittedSkipped,
+      incomplete: isDegradedExternalAnalyzerStatus(row) || Boolean(row.source_read_failures) || admittedSkipped.length > 0,
       findings: bundle.external_analyzer_results?.find(entry => entry.tool === row.tool)?.results.length ?? 0 };
   });
   const input_sha256 = hashContent(stableStringify({
     manifest: bundle.repo_manifest?.files, disposition: bundle.file_disposition?.files,
-    acquisition: bundle.external_analyzer_acquisition, results: bundle.external_analyzer_results, selection,
+    acquisition, syntax: bundle.syntax_resolution_status, results: bundle.external_analyzer_results, selection,
   }));
   return { input_sha256, tools, runtimes, previousRetries };
 }
@@ -78,15 +129,24 @@ export function currentAnalyzerCalibration(value: unknown, request: AnalyzerCali
   if (byId.size !== answer.data.decisions.length || byId.size !== request.tools.length) return;
   if (!request.tools.every(tool => {
     const row = byId.get(tool.tool);
-    if (!row || !validRuntimeOverride(row, row.action === "retry") ||
-        (row.action === "retry" && !row.change)) return false;
+    if (!row || !validRuntimeOverride(row, row.action === "retry" && tool.runner === "registered") ||
+        (row.action === "retry" && !row.change) ||
+        (row.measurement && (tool.runner !== "host" ||
+          row.measurement.attempt_sha256 !== tool.measurementAttempt))) return false;
     if (row.action === "retry" && row.change) {
       const runtime = analyzerRuntimeOverrides([row])[row.tool] ?? request.runtimes.get(row.tool);
       if (request.previousRetries.get(row.tool)?.has(retrySignature(runtime, row.change))) return false;
     }
-    if (tool.status === "skipped") return row.action === "limited";
-    if (tool.incomplete && row.action === "accept") return false;
-    return !(tool.incomplete && row.action === "limited") || Boolean(row.recovery);
+    if (row.action === "limited") {
+      if (!row.recovery || row.measurement?.outcome === "complete") return false;
+      return !row.measurement || row.recovery.failure === (row.measurement.outcome === "partial" ? "partial" : "complete");
+    }
+    if (tool.status === "skipped" && tool.runner === "registered") return false;
+    if (row.action === "accept") {
+      if (tool.runner === "host") return row.measurement?.outcome === "complete";
+      return !tool.incomplete;
+    }
+    return true;
   })) return;
   return answer.data;
 }
@@ -101,7 +161,7 @@ export async function readAnalyzerCoverageGaps(artifactsDir: string, bundle: Art
   const acceptedSelection = AnalyzerSelectionSchema.safeParse(selection);
   const notes = [
     ...receipt.unresolved,
-    ...receipt.decisions.flatMap(row => row.action === "limited" ? [row.tool + ": " + row.coverage] : []),
+    ...receipt.decisions.flatMap(row => row.action === "limited" ? [row.tool + " (" + row.recovery?.failure + " failure): " + row.coverage] : []),
     ...(acceptedSelection.success ? acceptedSelection.data.gaps : []),
   ];
   return [...new Set(notes.map(note => note.replace(/\s+/gu, " ").trim()))];

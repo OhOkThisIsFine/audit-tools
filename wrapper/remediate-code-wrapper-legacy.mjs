@@ -1,19 +1,7 @@
 import { readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readTextIfExists } from './remediate-code-wrapper-io.mjs';
-
-function normalizeNewlines(value) {
-  return value.replace(/\r\n/g, '\n');
-}
-
-function looksLikeRemediateCodeSkill(content) {
-  const normalized = normalizeNewlines(content);
-  return (
-    /^name:\s*remediate-code\b/mu.test(normalized)
-    || normalized.includes('Conversation-first remediation of audit findings or feedback.')
-    || normalized.includes('The canonical entrypoint is `/remediate-code` in conversation.')
-  );
-}
+import { legacySkillOwnershipMatcher, normalizeNewlines } from './shared-install-hosts.mjs';
 
 function looksLikeRemediateCodePrompt(content) {
   const normalized = normalizeNewlines(content);
@@ -44,12 +32,13 @@ function looksLikeRemediateCodeInterfaceMetadata(content) {
 }
 
 export async function buildLegacyRemediateCodeSurfaceTargets(root) {
+  const ownsLegacySkill = await legacySkillOwnershipMatcher('remediate-code');
   const targets = [
     {
       host: 'codex',
       surface: 'skill',
       path: join(root, '.codex', 'skills', 'remediate-code', 'SKILL.md'),
-      matches: looksLikeRemediateCodeSkill,
+      matches: ownsLegacySkill,
     },
     {
       host: 'codex',
@@ -67,7 +56,7 @@ export async function buildLegacyRemediateCodeSurfaceTargets(root) {
       host: 'opencode',
       surface: 'skill',
       path: join(root, '.opencode', 'skills', 'remediate-code', 'SKILL.md'),
-      matches: looksLikeRemediateCodeSkill,
+      matches: ownsLegacySkill,
     },
     {
       host: 'opencode',

@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/loop-core-closure.test.ts
+// sites-pinned: tests/checked-in-artifacts.test.mjs
 // Modules reachable ONLY through loop-core that are deliberately NOT in
 // `LOOP_CORE_PATTERNS`, each with a CHECKED claim and a reason.
 //
@@ -49,6 +49,7 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   // These are the CONTENT work an orchestrator step dispatches to. They compute
   // and return; they do not persist workflow state, own a write boundary, or
   // decide what happens next — which is what the loop-core set governs.
+  { module: "src/audit/cli/lineIndex.ts", claim: "reads-only", reason: "bounded source line measurements for existing workload paths; it never issues or mutates a review binding" },
   { module: "src/audit/clarification/dials.ts", claim: "reads-only", reason: "clarification dial arithmetic; voiQueue reaches the runtime shared barrel and its I/O modules, but this module persists no state" },
   { module: "src/audit/clarification/partition.ts", claim: "reads-only", reason: "clarification partitioning; runtime shared helpers reach I/O modules through the barrel, but this module persists no state" },
   { module: "src/audit/clarification/riskGate.ts", claim: "reads-only", reason: "clarification risk thresholding; runtime riskGateClarification reaches I/O modules through the shared barrel, but this module persists no state" },
@@ -74,7 +75,6 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   { module: "src/remediate/phases/close.ts", claim: "mutates", reason: "closing-action bodies; it WRITES closing artifacts and removes the artifacts dir on promotion, but the STEP MACHINE owns the transition and the directory — close.ts executes a close it was handed, it does not decide that the run is closing or where its artifacts live (options.artifactsDir is caller-supplied throughout)" },
   { module: "src/remediate/phases/triage.ts", claim: "mutates", reason: "triage decision bodies; it WRITES triage_batch.json / triage-outcome.json and renames quarantined files, all under a caller-supplied options.artifactsDir — the step machine owns the transition and the location" },
   { module: "src/remediate/review/autonomousGate.ts", claim: "pure", reason: "autonomous-review gating predicate; pure" },
-  { module: "src/remediate/steps/intakeResolver.ts", claim: "reads-only", reason: "intake resolution; it reads intake artifacts and writes the source manifest, the selected-findings projection, the current step and the brief only through helper modules (writeJsonFile, writeCurrentStep, writeRemediationBrief) — the step machine owns the transition" },
   { module: "src/remediate/steps/sessionConfigLoad.ts", claim: "reads-only", reason: "session-config adapter; loadSessionIntent reads repository session intent, while the step machine owns the transition and this module performs no writes" },
 ];
 

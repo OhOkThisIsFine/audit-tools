@@ -103,7 +103,7 @@ export async function checkContractConformance(params: {
 }
 
 /** Common success-review boundary; each evidence source owns acquisition and final freshness guards. */
-export async function checkConformanceSubject(params: { artifactsDir: string; runId: string; itemId: string; obligationIds: readonly string[]; content: unknown; evidenceInstruction: string }): Promise<ConformanceReviewCheck> {
+export async function checkConformanceSubject(params: { artifactsDir: string; runId: string; itemId: string; obligationIds: readonly string[]; content: unknown; evidenceInstruction: string; assertOwnership?: () => Promise<void> }): Promise<ConformanceReviewCheck> {
   const paths = conformanceReviewPaths(params.artifactsDir, params.runId, params.itemId);
   const content = params.content;
   const binding = contentSha256(content);
@@ -130,9 +130,15 @@ export async function checkConformanceSubject(params: { artifactsDir: string; ru
   // Retain the exact review subject even when a later tree replaces the live request.
   const subjectPath = join(conformanceSubjectsDir(params.artifactsDir), `${binding}.json`);
   const savedSubject = await readSubmissionDocument(subjectPath);
-  if (savedSubject.kind !== "value") await writeJsonFile(subjectPath, request);
+  if (savedSubject.kind !== "value") {
+    await params.assertOwnership?.();
+    await writeJsonFile(subjectPath, request);
+  }
   const existing = await readSubmissionDocument(paths.request);
-  if (stableStringify(existing.kind === "value" ? existing.value : null) !== stableStringify(request)) await writeJsonFile(paths.request, request);
+  if (stableStringify(existing.kind === "value" ? existing.value : null) !== stableStringify(request)) {
+    await params.assertOwnership?.();
+    await writeJsonFile(paths.request, request);
+  }
   const issue = (code: ConformanceReviewIssueCode, message: string) => conformanceIssue(paths, params.itemId, code, message);
   const raw = await readSubmissionDocument(paths.response);
   const review = parseConformanceResponse(raw.kind === "value" ? raw.value : undefined, binding);
@@ -149,6 +155,7 @@ export async function checkConformanceSubject(params: { artifactsDir: string; ru
   }
   // Preserve the independently supplied review as history; adapter freshness guards
   // still decide whether this review can authorize a state transition.
+  await params.assertOwnership?.();
   await writeJsonFile(join(conformanceSubjectsDir(params.artifactsDir), `${binding}.review.json`), review);
   return { ok: true, receipt: AcceptedConformanceReviewSchema.parse({
     requirement: "independent", binding, review: review.declaration, summary: review.summary.slice(0, 2000),
