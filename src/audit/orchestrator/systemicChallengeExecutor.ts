@@ -157,8 +157,8 @@ function omittedRegister(ceiling: Ceiling, generated_at: string): SystemicChalle
  *   `status:omitted` register so the obligation is satisfied with no host turn (the
  *   conversation-first default; mirrors the charter-clarification omit).
  * - **run** (`deep`/`deepest` ceiling): assemble the metrics digest and fold each
- *   submitted challenge round into the register. An EMPTY submission (a round that
- *   surfaced nothing new) is a QUIET round; the register marks `converged` only
+ *   submitted challenge round into the register. A round that surfaced nothing
+ *   new and was not host-forced is QUIET; the register marks `converged` only
  *   after {@link QUIET_ROUNDS_TO_CONVERGE} CONSECUTIVE quiet rounds.
  *
  * A round ends the loop when it demonstrably went dry (two consecutive quiet rounds —
@@ -275,10 +275,11 @@ export function runSystemicChallengeExecutor(
     repoManifest: bundle.repo_manifest,
   });
 
+  const hostForced = submission.stop?.forced === true;
   const round: SystemicChallengeRound = {
     round: roundNumber,
     new_finding_ids: folded.new_finding_ids,
-    dry: folded.dry,
+    dry: !hostForced && folded.dry,
   };
   const rounds = [...priorRounds, round];
   const foldedHashes = submissionHash
@@ -300,7 +301,6 @@ export function runSystemicChallengeExecutor(
   // for the loop that ran out of rounds without ever going dry. An already
   // recorded reason survives a later round's fold, so the loop stays ended.
   const ceilingReached = rounds.length >= SYSTEMIC_ROUND_CEILING;
-  const hostForced = submission.stop?.forced === true;
   const effectiveStop: SystemicChallengeStop | undefined = hostForced
     ? submission.stop
     : undefined;
@@ -372,7 +372,7 @@ export function runSystemicChallengeExecutor(
     progress_summary:
       `Systemic challenge round ${round.round}: ${folded.new_finding_ids.length} new improvement(s)` +
       (stopNote ??
-        (folded.dry
+        (round.dry
           ? " — quiet round; the loop converges after the next consecutive quiet round."
           : `, ${folded.findings.length} total; loop continues.`)),
   };
