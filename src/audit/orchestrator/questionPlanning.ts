@@ -1,5 +1,5 @@
 // sites-pinned: tests/audit/question-planning.test.ts
-import { compareCodeUnits, hashContent, pathMatchesPrefix, stableStringify } from "audit-tools/shared";
+import { compareCodeUnits, hashContent, stableStringify } from "audit-tools/shared";
 import {
   BUILT_IN_REVIEW_LENSES, DISCONFIRMATION_PART_ID, REVIEW_QUESTION_CONTRACT_VERSION, ReviewLensSchema,
   type ReviewInventoryItem, type ReviewPlan, type ReviewQuestion, type ReviewSourceRef,
@@ -14,6 +14,11 @@ import { fingerprintDiscoveredSet } from "./questionEvidence.js";
 import { REVIEW_LENS_PLAYBOOKS } from "./reviewLensPlaybooks.js";
 import { resolveIntentLensSelection } from "./lensSelection.js";
 import { discoverTestSuites } from "./testSuiteSubjects.js";
+import { explicitScopeExclusion } from "../../shared/intent/pathScope.js";
+import { reviewSourceScope } from "./reviewSourceScope.js";
+
+export { reviewSourceScope };
+
 // Change when the membership discovery or interpretation changes, not when a
 // different revision merely adds/removes a member.
 const QUESTION_DISCOVERY_RULE = "review-question-discovery/v1";
@@ -94,38 +99,6 @@ export function classifyConfiguration(path: string): "release" | "runtime" | und
   if (/(?:^|\/)(?:\.github\/workflows\/|\.gitlab-ci\.ya?ml$|Jenkinsfile$|Dockerfile(?:\.[^/]+)?$|(?:docker-)?compose\.ya?ml$|render\.ya?ml$)/iu.test(path)) return "release";
   if (/(?:^|\/)(?:package\.json$|pyproject\.toml$|Cargo\.toml$|\.env\.example$|(?:runtime[-_.]config|config[-_.]runtime|config\.runtime|config\.(?:[cm]?[jt]s|py)$)(?:\.|$)|(?:install|setup|deploy|rollback)\/)/iu.test(path)) return "runtime";
   return undefined;
-}
-
-/** Same trust boundary for planner references and the full allowed review scope. */
-export function reviewSourceScope(bundle: ArtifactBundle, overrideScope?: AuditScopeManifest) {
-  const files = new Map(bundle.repo_manifest?.files.map((file) => [file.path, file]));
-  const dispositions = new Map(bundle.file_disposition?.files.map((file) => [file.path, file]));
-  const intent = bundle.intent_checkpoint;
-  const scope = overrideScope ?? bundle.scope;
-  const delta = scope?.mode === "delta" ? new Set([...scope.seed_files, ...scope.expanded_files]) : undefined;
-  const sourceStatus = (path: string, contract = false, requireFingerprint = true): string | undefined => {
-    const exclusion = intent?.excluded_scope?.find((row) => pathMatchesPrefix(path, row.path));
-    if (exclusion) return exclusion.reason;
-    const file = files.get(path);
-    if (!file) return "No unique frozen source file was resolved for this surface.";
-    if (file.excluded) return file.exclusion_reason ?? "Outside the admitted audit source.";
-    const override = intent?.disposition_overrides?.find((row) => pathMatchesPrefix(path, row.path));
-    const disposition = override ?? dispositions.get(path);
-    const contractDocument = contract && disposition?.status === "doc_only";
-    if (disposition?.status !== "included" && !contractDocument) {
-      return disposition?.reason ?? (disposition ? `Source disposition: ${disposition.status}.` : "Source disposition has not been established.");
-    }
-    if (delta && !contractDocument && !delta.has(path)) return "Outside the confirmed changed scope.";
-    if (requireFingerprint && !file.hash) return "Source is present but lacks a verifiable content fingerprint.";
-    return undefined;
-  };
-  return {
-    files, dispositions, sourceStatus,
-    emptySourcePaths: new Set([...files.values()].filter(file => file.size_bytes === 0 && file.hash).map(file => file.path)),
-    includedSourcePaths: ordered([...files.keys()].filter((path) => sourceStatus(path, false, false) === undefined)),
-    allowedSourcePaths: ordered([...files.keys()].filter((path) => sourceStatus(path) === undefined)),
-    allowedContractPaths: ordered([...files.keys()].filter((path) => sourceStatus(path, true) === undefined)),
-  };
 }
 
 function discoverOperationEntries(bundle: ArtifactBundle, { files, sourceStatus }: ReturnType<typeof reviewSourceScope>) {
@@ -262,7 +235,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     const related = ref ? (byEntry.get(ref.path) ?? []) : [];
     const title = surface.registered ? surface.id : related[0]?.name ?? surface.id;
     if (reason !== undefined || !ref) {
-      const declared = !!ref && (files.has(ref.path) && dispositions.has(ref.path) || !!intent?.excluded_scope?.some((row) => pathMatchesPrefix(ref.path, row.path)));
+      const declared = !!ref && (files.has(ref.path) && dispositions.has(ref.path) || !!explicitScopeExclusion(ref.path, intent));
       const state = declared && ref && files.get(ref.path)?.hash ? "excluded" : "deferred";
       const hint = /^(?:[\w@.-]+\/)+[\w@.-]+$/u.test(surface.entrypoint) &&
         !surface.entrypoint.split("/").some((segment) => segment === "." || segment === "..")
