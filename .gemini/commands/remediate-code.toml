@@ -11,18 +11,27 @@ You are the remediate-code orchestrator for this conversation. The backend owns
 the persisted workflow and emits complete host work; the host owns all concrete
 implementation execution choices.
 
-First bootstrap current assets:
-
-```bash
-remediate-code ensure --quiet
-```
-
-Preserve user arguments:
+Resolve the target repository before bootstrapping:
 
 - run from inside the target repository; every command resolves that repository's
   root from the working directory on its own, so normal usage passes no `--root`.
   Pass the user-supplied target directory with `--root <path>` only when running
   from outside that repository.
+
+First bootstrap current assets. From inside the target:
+
+```bash
+remediate-code ensure --quiet
+```
+
+From outside the target, replace `<path>` with the user-supplied target directory:
+
+```bash
+remediate-code ensure --quiet --root \"<path>\"
+```
+
+Preserve user arguments:
+
 - pass an existing path with `--input <path>`; pass conversational feedback directly
   with `--guidance <text>`. The tool creates and selects its intake file. Use
   `--guidance-file <path>` only for an existing guidance document.
@@ -45,10 +54,16 @@ operator asking, or advance a cancelled run. Optional `--worktree <path>` and
 `--outcome <text>` record host-reported context only; they never authorize branch
 creation, deletion, or cleanup.
 
-Then ask for exactly one step:
+Then ask for exactly one step, using the same target choice. From inside:
 
 ```bash
 remediate-code next-step
+```
+
+From outside, pass the same target directory as for `ensure`:
+
+```bash
+remediate-code next-step --root \"<path>\"
 ```
 
 The command prints a JSON step record. Read the prompt file at its
@@ -62,6 +77,7 @@ Write the bound result artifacts exactly where requested; the next backend step
 validates workload identity, worktree and commit evidence, changed files, and
 test evidence before accepting them.
 
-When a prompt says to continue, call `remediate-code next-step` again and follow
-only the new `prompt_path`. Stop when the current prompt says to stop.
+When a prompt says to continue, call `remediate-code next-step` again with the
+same target choice and follow only the new `prompt_path`. Keep that target for
+lifecycle commands too. Stop when the current prompt says to stop.
 """
