@@ -1,5 +1,5 @@
 import { FindingSelectionSchema } from "./intakeSelection.js";
-// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/intake-sources-and-digest.test.ts
+// sites-pinned: tests/remediate-exact-intake-cycle6.test.mjs
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -42,11 +42,19 @@ const IntakeSourceSchema = z
   .strict();
 export type IntakeSource = z.infer<typeof IntakeSourceSchema>;
 
+export const DiscoveredInputBindingSchema = z.object({
+  path: z.string().min(1),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
+export type DiscoveredInputBinding = z.infer<typeof DiscoveredInputBindingSchema>;
+export type VerifiedDiscoveredInput = DiscoveredInputBinding & { bytes: Buffer };
+
 const IntakeSourceManifestSchema = z
   .object({
     schema_version: z.literal(INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION),
     created_from: z.enum(["input", "default_candidates", "conversation", "mixed"]),
     sources: z.array(IntakeSourceSchema).min(1),
+    discovered_input: DiscoveredInputBindingSchema.optional(),
     finding_selection: z.object({
       criteria: FindingSelectionSchema,
       source_path: z.string().min(1),
@@ -227,6 +235,9 @@ export async function writeRemediationBrief(
 export interface IntakePaths {
   dir: string;
   sourceManifest: string;
+  discoveredInputOffer: string;
+  discoveredInputAck: string;
+  discoveredInputSnapshots: string;
   conversationStart: string;
   summary: string;
   clarificationResolution: string;
@@ -244,6 +255,9 @@ export function intakePaths(artifactsDir: string): IntakePaths {
   return {
     dir,
     sourceManifest: join(dir, "source-manifest.json"),
+    discoveredInputOffer: join(dir, "discovered-input-offer.json"),
+    discoveredInputAck: join(artifactsDir, "confirm_auto_discovered_input_ack.json"),
+    discoveredInputSnapshots: join(dir, "discovered-input"),
     conversationStart: join(dir, "conversation-start.md"),
     summary: join(dir, "intake-summary.json"),
     clarificationResolution: join(dir, "intake-clarifications.json"),
@@ -391,6 +405,8 @@ export function sourceManifestsEquivalent(
 ): boolean {
   if (!a || !b) return false;
   if (a.sources.length !== b.sources.length) return false;
+  if (a.discovered_input?.path !== b.discovered_input?.path ||
+      a.discovered_input?.sha256 !== b.discovered_input?.sha256) return false;
   if (JSON.stringify(a.finding_selection) !== JSON.stringify(b.finding_selection)) return false;
   return a.sources.every((source, index) => {
     const other = b.sources[index];
@@ -401,6 +417,7 @@ export function sourceManifestsEquivalent(
 export function resolveManifestSources(
   root: string,
   manifest: IntakeSourceManifest,
+  readPath?: string,
 ): {
   resolved: IntakeSource[];
   missing: IntakeSource[];
@@ -414,7 +431,7 @@ export function resolveManifestSources(
       ? manifest.finding_selection.projected_path : source.path;
     const absolutePath = resolve(root, selectedPath);
     const normalized = { ...source, path: absolutePath };
-    if (existsSync(absolutePath)) {
+    if (absolutePath === readPath || existsSync(absolutePath)) {
       resolved.push(normalized);
     } else {
       missing.push(normalized);
