@@ -78,6 +78,9 @@ async function closeFixture(t, changes = {}) {
   await writeFile(join(root,"scripts/shared/run-contract-tests.mjs"), leaf);
   await writeFile(join(root,"scripts/check-invariant-glossary.mjs"), `${log("glossary")} ${changes.mutate ? 'import {writeFileSync} from "node:fs"; writeFileSync("dist/built.js","changed");' : ""}`);
   await writeFile(join(root,"scripts/hook.mjs"),log("hook"));
+  if (changes.failingSuite) {
+    await writeFile(join(root, "scripts/failure.mjs"), `${log(changes.failingSuite)} process.exitCode = 1;`);
+  }
   await writeFile(join(root,"tsc-fixture.mjs"), `import {appendFileSync,readFileSync,writeFileSync} from "node:fs"; if(process.argv.includes("--noEmit")){ appendFileSync(".git/fixture-trace","check\\n"); if(${Boolean(changes.revoke)}){const pkg=JSON.parse(readFileSync("package.json")); delete pkg.scripts.test; writeFileSync("package.json",JSON.stringify(pkg));} }`);
   await writeFile(join(root,"node_modules/fixture-runtime.mjs"), "original");
   await writeFile(join(root,"node_modules/.bin/tsc"), '#!/bin/sh\nnode tsc-fixture.mjs "$@"\n', { mode: 0o755 });
@@ -161,6 +164,17 @@ async function closeFixture(t, changes = {}) {
   if (changes.explicit) {
     state.plan.test_command = "node scripts/hook.mjs";
     state.plan.test_command_source = "explicit";
+  }
+  if (changes.failingSuite) {
+    const failure = "node scripts/failure.mjs";
+    state.plan.test_command = changes.failingSuite === "combined" ? failure : "node scripts/hook.mjs";
+    state.plan.test_command_source = "explicit";
+    if (changes.failingSuite === "e2e") {
+      state.plan.e2e_command = failure;
+      state.plan.e2e_command_source = "explicit";
+    }
+    if (changes.noReblock) state.items.title.status = "ignored";
+    options.skipFinalGate = true;
   }
   const result = await runClosePhase(state, options);
   const trace = (await readFile(join(root,".git","fixture-trace"),"utf8")).trim().split("\n");
@@ -262,3 +276,33 @@ test("a build/check that revokes late project-test admission cannot borrow green
   assert.equal(result.status,"triage");
   assert.equal(report,"");
 });
+
+for (const [failingSuite, warning] of [
+  ["combined", /completing with test failure recorded in report/],
+  ["e2e", /completing with e2e failure recorded in report/],
+]) {
+  for (const noReblock of [false, true]) {
+    test(`${failingSuite} failure ${noReblock ? "continues reporting without announcing triage" : "announces and returns triage"}`, async t => {
+      const messages = [];
+      for (const method of ["log", "warn"]) {
+        t.mock.method(console, method, (...args) => messages.push(args.join(" ")));
+      }
+      const { result, trace, report } = await closeFixture(t, { failingSuite, noReblock, noAdvisory: true });
+      assert.equal(trace.filter(label => label === failingSuite).length, 1);
+      const triage = messages.filter(line => /transitioning .*triage/i.test(line));
+      const continuation = messages.filter(line => warning.test(line));
+      if (noReblock) {
+        assert.equal(result.status, "complete");
+        assert.equal(result.items.title.status, "ignored");
+        assert.equal(triage.length, 0);
+        assert.equal(continuation.length, 1);
+        assert.match(report, failingSuite === "combined" ? /## Combined Test Suite Failure/ : /End-to-end tests: failed/);
+      } else {
+        assert.equal(result.status, "triage");
+        assert.equal(result.items.title.status, "blocked");
+        assert.equal(triage.length, 1);
+        assert.equal(continuation.length, 0);
+      }
+    });
+  }
+}

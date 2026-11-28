@@ -1594,7 +1594,6 @@ async function runE2eTests(
   const e2ePassed = trackedTestPassed(e2eResult);
   if (!e2ePassed) {
     const e2eOutput = combinedOutputTail(e2eResult);
-    console.warn("End-to-end tests failed after remediation. Transitioning to triage.");
     return { ran: true, passed: false, output: e2eOutput };
   }
   console.log("End-to-end tests passed.");
@@ -2296,8 +2295,8 @@ export async function runClosePhase(
   }
   const combinedTest = acceptance.combinedTest ?? await runCombinedTestSuite(state, options);
   if (!combinedTest.passed) {
-    console.log("Full test suite failed. Transitioning back to triage.");
     if (blockResolvedItemsOnCombinedFailure(state, combinedTest.output)) {
+      console.log("Full test suite failed. Transitioning back to triage.");
       runLogger?.event({
         phase: "close",
         kind: "state",
@@ -2402,8 +2401,8 @@ export async function runClosePhase(
   // state with no newly-blocked item to drive it forward).
   const e2eResult = await runE2eTests(state, options);
   if (!e2eResult.passed) {
-    console.log("End-to-end tests failed. Transitioning back to triage.");
     if (blockResolvedItemsOnCombinedFailure(state, e2eResult.output, "End-to-end tests")) {
+      console.log("End-to-end tests failed. Transitioning back to triage.");
       runLogger?.event({
         phase: "close",
         kind: "state",
