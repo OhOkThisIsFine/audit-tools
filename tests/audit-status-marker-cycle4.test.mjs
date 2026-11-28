@@ -33,7 +33,44 @@ test("status distinguishes legal, absent and invalid saved status markers", asyn
     assert.match(output.error, /audit_state\.json/);
   }
   for (const savedStatus of ["not_started", "active", "blocked", "complete"]) {
-    await writeFile(marker, JSON.stringify({ status: savedStatus, obligations: [] }));
-    assert.equal((await status(0)).status, savedStatus);
+    await writeFile(marker, JSON.stringify({ status: savedStatus }));
+    const output = await status(0);
+    assert.equal(output.status, savedStatus);
+    assert.equal(output.last_obligation, null);
+    assert.equal(output.last_executor, null);
+    assert.deepEqual(output.blockers, []);
+    assert.deepEqual(output.obligations_summary, {
+      missing: 0, present: 0, stale: 0, blocked: 0, satisfied: 0, not_applicable: 0,
+    });
+  }
+  const fields = {
+    status: "blocked", last_obligation: "inspection", last_executor: "reviewer",
+    blockers: ["Awaiting evidence"],
+    obligations: [
+      { id: "inspection", state: "blocked", reason: "Awaiting evidence" },
+      { id: "intake", state: "satisfied" },
+      { id: "scope", state: "satisfied" },
+    ],
+    unrelated: true,
+  };
+  await writeFile(marker, JSON.stringify(fields));
+  const output = await status(0);
+  assert.equal(output.last_obligation, fields.last_obligation);
+  assert.equal(output.last_executor, fields.last_executor);
+  assert.deepEqual(output.blockers, fields.blockers);
+  assert.deepEqual(output.obligations_summary, {
+    missing: 0, present: 0, stale: 0, blocked: 1, satisfied: 2, not_applicable: 0,
+  });
+  for (const invalid of [
+    { obligations: {} }, { obligations: "not an array" }, { obligations: null }, { obligations: [null] },
+    { obligations: [{ id: "inspection", state: "unknown" }] },
+    { obligations: [{ state: "satisfied" }] },
+    { last_obligation: 42 }, { last_executor: null }, { blockers: ["valid", 42] }, { blockers: "one" },
+  ]) {
+    await writeFile(marker, JSON.stringify({ ...fields, ...invalid }));
+    const output = await status(1);
+    assert.equal(output.status, "invalid_audit_state", JSON.stringify(invalid));
+    assert.match(output.error, /audit_state\.json/);
+    assert.equal(output.obligations_summary, undefined);
   }
 });

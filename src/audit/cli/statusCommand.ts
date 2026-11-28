@@ -5,7 +5,7 @@ import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { assertSubmissionRunId, hashContent, isFileMissingError, isJsonParseError, readJsonFile, toPromptPathToken } from "audit-tools/shared";
 import { AuditTaskSchema } from "../types.js";
-import { AuditTopLevelStatusSchema, type AuditState, type ObligationState } from "../types/auditState.js";
+import { AuditStatusProjectionSchema, type ObligationState } from "../types/auditState.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
 import { deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
@@ -34,9 +34,13 @@ export async function cmdStatus(argv: string[]): Promise<void> {
 
 type LoadBundle = () => ReturnType<typeof loadArtifactBundle>;
 
-function readCurrentStep(artifactsDir: string) {
-  return readJsonFile<unknown>(join(artifactsDir, "steps", "current-step.json"))
-    .then(raw => StepArtifactSchema.parse(raw));
+async function readCurrentStep(path: string) {
+  try {
+    const step = StepArtifactSchema.parse(await readJsonFile<unknown>(path));
+    return { state: "verified", step } as const;
+  } catch (error) {
+    return { state: isFileMissingError(error) ? "absent" : "unavailable" } as const;
+  }
 }
 
 async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: string, step: StepArtifact, loadBundle: LoadBundle) {
@@ -153,7 +157,7 @@ function reportInvalidAuditState(artifactsDir: string): void {
   outputJson({
     artifacts_dir: artifactsDir,
     status: "invalid_audit_state",
-    error: "audit_state.json is malformed or does not contain a recognized audit status.",
+    error: "audit_state.json is malformed or contains invalid status fields.",
   });
   process.exitCode = 1;
 }
@@ -162,14 +166,14 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
   await assertNoPendingFoldReceipt(artifactsDir);
   const auditStatePath = join(artifactsDir, ARTIFACT_DEFINITIONS.audit_state.fileName);
 
-  let auditState: AuditState | undefined;
+  let auditState: ReturnType<typeof AuditStatusProjectionSchema.parse> | undefined;
   try {
-    const state = await readJsonFile<AuditState | null>(auditStatePath);
-    if (!state || !AuditTopLevelStatusSchema.safeParse(state.status).success) {
+    const state = AuditStatusProjectionSchema.safeParse(await readJsonFile<unknown>(auditStatePath));
+    if (!state.success) {
       reportInvalidAuditState(artifactsDir);
       return;
     }
-    auditState = state;
+    auditState = state.data;
   } catch (error) {
     if (isJsonParseError(error)) {
       reportInvalidAuditState(artifactsDir);
@@ -178,11 +182,23 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     if (!isFileMissingError(error)) throw error;
   }
 
-  const step = await readCurrentStep(artifactsDir).catch(() => undefined);
+  const stepPath = join(artifactsDir, "steps", "current-step.json");
+  const currentStep = await readCurrentStep(stepPath);
+  const step = currentStep.state === "verified" ? currentStep.step : undefined;
+  const unavailableStep = currentStep.state === "unavailable" ? {
+    state: "unavailable",
+    path: stepPath,
+    summary: "Could not verify continuation from the current-step publication.",
+  } : undefined;
   const preflight = await publishedPreflight(artifactsDir, step);
   if (!auditState) {
     if (preflight) {
       outputJson({ artifacts_dir: artifactsDir, status: "preflight", functional_preflight: preflight });
+      return;
+    }
+    if (unavailableStep) {
+      outputJson({ artifacts_dir: artifactsDir, status: "current_step_unavailable", current_step: unavailableStep });
+      process.exitCode = 1;
       return;
     }
     outputJson({ status: 'no_active_audit', error: 'No audit_state.json found; no active audit in this artifacts directory.' });
@@ -200,10 +216,7 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     not_applicable: 0,
   };
   for (const obligation of auditState.obligations ?? []) {
-    const state = obligation.state;
-    if (state in obligationStates) {
-      obligationStates[state]!++;
-    }
+    obligationStates[obligation.state]++;
   }
 
   // Planned questions are not outstanding answers. Only the published handoff
@@ -283,6 +296,7 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
   outputJson({
     artifacts_dir: artifactsDir,
     status: auditState.status,
+    ...(unavailableStep ? { current_step: unavailableStep } : {}),
     ...(preflight ? { functional_preflight: preflight } : {}),
     last_obligation: auditState.last_obligation ?? null,
     last_executor: auditState.last_executor ?? null,

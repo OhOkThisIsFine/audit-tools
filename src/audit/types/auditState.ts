@@ -27,3 +27,9 @@ export const AuditStateSchema = z
   })
   .strict();
 export type AuditState = z.infer<typeof AuditStateSchema>;
+
+// Status can read a marker without full state. Validate all fields it reports
+// when present, and ignore unrelated data.
+export const AuditStatusProjectionSchema = AuditStateSchema
+  .partial({ obligations: true })
+  .strip();
