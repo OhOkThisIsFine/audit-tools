@@ -335,6 +335,11 @@ export const ExternalAnalyzerAcquisitionMarkerSchema = z
     generated_at: z.string().optional(),
     enabled: z.boolean(),
     tool_statuses: z.array(ExternalAnalyzerToolStatusSchema),
+    codebase_memory: z.strictObject({
+      status: z.enum(["success", "failed", "not_resolved"]),
+      index_sha256: z.string().optional(),
+      error: z.string().optional(),
+    }).optional(),
     calibration_retries: z.array(z.object({
       input_sha256: z.string(),
       at: z.string(),

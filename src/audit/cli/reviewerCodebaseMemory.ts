@@ -68,7 +68,7 @@ async function run(binary: string, home: string, operation: string, args: object
 
 /** Source-only local index. Stage only admitted bytes, never the live workspace,
  * Git metadata, or file links. Remove the staging tree before publishing. */
-export async function prepareReviewerCbm(runDir: string, sourceRoot: string, files: readonly SourceFile[]): Promise<{
+export async function prepareReviewerCbm(runDir: string, sourceRoot: string, files: readonly SourceFile[], retryFailure = false): Promise<{
   indexed?: ReviewerCbm; failure?: string; reusedFailure?: boolean;
 }> {
   const binary = executable();
@@ -90,9 +90,15 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
   await mkdir(runDir, { recursive: true });
   const cache = await reviewerCbmCacheDirectory(runDir);
   const failurePath = join(cache, "failed.json");
+  const meta = build ? ReviewerCbmSchema.parse({ key, engine: ENGINE, build }) : undefined;
+  const final = join(cache, key);
+  const ready = async () => ReviewerCbmSchema.parse(JSON.parse(await readFile(join(final, MANIFEST), "utf8"))).key === key;
+  if (meta) {
+    try { if (await ready()) return { indexed: meta }; } catch (error) { if (!isFileMissingError(error)) throw error; }
+  }
   try {
     const prior = FailureMarker.safeParse(JSON.parse(await readFile(failurePath, "utf8")));
-    if (prior.success && prior.data.key === key) return { failure: prior.data.reason, reusedFailure: true };
+    if (!retryFailure && prior.success && prior.data.key === key) return { failure: prior.data.reason, reusedFailure: true };
   } catch (error) {
     if (!isFileMissingError(error) && !(error instanceof SyntaxError)) throw error;
   }
@@ -102,11 +108,7 @@ export async function prepareReviewerCbm(runDir: string, sourceRoot: string, fil
     await writeJsonFile(failurePath, { key, reason: failure });
     return { failure };
   };
-  if (!binary || !build) return recordFailure(preflightFailure ?? "Codebase Memory executable was not qualified.");
-  const meta = ReviewerCbmSchema.parse({ key, engine: ENGINE, build });
-  const final = join(cache, key);
-  const ready = async () => ReviewerCbmSchema.parse(JSON.parse(await readFile(join(final, MANIFEST), "utf8"))).key === key;
-  try { if (await ready()) return { indexed: meta }; } catch (error) { if (!isFileMissingError(error)) throw error; }
+  if (!binary || !meta) return recordFailure(preflightFailure ?? "Codebase Memory executable was not qualified.");
   await mkdir(cache, { recursive: true });
   const scratch = await mkdtemp(join(cache, "build-"));
   const input = join(scratch, "source");

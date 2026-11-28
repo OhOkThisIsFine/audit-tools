@@ -1,10 +1,10 @@
 import { QuestionAuditFindingsReportSchema } from "../../shared/types/questionReviewReport.js";
-import { analyzerCalibrationRequest, currentAnalyzerCalibration, type AnalyzerCalibrationRequest } from "../orchestrator/analyzerCalibration.js";
+import { analyzerCalibrationRequest, currentAnalyzerCalibration, CODEBASE_MEMORY, type AnalyzerCalibrationRequest } from "../orchestrator/analyzerCalibration.js";
 import { analyzerRuntimeOverrides, analyzerSelectionRequest, currentAnalyzerSelection, type AnalyzerSelectionRequest } from "../orchestrator/analyzerSelection.js";
 import { nextStepCommand } from "./prompts.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { assertQualifiedReviewObligation, assertQualifiedReviewStillCurrent, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
-import { publishAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
+import { publishAuditEvidenceGraph, publishAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
 import type { SpawnDeadline } from "../../shared/tooling/exec.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { decodeAuditReviewSubmission, readAuditReviewSubmission, currentAuditReviewInputRevision, auditLaneReviewRequirement, type CurrentReviewInputRevision } from "./reviewSubmission.js";
@@ -2784,6 +2784,18 @@ const HOST_SELECTION_OBLIGATION_ORDER = PRIORITY.flatMap(id =>
 
 type CalibrationInputs = { selection: unknown; receipt: unknown };
 
+// sites-pinned: tests/audit-smoke.test.mjs
+async function measureCalibrationIndex(bundle: ArtifactBundle, params: NextStepParams, retry = false) {
+  const scope = reviewSourceScope(bundle);
+  const files = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])]
+    .map(path => ({ path, fingerprint: scope.files.get(path)!.hash! }));
+  const { indexed, graphSha256, graphIndexError } =
+    await publishAuditEvidenceGraph(params.artifactsDir, requireSourceRoot(params), files, undefined, true, retry);
+  if (indexed && graphSha256) return { status: "success" as const, index_sha256: graphSha256 };
+  if (graphIndexError) return { status: "failed" as const, error: graphIndexError };
+  return { status: "not_resolved" as const, error: "No eligible local Codebase Memory executable was configured or found." };
+}
+
 function calibrationObligation(inputs: CalibrationInputs): AuditObligationDef {
   const requests = new WeakMap<ArtifactBundle, { selection: unknown; request: AnalyzerCalibrationRequest }>();
   const requestFor = (bundle: ArtifactBundle) => {
@@ -2798,11 +2810,21 @@ function calibrationObligation(inputs: CalibrationInputs): AuditObligationDef {
     derive(bundle) {
       if (!bundle.external_analyzer_acquisition?.enabled ||
           bundle.review_tooling_qualification || bundle.audit_state?.status === "complete") return "satisfied";
+      if (!bundle.external_analyzer_acquisition.codebase_memory) return "missing";
       const receipt = currentAnalyzerCalibration(inputs.receipt, requestFor(bundle));
       return receipt && !receipt.decisions.some(row => row.action === "retry") ? "satisfied" : "missing";
     },
     async execute(bundle, ctx) {
       const { artifactsDir, externalAcquisition } = ctx.params;
+      const acquisitionFile = "external_analyzer_acquisition.json";
+      const active = bundle.external_analyzer_acquisition!;
+      if (!active.codebase_memory) {
+        const codebase_memory = await measureCalibrationIndex(bundle, ctx.params);
+        const updated = { ...bundle, external_analyzer_acquisition: { ...active, codebase_memory } };
+        updated.artifact_metadata = computeArtifactMetadata(updated,
+          bundle.artifact_metadata ?? computeArtifactMetadata(bundle), [acquisitionFile]);
+        return emitCalibration(updated, requestFor(updated));
+      }
       const request = requestFor(bundle);
       const file = "analyzer-calibration.json";
       const lane = GATE_LANES.analyzer_calibration;
@@ -2810,22 +2832,30 @@ function calibrationObligation(inputs: CalibrationInputs): AuditObligationDef {
       if (incoming.status === "ok") {
         const answer = currentAnalyzerCalibration(incoming.value, request);
         if (answer) {
-          const affected = answer.decisions.filter(row => row.action === "retry").map(row => row.tool);
+          const retries = answer.decisions.filter(row => row.action === "retry");
+          const affected = retries.map(row => row.tool);
           if (affected.length > 0) {
             if (!externalAcquisition) throw new Error("Analyzer calibration requires acquisition options.");
             const existingRuntimes = {
               ...Object.fromEntries(request.runtimes),
               ...analyzerRuntimeOverrides(answer.decisions),
             };
-            const next = await runExternalAnalyzerAcquisitionExecutor(
-              bundle, requireSourceRoot(ctx.params), { ...externalAcquisition, existingRuntimes }, affected,
-            );
+            const registered = request.tools.filter(tool => tool.runner === "registered" && affected.includes(tool.tool)).map(tool => tool.tool);
+            const next = registered.length
+              ? await runExternalAnalyzerAcquisitionExecutor(
+                bundle, requireSourceRoot(ctx.params), { ...externalAcquisition, existingRuntimes }, registered)
+              : { updated: { ...bundle, external_analyzer_acquisition: { ...active } }, artifacts_written: [acquisitionFile] };
             const marker = next.updated.external_analyzer_acquisition!;
+            marker.codebase_memory = affected.includes(CODEBASE_MEMORY)
+              ? await measureCalibrationIndex(next.updated, ctx.params, true)
+              : active.codebase_memory;
             marker.calibration_retries = [...(marker.calibration_retries ?? []), {
               input_sha256: request.input_sha256, at: marker.generated_at ?? new Date().toISOString(),
-              tools: answer.decisions.filter(row => affected.includes(row.tool)).map(({ tool, coverage, reason, existing_executable, local_rules, change }) => {
+              tools: retries.map(({ tool, coverage, reason, existing_executable, local_rules, change }) => {
                 const measured = marker.tool_statuses.find(row => row.tool === tool);
-                return { tool, coverage, reason, status: measured?.status, version: measured?.version, existing_executable, local_rules, change };
+                return { tool, coverage, reason,
+                  status: tool === CODEBASE_MEMORY ? marker.codebase_memory?.status : measured?.status,
+                  version: measured?.version, existing_executable, local_rules, change };
               }),
             }];
             next.updated.artifact_metadata = computeArtifactMetadata(
@@ -2842,7 +2872,7 @@ function calibrationObligation(inputs: CalibrationInputs): AuditObligationDef {
           const quarantine = await quarantineSubmissionFile(artifactsDir, incoming.path, lane);
           await recordLaneOutcome(artifactsDir, lane, {
             kind: "rejected", issueCode: "submission_contract_invalid",
-            message: "Calibrate each attempted tool exactly once against the current evidence. Degraded results cannot be accepted as complete and need a concrete recovery disposition before closing. An identical runtime and recorded change cannot be retried twice." + quarantineSurvivalNote(quarantine),
+            message: "Calibrate each listed tool exactly once, including supplemental checks and Codebase Memory. Accept only verified coverage or explicitly record a partial or complete failure; retry only after a changed input. An identical runtime and recorded change cannot be retried twice." + quarantineSurvivalNote(quarantine),
           });
           return emitCalibration(bundle, request);
         }

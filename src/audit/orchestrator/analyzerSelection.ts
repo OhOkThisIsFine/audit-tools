@@ -48,7 +48,10 @@ export function currentAnalyzerSelection(value: unknown, request: AnalyzerSelect
   const answer = AnalyzerSelectionSchema.safeParse(value);
   if (!answer.success || answer.data.input_sha256 !== request.input_sha256) return;
   const actual = new Set(answer.data.decisions.map(row => row.tool));
-  if (answer.data.decisions.some(row => !validRuntimeOverride(row, row.action === "run")) ||
+  const additional = answer.data.additional_checks.map(check => check.tool);
+  if (new Set(additional).size !== additional.length ||
+      additional.includes("codebase-memory-mcp") ||
+      answer.data.decisions.some(row => !validRuntimeOverride(row, row.action === "run")) ||
       actual.size !== answer.data.decisions.length || actual.size !== request.candidates.length ||
       request.candidates.some(candidate => !actual.has(candidate.id))) return;
   return answer.data;

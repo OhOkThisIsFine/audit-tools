@@ -279,6 +279,7 @@ export async function publishAuditEvidenceGraph(
   sourceFiles: readonly { path: string; fingerprint: string }[],
   graph: ArtifactBundle["graph_bundle"],
   indexSourceOnly: boolean | "native-only" = false,
+  retryIndexFailure = false,
 ) {
   const files = sourceFiles.map(({ path, fingerprint }) => ({ path, fingerprint }))
     .sort((a, b) => compareCodeUnits(a.path, b.path));
@@ -287,7 +288,7 @@ export async function publishAuditEvidenceGraph(
   let graphIndexFailureReused = false;
   if (indexSourceOnly !== "native-only" && (graph || indexSourceOnly)) {
     try {
-      const result = await prepareReviewerCbm(artifactsDir, sourceRoot, files);
+      const result = await prepareReviewerCbm(artifactsDir, sourceRoot, files, retryIndexFailure);
       indexed = result.indexed;
       graphIndexError = result.failure;
       graphIndexFailureReused = result.reusedFailure === true;

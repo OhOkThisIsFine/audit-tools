@@ -48,11 +48,38 @@ test("one review survives a fresh CLI invocation and both audit reports agree on
     if(step.step_kind==="analyzer_selection"){
       const id=prompt.match(/"input_sha256": "([0-9a-f]{64})"/)?.[1];
       if(!id) throw new Error("Analyzer selection did not include a digest");
-      await put(step.artifact_paths.analyzer_selection,{input_sha256:id,decisions:[],additional_checks:[],gaps:[]});
+      await put(step.artifact_paths.analyzer_selection,{input_sha256:id,decisions:[],
+        additional_checks:[{tool:"fixture supplemental",scope:"src/*.ts",reason:"Verify same calibration boundary"}],gaps:[]});
     }else if(step.step_kind==="analyzer_calibration"){
       const id=prompt.match(/"input_sha256": "([0-9a-f]{64})"/)?.[1];
       if(!id) throw new Error("Analyzer calibration did not include a digest");
-      await put(step.artifact_paths.analyzer_calibration,{input_sha256:id,decisions:[],unresolved:[]});
+      const selection=JSON.parse(await readFile(step.artifact_paths.analyzer_selection,"utf8"));
+      const acquisition=JSON.parse(await readFile(step.artifact_paths.analyzer_acquisition,"utf8"));
+      const {analyzerCalibrationRequest,currentAnalyzerCalibration}=await load("audit/orchestrator/analyzerCalibration.js");
+      // The real prompt carries both rows even when nobody installed a tool.
+      assert.match(prompt,/fixture supplemental/);
+      assert.match(prompt,/codebase-memory-mcp/);
+      assert.equal(acquisition.codebase_memory.status,"not_resolved");
+      const request=analyzerCalibrationRequest({external_analyzer_acquisition:acquisition},selection);
+      const row=(tool)=>({tool,action:"limited",reason:"No installed fixture runtime",
+        coverage:"src/*.ts not scanned",recovery:{failure:"complete",disposition:"exhausted",detail:"Fixture PATH checked"}});
+      const decisions=["fixture supplemental","codebase-memory-mcp"].map(row);
+      const answer={input_sha256:id,decisions,unresolved:[]};
+      assert.equal(currentAnalyzerCalibration({...answer,input_sha256:request.input_sha256,
+        decisions:decisions.slice(0,1)},request),undefined);
+      const retry={tool:decisions[0].tool,action:"retry",reason:"Changed configuration",coverage:"src/*.ts",
+        change:{kind:"configuration",detail:"Use fixture config 1"}};
+      assert.ok(currentAnalyzerCalibration({...answer,input_sha256:request.input_sha256,
+        decisions:[retry,decisions[1]]},request));
+      const retried=analyzerCalibrationRequest({external_analyzer_acquisition:{...acquisition,calibration_retries:[{
+        input_sha256:request.input_sha256,at:"2026-01-01",tools:[retry],
+      }]}},selection);
+      assert.equal(currentAnalyzerCalibration({...answer,input_sha256:retried.input_sha256,
+        decisions:[retry,decisions[1]]},retried),undefined);
+      assert.ok(currentAnalyzerCalibration({...answer,input_sha256:retried.input_sha256,
+        decisions:[{...retry,change:{...retry.change,detail:"Use fixture config 2"}},decisions[1]]},retried));
+      // Normal end-to-end smoke completes after both explicit blockers.
+      await put(step.artifact_paths.analyzer_calibration,answer);
     }else if(step.step_kind==="critical_flow_fallback"){
       await put(step.artifact_paths.critical_flow_fallback_results,{flows:[]});
     }else if(step.step_kind==="design_review_parallel"){

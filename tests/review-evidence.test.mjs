@@ -13,10 +13,15 @@ test("selected analyzers that did not run cannot be credited as covering source"
   const request = analyzerCalibrationRequest(bundle,selection);
   assert.equal(request.tools.length,1);
   assert.equal(request.tools[0].incomplete,true);
-  const answer = action => ({input_sha256:request.input_sha256,decisions:[{tool:"semgrep",action,reason:"The executable is unavailable.",coverage:"No source rules ran."}],unresolved:[]});
+  const answer = action => ({input_sha256:request.input_sha256,decisions:[{tool:"semgrep",action,
+    reason:"The executable is unavailable.",coverage:"No source rules ran.",
+    ...(action==="limited" && {recovery:{failure:"complete",disposition:"permission_refused",detail:"Run was not authorized"}})}],unresolved:[]});
   assert.equal(currentAnalyzerCalibration(answer("accept"),request),undefined);
   assert.equal(currentAnalyzerCalibration(answer("retry"),request),undefined);
-  assert.deepEqual(currentAnalyzerCalibration(answer("limited"),request),answer("limited"));
+  const limited = answer("limited");
+  const { recovery, ...withoutFailure } = limited.decisions[0];
+  assert.equal(currentAnalyzerCalibration({...limited,decisions:[withoutFailure]},request),undefined);
+  assert.deepEqual(currentAnalyzerCalibration(limited,request),limited);
   const changed = analyzerCalibrationRequest({...bundle,external_analyzer_results:[{tool:"semgrep",results:[]}]},selection);
   assert.notEqual(changed.input_sha256, request.input_sha256);
   assert.equal(currentAnalyzerCalibration(answer("limited"),changed),undefined);
