@@ -5,13 +5,11 @@ import { INDEPENDENT_CONTEXT, renderFanoutExecutionLines } from "../../shared/pr
 // sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/conceptual-independent-guidance.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import {
   isFileMissingError,
-  isJsonParseError,
   type DesignReviewBinding,
   type IntentCheckpoint,
   readTrailingSubmissionRefusals,
   resolveDesignReviewBinding,
 } from "audit-tools/shared";
-import { z } from "zod";
 import type { ConceptualWorkload } from "./steps.js";
 import { readAuditReviewSubmission, ReviewUnavailableError } from "./reviewSubmission.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -29,6 +27,7 @@ import { materializeFanoutLanes } from "./fanoutLanes.js";
 import type { FanoutLaneSpec } from "./fanoutLanes.js";
 import {
   clearConceptualReviewRoundManifest,
+  conceptualPerspectiveMalformedReason,
   conceptualReviewRoundManifestPath,
   parseConceptualPerspectiveFindings,
   readConceptualReviewRoundManifest,
@@ -42,6 +41,7 @@ import {
   conceptualRoundToken,
   laneSubmissionPath,
   laneSubmissionId,
+  recordLaneOutcome,
   type LaneSubmissionShortfall,
 } from "./laneSubmissions.js";
 
@@ -198,6 +198,30 @@ export type ConceptualDispatch = (
   shortfall: LaneSubmissionShortfall;
 };
 
+/** Inspect the actual bound result before counting a perspective as delivered. */
+async function inspectPerspective(
+  artifactsDir: string,
+  lane: string,
+  path: string,
+  semanticInputRevision?: string,
+): Promise<
+  | { status: "delivered" | "missing" | "unavailable" }
+  | { status: "malformed"; reason: string }
+> {
+  try {
+    parseConceptualPerspectiveFindings(
+      await readAuditReviewSubmission(path, artifactsDir, lane, semanticInputRevision),
+    );
+    return { status: "delivered" };
+  } catch (error) {
+    if (error instanceof ReviewUnavailableError) return { status: "unavailable" };
+    if (isFileMissingError(error)) return { status: "missing" };
+    const reason = conceptualPerspectiveMalformedReason(error);
+    if (reason === undefined) throw error;
+    return { status: "malformed", reason };
+  }
+}
+
 /**
  * Write the conceptual-review prompt artifacts and return the host workload.
  *
@@ -273,6 +297,19 @@ export async function prepareConceptualDispatch(opts: {
   const priorRound = await readConceptualReviewRoundManifest(artifactsDir);
   const closePriorRound = async (currentRoundId?: string): Promise<void> => {
     if (!priorRound || priorRound.round_id === currentRoundId) return;
+    for (const { lane_id: lane } of priorRound.perspectives) {
+      const result = await inspectPerspective(artifactsDir, lane, laneSubmissionPath(artifactsDir, lane));
+      if (result.status === "malformed") {
+        // The generic ledger observer checks only the envelope and array shape.
+        // Close invalid perspective results as refusals before that observer
+        // can credit their raw array as clean/findings delivery.
+        await recordLaneOutcome(artifactsDir, lane, {
+          kind: "rejected",
+          issueCode: "submission_contract_invalid",
+          message: `Malformed perspective result: ${result.reason}`,
+        });
+      }
+    }
     await closeDispatchedLaneOutcomes(artifactsDir, {
       lanes: priorRound.perspectives.map((perspective) => perspective.lane_id),
       roundId: priorRound.round_id,
@@ -389,26 +426,21 @@ export async function prepareConceptualDispatch(opts: {
   );
 
   const laneSpecs: FanoutLaneSpec[] = [
-    ...perspectiveFiles.map((f) => {
-      const refusal = perspectiveRefusals.get(laneSubmissionId(f.lane));
-      return {
-        id: f.lane,
-        semanticInputRevision,
-        fileCount,
-        ...SEMANTIC_REVIEW_DEMAND,
-        label: `Conceptual perspective — ${f.name}`,
-        promptFilename: f.promptFilename,
-        contextPaths,
-        generatedContext: deepContext,
-        promptText: f.promptText + (refusal
-          ? `\n\n## Previous submission rejected\n\n${refusal.message}`
-          : ""),
-        // A perspective's findings are read by the JUDGE, never by this tool —
-        // so the tool is owed nothing here and must not record an expectation it
-        // will never satisfy. The bound path is still minted and declared below.
-        expected: false,
-      };
-    }),
+    ...perspectiveFiles.map((f) => ({
+      id: f.lane,
+      semanticInputRevision,
+      fileCount,
+      ...SEMANTIC_REVIEW_DEMAND,
+      label: `Conceptual perspective - ${f.name}`,
+      promptFilename: f.promptFilename,
+      contextPaths,
+      generatedContext: deepContext,
+      // Keep the bound prompt stable. Repair feedback goes into the parent
+      // instructions; changing this prompt would invalidate a corrected result.
+      promptText: f.promptText,
+      // The judge consumes these findings; the audit gate expects only the judge.
+      expected: false,
+    })),
     {
       // The judge PRODUCES the conceptual submission, so it is that lane — a
       // separate judge lane id would mint a bound path nothing reads.
@@ -461,16 +493,22 @@ export async function prepareConceptualDispatch(opts: {
   // Work (both structured and rendered) narrows on resume; access and the
   // manifest retain the full, stable bindings for this round, including the
   // landed perspective submissions the judge still needs to read.
-  const pendingPerspectives: Array<{ ordinal: number; f: (typeof perspectivePrompts)[number] }> = [];
+  const pendingPerspectives: Array<{
+    ordinal: number;
+    f: (typeof perspectivePrompts)[number];
+    diagnostic: string;
+  }> = [];
   for (const [i, f] of perspectivePrompts.entries()) {
-    try {
-      const result = await readAuditReviewSubmission<unknown>(f.resultsPath, artifactsDir, f.lane, semanticInputRevision);
-      parseConceptualPerspectiveFindings(result);
-    } catch (error) {
-      if (!(error instanceof ReviewUnavailableError) && !(error instanceof z.ZodError) &&
-          !isFileMissingError(error) && !isJsonParseError(error)) throw error;
-      pendingPerspectives.push({ ordinal: i + 1, f });
-    }
+    const result = await inspectPerspective(artifactsDir, f.lane, f.resultsPath, semanticInputRevision);
+    if (result.status === "delivered") continue;
+    const diagnostic = result.status === "malformed"
+      ? `malformed result: ${result.reason}. Correct and resubmit to the same result path`
+      : result.status === "unavailable"
+        ? "declared unavailable; retry only if independent review is available"
+        : perspectiveRefusals.has(laneSubmissionId(f.lane))
+          ? "previous result rejected; correct it and resubmit to the same result path"
+          : "result not received";
+    pendingPerspectives.push({ ordinal: i + 1, f, diagnostic });
   }
   const pendingCount = pendingPerspectives.length;
   const deliveredCount = perspectivePrompts.length - pendingCount;
@@ -522,6 +560,7 @@ export async function prepareConceptualDispatch(opts: {
       ...(pendingCount > 0
         ? [
             `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) in parallel where possible, otherwise sequentially in independent contexts. Each lane reviews only through its own value system and must NOT see the others' output:`,
+            ...pendingPerspectives.map(({ ordinal, diagnostic }) => `   Perspective ${ordinal}: ${diagnostic}.`),
             ...renderFanoutExecutionLines({
               lanes: pendingPerspectives.map(({ ordinal, f }) => ({ label: `Perspective ${ordinal} (${f.name})`, promptPath: f.promptPath, resultPath: f.resultsPath })),
               independenceRequired: true,
