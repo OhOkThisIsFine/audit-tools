@@ -387,7 +387,18 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
   const dirtyAtBase = new Set(auditRead.dirty_paths.map((path) => normalizeRepoPath(path)));
 
   const corpus = await enumerateTrackedFilePaths(root);
-  const readAtRef = overrides?.readAtRef ?? fileContentAtRef;
+  const readBlob = overrides?.readAtRef ?? fileContentAtRef;
+  // Both refs are object ids. Keep the literal resolved path and only reuse
+  // successful reads during this verification, not verdicts or failed reads.
+  const blobs = new Map<string, string>();
+  const readAtRef: typeof readBlob = async (readRoot, commit, file) => {
+    const key = JSON.stringify([commit, file]);
+    const cached = blobs.get(key);
+    if (cached !== undefined) return cached;
+    const content = await readBlob(readRoot, commit, file);
+    if (content !== undefined) blobs.set(key, content);
+    return content;
+  };
 
   const recorded: Record<string, HeadEvidenceRecord> = {};
   const withheld: HeadEvidenceRecord[] = [];
